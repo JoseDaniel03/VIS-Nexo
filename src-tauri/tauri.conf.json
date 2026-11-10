@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VIS Nexo",
+  "version": "2.18.0",
+  "identifier": "com.virgoland.vslauncher",
+  "build": {
+    "beforeDevCommand": "node tools/prepare_horizon.mjs build && node tools/dev.mjs",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../web",
+    "beforeBuildCommand": "node tools/prepare_horizon.mjs build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "VIS Nexo",
+        "width": 1400,
+        "height": 860,
+        "minWidth": 880,
+        "minHeight": 580,
+        "backgroundColor": "#110b24",
+        "center": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "createUpdaterArtifacts": true,
+    "resources": {
+      "resources/horizon/": "horizon/"
+    }
+  }
+}

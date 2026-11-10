@@ -1,0 +1,1 @@
+VIS builds horizon-client and horizon-prepare from the pinned official source. Generated binaries and resources are not committed. Minecraft assets and player data must never be added to this directory.

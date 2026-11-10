@@ -1,0 +1,4 @@
+.vis-horizon-download-options{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:2px}
+.vis-horizon-download-options button{min-height:38px}
+.vis-horizon-download-note{font-size:.81rem;line-height:1.5;color:var(--text-secondary,#b5afc3);margin:0;max-width:800px}
+@media(max-width:880px){.vis-horizon-download-options{flex-direction:column;align-items:stretch}.vis-horizon-download-options button{width:100%}}

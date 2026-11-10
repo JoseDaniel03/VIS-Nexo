@@ -1,0 +1,52 @@
+/* VSLauncher 2.4: isolated Java Edition and Modrinth UI, no persistent animations. */
+.mc-instance-actions{display:flex;flex-wrap:wrap;gap:7px;align-items:center;justify-content:flex-end}
+.mc-instance-actions .outline-btn,.mc-instance-actions .primary-btn{min-height:39px;padding:8px 12px;white-space:nowrap}
+.instance-card{gap:14px;min-height:114px}
+.instance-descriptor{min-width:170px;flex:1}
+.instance-descriptor h3{margin-bottom:5px}
+.instance-descriptor p{line-height:1.5;white-space:normal}
+.instance-notice.mc-ok{color:#80dbaf;background:rgba(55,172,121,.12);border-radius:6px;padding:3px 6px}
+.project-execution-control{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 20px;margin-top:11px;background:rgba(91,73,144,.13);border:1px solid rgba(161,142,210,.16);border-radius:12px}
+.project-execution-control>span{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#c8c1de;font-size:13px}
+.project-execution-control b{color:#efe5ff}
+.project-execution-control button{flex-shrink:0}
+.mc-manager{padding-bottom:48px}
+.mc-profile-card{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:23px;margin-bottom:20px}
+.mc-profile-card h2{font-size:22px;margin:8px 0}
+.mc-profile-card p{color:#b6b1c9;line-height:1.5}
+.mc-profile-card select{max-width:320px;min-width:220px;min-height:44px;background:#231c36;color:#f7f1ff;border:1px solid #4b4265;border-radius:8px;padding:9px 12px}
+.mc-manager-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(280px,1fr);gap:20px;align-items:start}
+.mc-manager-grid .surface-card{min-width:0;padding:22px}
+.mc-search-form{margin:17px 0}
+.mc-filter-row,.mc-search-box,.mc-file-buttons{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mc-filter-row{margin-bottom:10px}
+.mc-filter-row select{flex:1;min-height:40px;padding:10px;background:#211b35;color:#f4efff;border:1px solid #473e62;border-radius:8px}
+.mc-version-chip{font-size:12px;color:#dbc8ff;border-radius:8px;background:#302448;padding:10px}
+.mc-search-box input{flex:1;min-width:140px;min-height:44px;border-radius:9px;border:1px solid #4c3f69;background:#1a142b;color:#fff;padding:10px 14px;font-size:14px}
+.mc-search-box button{min-height:44px}
+.mc-results{max-height:590px;overflow:auto;scrollbar-width:thin;display:grid;gap:10px}
+.mc-result{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:13px;background:rgba(74,62,104,.18);padding:12px;border:1px solid rgba(132,111,192,.14);border-radius:12px}
+.mc-result-icon{width:44px;height:44px;border-radius:9px;background:#352752;display:grid;place-items:center;color:#d0aaff}
+.mc-result h3{font-size:15px;margin:0 0 4px}.mc-result p{color:#beb4d5;font-size:12px;line-height:1.4;max-height:54px;overflow:hidden;margin:0 0 4px}
+.mc-result small{font-size:11px;color:#998daf}.mc-result button{display:flex;gap:6px;align-items:center;padding:9px;border-radius:8px;color:#eee4ff;border:1px solid #6b519d;background:#3c2a62;cursor:pointer}
+.mc-result button:hover{background:#5c3c99}
+.mc-file-buttons{margin:18px 0}.mc-file-buttons .outline-btn{min-height:36px;font-size:12px}
+.mc-local-files{display:grid;gap:6px;max-height:590px;overflow:auto}
+.mc-file-entry{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid rgba(138,121,175,.12);padding:9px 2px;font-size:12px;min-width:0}
+.mc-file-entry>span{display:flex;align-items:center;gap:7px;min-width:0;overflow-wrap:anywhere}.mc-file-entry small{color:#9e83cd}
+.mc-file-entry button{border:0;background:transparent;color:#cb9fa9;padding:8px;cursor:pointer;border-radius:8px}.mc-file-entry button:hover{background:#3a263e}
+.mc-disclaimer{display:flex;align-items:flex-start;gap:12px;color:#bfb4db;background:rgba(73,51,117,.18);border:1px solid rgba(159,117,240,.19);padding:16px 18px;margin-top:18px;border-radius:12px;line-height:1.55;font-size:13px}
+.mc-progress{padding:13px;margin:12px 0 18px;border-radius:10px;background:rgba(106,71,190,.2);border:1px solid rgba(160,122,232,.4);color:#dac7ff;line-height:1.5}
+.mc-skin-preview{width:100px;height:100px;object-fit:contain;image-rendering:pixelated;background:#21192f;border:1px solid #53416c;border-radius:9px;margin:14px 0}
+#fabric-version-field.hidden{display:none!important}
+@media(max-width:1200px){.mc-manager-grid{grid-template-columns:1fr}.instance-card{flex-wrap:wrap}.mc-instance-actions{width:100%;justify-content:flex-start}}
+@media(max-width:900px){.mc-profile-card{flex-wrap:wrap}.mc-profile-card select{width:100%;max-width:none}.project-execution-control{flex-wrap:wrap}.mc-instance-actions .outline-btn,.mc-instance-actions .primary-btn{flex:1}}
+@media(max-width:620px){.mc-result{grid-template-columns:40px minmax(0,1fr)}.mc-result button{grid-column:2;justify-self:start}.mc-file-buttons .outline-btn{width:100%}.mc-manager-grid .surface-card{padding:14px}}
+@media(prefers-reduced-motion:reduce){.mc-manager *{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+.avatar .avatar-layer-overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:2} .avatar{position:relative;overflow:hidden}
+
+/* VIS Worlds v2.11: enable/disable resources in-place without losing data. */
+.mc-file-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.mc-file-entry:has([data-action="toggle-instance-file"]) small{opacity:.75}
+.mc-file-actions button{min-width:30px;min-height:30px}

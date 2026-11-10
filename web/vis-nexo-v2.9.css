@@ -1,0 +1,6 @@
+/* VIS Nexo 2.9 — non-destructive Minecraft crash diagnostics */
+.vis-crash-notice{border:1px solid rgba(233,121,136,.4);background:linear-gradient(125deg,rgba(80,35,61,.44),rgba(28,22,48,.86));margin:18px 0;padding:22px;display:grid;gap:10px}
+.vis-crash-notice .card-heading{color:#f5c0c8}
+.vis-crash-notice p{margin:0;line-height:1.55}
+.vis-crash-path{display:block;word-break:break-all;overflow-wrap:anywhere;background:rgba(0,0,0,.22);padding:10px 12px;border-radius:8px;font-size:12px;max-width:100%}
+.vis-crash-notice button{justify-self:start}

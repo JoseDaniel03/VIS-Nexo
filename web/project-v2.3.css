@@ -1,0 +1,38 @@
+/* VSLauncher 2.3 — project page, direct publishing & non-destructive image editor. */
+.riot-project-page.project-page-v23{padding-top:0}
+.cinematic-project-hero{height:clamp(440px,46vw,660px);margin:0 calc(-1 * clamp(19px,2.5vw,46px));border:0;border-radius:0;box-shadow:none;background-position:center center;isolation:isolate;}
+.cinematic-project-hero::after{display:none!important}
+.cinematic-project-hero::before{z-index:0;inset:0;background:linear-gradient(0deg,#0c0d14 0%,rgba(12,13,20,.91) 12%,rgba(12,13,20,.34) 38%,transparent 76%),linear-gradient(90deg,rgba(12,13,20,.72) 0%,rgba(12,13,20,.30) 34%,transparent 78%);}
+.cinematic-project-hero .project-hero-shade{opacity:0;display:none}
+.cinematic-project-hero .project-hero-content{bottom:clamp(68px,7vw,102px);left:clamp(23px,4.5vw,78px);max-width:650px}
+.cinematic-project-hero .portal-hero-caption{bottom:68px;right:clamp(22px,4vw,68px)}
+.project-page-v23 .portal-project-lower{margin-top:19px;position:relative;z-index:2}
+.project-admin-actions{position:relative;z-index:3;display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:16px 0 13px;border-bottom:1px solid #31283d}
+.admin-actions-title{color:#b1a0c9;font-size:10px;font-weight:800;letter-spacing:.12em;display:inline-flex;align-items:center;gap:7px;margin-right:5px}
+.admin-action{height:35px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #493956;background:#231d31;border-radius:7px;color:#e8dcf6;font-size:12px;font-weight:690;padding:0 12px;white-space:nowrap}
+.admin-action:hover{background:#39284c;border-color:#9a70d9;color:white}
+.admin-action.light{margin-left:auto;background:#181824}
+.news-item .news-content{flex:1;min-width:0}
+.news-admin{display:flex;align-items:flex-start;gap:4px}
+.news-admin .icon-btn{width:31px;height:31px;min-width:31px;display:grid;place-items:center}
+.quick-publish-dialog{width:min(100%,610px)}
+.quick-publish-form{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.quick-publish-dialog .modal-body{display:flex;flex-direction:column;gap:13px}
+.quick-publish-dialog label{display:flex;flex-direction:column;gap:7px}
+.quick-publish-dialog .modal-head{padding:22px 26px}
+.project-editor-dialog .asset-tile-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.project-editor-dialog .asset-tile-bottom{align-items:center}
+.project-editor-dialog .asset-tile .outline-btn.small{white-space:nowrap;font-size:11px}
+.crop-dialog{width:min(94vw,1060px);max-height:min(96vh,910px);display:flex;flex-direction:column}
+.crop-body{padding:20px 24px 13px;overflow:auto;min-height:0}
+.crop-stage{background:repeating-conic-gradient(#34303e 0% 25%,#26212f 0% 50%) 50%/28px 28px;display:grid;place-items:center;border:1px solid #594a69;border-radius:10px;overflow:hidden;min-height:180px;max-height:56vh}
+#crop-canvas{display:block;max-height:56vh;max-width:100%;width:auto;height:auto;aspect-ratio:auto;object-fit:contain;cursor:grab;touch-action:none;user-select:none}
+#crop-canvas:active{cursor:grabbing}
+.crop-controls{padding:15px 1px;display:flex;flex-direction:column;gap:9px}
+.crop-controls label{display:flex;justify-content:space-between;gap:12px;font-size:13px;font-weight:700}
+.crop-controls input[type=range]{width:100%;accent-color:#a479f2;cursor:pointer}
+.crop-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;color:#aaa0b5;font-size:11px}
+@media(max-width:960px){.cinematic-project-hero{margin-left:-19px;margin-right:-19px;height:clamp(380px,53vw,600px)}.project-admin-actions{gap:6px}.admin-action.light{margin-left:0}}
+@media(max-width:760px){.cinematic-project-hero{margin-left:-19px;margin-right:-19px;height:440px}.cinematic-project-hero .project-hero-content{bottom:57px}.project-admin-actions{flex-wrap:wrap}.admin-actions-title{width:100%}.project-page-v23 .portal-project-lower{margin-top:16px}.crop-dialog .modal-head{padding:14px 18px}.crop-body{padding:10px 14px}.crop-dialog .modal-footer{padding:12px 14px}}
+@media(max-width:620px){.cinematic-project-hero{margin-left:-14px;margin-right:-14px}.cinematic-project-hero .project-hero-content{bottom:55px;left:23px;right:18px}.admin-action{font-size:11px;padding:0 9px}.admin-action .ic{width:15px;height:15px}.project-admin-actions{margin-top:-10px}.crop-stage{max-height:41vh}#crop-canvas{max-height:41vh}}
+@media(prefers-reduced-motion:reduce){.cinematic-project-hero,.admin-action{transition:none!important}}

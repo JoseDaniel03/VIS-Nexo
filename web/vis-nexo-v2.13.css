@@ -1,0 +1,4 @@
+.vis-horizon-fields{border:1px solid rgba(176,145,235,.25);padding:16px;border-radius:14px;background:rgba(70,48,100,.12);display:flex;flex-direction:column;gap:12px}
+.vis-horizon-fields.hidden{display:none}
+.vis-horizon-fields .vis-smart-tip{margin:0}
+#mc-instance-engine{font-weight:600}

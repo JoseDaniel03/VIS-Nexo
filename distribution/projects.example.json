@@ -1,0 +1,14 @@
+{
+  "projects": [
+    {
+      "id": "vis-example",
+      "name": "Ejemplo de proyecto",
+      "description": "Reemplazá los datos y el ZIP por tu proyecto real antes de publicarlo.",
+      "version": "1.0.0",
+      "minecraft_version": "26.3",
+      "loader": "fabric",
+      "archive_path": "./distribucion/mi-proyecto-v1.0.0.zip",
+      "bundle_url": "https://github.com/USUARIO/REPO/releases/download/proyecto-v1.0.0/mi-proyecto-v1.0.0.zip"
+    }
+  ]
+}

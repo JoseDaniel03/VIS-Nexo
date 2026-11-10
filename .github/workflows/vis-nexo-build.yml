@@ -1,0 +1,71 @@
+name: VIS Nexo Native Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/**'
+      - 'web/**'
+      - 'legacy/crates/vsui-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package-lock.json'
+      - 'package.json'
+      - 'tools/**'
+      - 'src-tauri/resources/horizon/README.txt'
+      - '.github/workflows/vis-nexo-build.yml'
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+            bundles: deb,appimage
+          - os: windows-2022
+            name: windows
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
+    env:
+      VIS_HORIZON_REF: 1405044d0996d37f850f5ab0dec02bab43d4945f
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Install Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf libasound2-dev libudev-dev
+      - name: Install frontend build CLI
+        run: npm ci
+      - name: JavaScript and bridge verification
+        run: |
+          npm run validate
+          npm run check:release
+      - name: Cargo check and Rust unit tests
+        run: |
+          cargo check -p vslauncher-tauri --all-targets --locked
+          cargo test --workspace --bins --lib --locked
+      - name: Build Minecraft Horizon GAME from official Rust sources
+        run: npm run horizon:source
+      - name: Verify bundled game's source manifest
+        run: npm run horizon:verify
+      - name: Build installer
+        run: npm run build -- --bundles ${{ matrix.bundles }} --config src-tauri/tauri.unsigned.json
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-${{ matrix.name }}
+          path: target/release/bundle/**
+          if-no-files-found: error

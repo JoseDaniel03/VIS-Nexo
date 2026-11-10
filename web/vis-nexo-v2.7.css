@@ -1,0 +1,16 @@
+/* VIS Nexo 2.7 - visible social shortcut & safe maintenance */
+.top-actions .social-toggle{display:inline-flex;align-items:center;justify-content:center;}
+.social-toggle[aria-pressed="true"]{color:#d2c5ff;background:#332943;border:1px solid #66538c;}
+.vis-maintenance{max-width:1240px;margin:0 auto;}
+.maintenance-intro{display:flex;align-items:center;justify-content:space-between;gap:22px;flex-wrap:wrap;background:linear-gradient(110deg,rgba(82,61,122,.18),rgba(18,14,32,.5));}
+.maintenance-total{display:flex;flex-direction:column;gap:7px;}
+.maintenance-total strong{font-size:clamp(26px,4vw,42px);font-weight:650;letter-spacing:-.025em;}
+.maintenance-total small,.maintenance-area small{color:#a9a3ba;}
+.maintenance-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.maintenance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0;}
+.maintenance-area{display:flex;flex-direction:column;gap:10px;}
+.maintenance-area h3{font-size:16px;margin:0;}
+.maintenance-area strong{font-size:24px;font-weight:650;}
+.maintenance-safe h3{display:flex;align-items:center;gap:8px;}
+.maintenance-safe p{line-height:1.6;}
+@media(max-width:720px){.maintenance-grid{grid-template-columns:1fr}.maintenance-controls{width:100%;}.maintenance-controls button{flex:1;}}

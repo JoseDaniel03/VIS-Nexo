@@ -1,0 +1,75 @@
+/* VSLauncher 2.2 — motion & interaction polish.
+   GPU-friendly: transitions only on transform, opacity, background and border.
+   Static surfaces do not request animation frames. */
+:root {
+  --motion-fast: 120ms;
+  --motion-base: 210ms;
+  --motion-medium: 300ms;
+  --motion-ease: cubic-bezier(.22,.72,.18,1);
+  --motion-spring: cubic-bezier(.18,.89,.32,1.08);
+}
+/* Keyboard navigation remains clear even in the dark Riot-inspired palette. */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, [role='tab']:focus-visible {
+  outline: 2px solid #c6a5ff;
+  outline-offset: 3px;
+}
+button:not(:disabled) { transition: color var(--motion-fast), background-color var(--motion-base), border-color var(--motion-base), box-shadow var(--motion-base), transform var(--motion-fast) var(--motion-ease); }
+button:disabled { opacity:.52; cursor:not-allowed; }
+button:not(:disabled):active { transform:translateY(1px) scale(.989); }
+/* Top-level navigation and project switching. */
+.side-logo,.side-project,.side-round,.side-avatar,.side-add {transition:transform var(--motion-base) var(--motion-ease), background-color var(--motion-base), border-color var(--motion-base), box-shadow var(--motion-base)!important}
+.side-logo:hover,.side-round:hover,.side-avatar:hover,.side-add:hover {transform:translateY(-2px); box-shadow:0 6px 18px #08051166}
+.side-project:hover { transform:translateY(-2px) scale(1.045)!important; }
+.side-project.selected { border-color:#b18af1!important; box-shadow:0 0 0 1px #9c6dec4d,0 0 18px #7e3bf22e; }
+.side-project.selected::before {transition:height var(--motion-medium) var(--motion-ease),opacity var(--motion-base);}
+.project-card,.portal-game-card,.instance-card,.surface-card,.asset-setting,.asset-tile {
+  transition: border-color var(--motion-base),box-shadow var(--motion-base),transform var(--motion-base) var(--motion-ease),background-color var(--motion-base);
+}
+.portal-game-card:hover,.portal-game-card:focus-visible { transform:translateY(-4px) scale(1.008); }
+.project-card-cover {overflow:hidden;}
+.project-card-cover::before {transition:transform .42s var(--motion-ease),opacity .32s; transform:scale(1.02);}
+.portal-game-card:hover .project-card-cover::before {transform:scale(1.035);}
+.portal-feature,.portal-project-hero { background-position:center; }
+/* Tabs and content switching */
+.feed-tabs button,.social-tabs button,.wizard-step {position:relative;transition:color var(--motion-base),background-color var(--motion-base),border-color var(--motion-base),transform var(--motion-base) var(--motion-ease)}
+.feed-tabs button::after {content:'';position:absolute;bottom:0;left:20%;right:20%;height:2px;background:#af81f8;transform:scaleX(0);transition:transform .22s var(--motion-ease);pointer-events:none;}
+.feed-tabs button.active::after {transform:scaleX(1);}
+.feed-tabs button:hover,.social-tabs button:hover {color:#fff;}
+.social-tabs button.active {box-shadow:inset 0 -2px #a87af4;}
+/* Social panel and chat */
+.social-pane {box-shadow:-2px 0 20px #0000001a;}
+.friend-item,.request-row,.social-person {transition:background-color var(--motion-base),border-color var(--motion-base),transform var(--motion-base) var(--motion-ease)}
+.friend-item:hover {transform:translateX(3px);background:#31243f;}
+.friend-item.selected {background:#34294a;box-shadow:inset 3px 0 #aa7fe5;}
+.friend-item .avatar,.social-person .avatar {transition:transform var(--motion-base) var(--motion-ease)}
+.friend-item:hover .avatar {transform:scale(1.07)}
+.social-pane .dot {transition:background-color var(--motion-base),box-shadow var(--motion-base)}
+.social-pane .dot.online {box-shadow:0 0 0 3px #5fcb9140;}
+.chat-drawer {animation:none!important;}
+.chat-messages {overscroll-behavior:contain;scroll-behavior:smooth;}
+.chat-send:focus-within {border-color:#9271df;}
+.chat-send input:focus-visible {outline:none;}
+.chat-send button:hover {color:#f7eaff;}
+/* Profile, avatars and settings */
+.profile-portrait .avatar,.avatar-preset-option .avatar,.avatar-stage-ring .avatar {transition:transform var(--motion-base) var(--motion-spring),box-shadow var(--motion-base)}
+.avatar-preset-option:hover .avatar {transform:translateY(-3px) scale(1.06);}
+.avatar-preset-option.active .avatar {box-shadow:0 0 0 2px #d0b0ff,0 0 20px #8a51d84d;}
+.toggle-line {transition:background-color var(--motion-base),border-color var(--motion-base)}
+.toggle-line:hover {background:#292238;}
+.toggle-line input[type='checkbox'] {accent-color:#a278ef;cursor:pointer;}
+.presence-picker:focus-within {outline:1px solid #b998ff;outline-offset:2px;}
+input:not([type='checkbox']):focus, textarea:focus, select:focus {border-color:#a480e8;box-shadow:0 0 0 3px #a27af122;}
+/* Dialogs and wizard transitions are managed by WAAPI to avoid competing animations */
+.dialog,.modal-backdrop,.auth-glass {animation:none!important;}
+.wizard-step.active {color:#f8efff;}
+.context-menu {animation:context-appear var(--motion-base) var(--motion-ease) both;transform-origin:top left;}
+@keyframes context-appear{from{opacity:0;transform:translateY(-5px) scale(.985)}to{opacity:1;transform:none}}
+.toast {animation:toast-in .25s var(--motion-ease) both;}
+/* No decorative loops: stop movement and smooth scrolling on reduced-motion preference. */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after {animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important;}
+}
+body.reduce-motion *,body.reduce-motion *::before,body.reduce-motion *::after {
+ animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important;
+}

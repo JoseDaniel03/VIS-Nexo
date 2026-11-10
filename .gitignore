@@ -1,0 +1,11 @@
+# VIS Nexo source-build cache and output
+.vis-build-cache/
+src-tauri/resources/horizon/*
+!src-tauri/resources/horizon/README.txt
+node_modules/
+target/
+.venv/
+__pycache__/
+*.pyc
+/preview-*.png
+.vis-smoke-test/

@@ -1,0 +1,4 @@
+/* VIS Worlds 2.10 — low-overhead instance/version selector and paged chat */
+#mc-version-channel{margin:6px 0 8px;max-width:100%;font-size:12px;min-height:30px}
+.chat-load-older{display:block;margin:8px auto 14px;border:1px solid rgba(175,160,215,.35);border-radius:7px;color:#dccff7;background:rgba(45,36,71,.7);padding:7px 12px;font-size:12px;cursor:pointer}
+.chat-load-older:hover{background:rgba(70,54,105,.9)}

@@ -1,0 +1,10 @@
+/* VIS Nexo 2.8 · Portals, Universe cloud catalog & secure updater */
+.social-brand{display:flex;flex-direction:column;gap:2px}.social-brand small{font-size:10px;letter-spacing:.035em;color:#aaa3bd}
+.social-search{display:flex;align-items:center;gap:8px;padding:8px 11px;margin:7px 10px 12px;border:1px solid rgba(174,149,236,.18);border-radius:10px;background:rgba(14,11,28,.45);color:#9789b3}
+.social-search input{min-width:0;width:100%;background:none;outline:none;border:0;color:#ebe7fb;font-size:12px}
+.friend-item[hidden]{display:none!important}.friend-item:hover{background:rgba(159,120,225,.1)}.friend-item.selected{box-shadow:inset 2px 0 0 #a894ec}
+.chat-drawer .message-date{display:block;font-size:9px;margin-top:5px;opacity:.55;overflow-wrap:anywhere}
+.update-card{display:flex;flex-direction:column;gap:10px}.update-actions{display:flex;gap:10px;flex-wrap:wrap}
+.cloud-guide{display:flex;justify-content:space-between;align-items:flex-start;gap:15px;background:linear-gradient(125deg,rgba(83,52,150,.2),rgba(13,11,26,.25))}.cloud-guide>div>svg{color:#baa4fa}.cloud-guide h3{font-size:18px;margin:10px 0 5px}.cloud-guide p{max-width:650px;color:#a9a3ba;line-height:1.6}.cloud-label{white-space:nowrap;font-size:11px;color:#c8b5f1;border:1px solid #67568b;padding:7px 10px;border-radius:100px}
+.cloud-project-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:20px}.cloud-project{display:flex;flex-direction:column;align-items:flex-start;gap:12px;min-height:230px}.cloud-project h3{font-size:19px;margin:0}.cloud-project p{color:#a7a0b9;font-size:13px;line-height:1.6;flex:1}.cloud-project-top{display:flex;width:100%;justify-content:space-between;align-items:center;color:#bda8fa}.cloud-project-top span{font-size:11px}.cloud-project-meta{display:flex;gap:10px;flex-wrap:wrap;color:#bab2c9;font-size:12px}.cloud-project .outline-btn{width:100%}
+@media(max-width:720px){.cloud-guide{flex-direction:column}.cloud-project-grid{grid-template-columns:1fr}}

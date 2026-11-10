@@ -1,0 +1,26 @@
+/* VSLauncher 2.5 — Quick access, visibility preferences, profile artwork, guest shell. */
+.side-section-label{margin-top:14px!important;margin-bottom:13px!important}
+.side-projects{padding-top:7px!important}
+.project-lower.full-content{grid-template-columns:minmax(0,1fr)!important}
+.project-section-switches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0 21px}
+.project-section-switches .section-visibility{display:flex;align-items:center;justify-content:space-between;background:#241c30;border:1px solid #42344f;border-radius:9px;padding:10px 12px;gap:10px;min-height:45px;color:#e6d9f4;font-size:12px}
+.project-section-switches input{accent-color:#a678ef;flex-shrink:0;width:17px;height:17px}
+.asset-tile-actions .subtle-btn.small{font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;color:#dfbec8}
+.asset-tile-actions button{min-height:33px}
+.auth-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.auth-switch .auth-choice{width:100%;min-width:0;justify-content:center;padding-inline:8px;gap:7px}
+.auth-switch .auth-choice>span:not(.ms-icon):not(.soon){white-space:nowrap}
+.recent-logins{display:flex;flex-direction:column;gap:9px;margin:0 0 16px}
+.recent-logins>.field-label{letter-spacing:.08em;font-weight:800;font-size:10px;color:#ad95c3}
+.recent-account-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.recent-account{border:1px solid #483557;color:#eee2fa;background:#231b32;border-radius:10px;padding:9px 6px;display:flex;align-items:center;flex-direction:column;gap:4px;min-width:0;font-size:12px;transition:background .16s ease,border-color .16s ease}
+.recent-account .ic{color:#b69ada}
+.recent-account span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-account small{font-size:10px;color:#a99ab8}
+.recent-account:hover,.recent-account:focus-visible{border-color:#b78cff;background:#392653}
+.recent-logins>small{font-size:10px;color:#8f809f}
+.profile-banner.portal-profile-banner[style]{background-repeat:no-repeat; background-size:cover}
+.profile-page .profile-actions .subtle-btn{border:1px solid #3c3050}
+@media(max-width:1060px){.auth-switch .auth-choice{font-size:11px;gap:4px}.auth-switch .auth-choice .soon{display:none}}
+@media(max-width:700px){.project-section-switches{grid-template-columns:1fr}.auth-glass{overflow-y:auto;max-height:calc(100vh - 20px)}.auth-switch .auth-choice{padding:8px 2px}.recent-account-list{gap:5px}.recent-account{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.recent-account{transition:none}}
