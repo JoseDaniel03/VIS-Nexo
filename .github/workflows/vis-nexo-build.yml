@@ -1,4 +1,7 @@
 name: VIS Nexo Native Build
+concurrency:
+  group: vis-nexo-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 on:
   workflow_dispatch:
   push:

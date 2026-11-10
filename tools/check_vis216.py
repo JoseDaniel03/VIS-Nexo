@@ -22,7 +22,7 @@ checks={
     'No automatically selected unverified builds': "selected.integrity!=='verified' && !window.confirm" in ui,
     'Build library escapes all remote/local strings': '${esc(entry.tag)}' in ui and '${esc(entry.detail||entry.build_dir)}' in ui,
     'Styles are loaded': 'vis-nexo-v2.16.css' in (p/'web/index.html').read_text(),
-    'Version metadata synchronized': all(x=='2.18.0' for x in [json.loads((p/'package.json').read_text())['version'],json.loads((p/'src-tauri/tauri.conf.json').read_text())['version']]),
+    'Version metadata synchronized': len(set([json.loads((p/'package.json').read_text())['version'],json.loads((p/'src-tauri/tauri.conf.json').read_text())['version']]))==1,
 }
 for label,ok in checks.items():print(('OK' if ok else 'FAIL'), label)
 if not all(checks.values()): raise SystemExit('Source contract v2.16 failed')

@@ -25,7 +25,7 @@ checks = {
   'UI chains installation and actual launch commands': all(x in ui for x in ['ensure_project_instance','install_minecraft','launch_minecraft','launch_horizon']),
   'Tauri bridge passes separate source owner for shared games': 'sourceOwner:' in ui,
   'New VIS stylesheet is loaded': 'vis-nexo-v2.17.css' in (root/'web/index.html').read_text(),
-  'Version 2.17 is synchronized': all(x=='2.18.0' for x in [json.loads((root/'package.json').read_text())['version'], json.loads((root/'src-tauri/tauri.conf.json').read_text())['version']]),
+  'Version 2.17 is synchronized': len(set([json.loads((root/'package.json').read_text())['version'], json.loads((root/'src-tauri/tauri.conf.json').read_text())['version']]))==1,
 }
 for label, ok in checks.items(): print(('OK' if ok else 'FAIL'),label)
 if not all(checks.values()): raise SystemExit('VIS 2.17 source checks failed')
