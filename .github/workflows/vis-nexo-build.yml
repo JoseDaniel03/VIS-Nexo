@@ -12,8 +12,11 @@ on:
       - 'package-lock.json'
       - 'package.json'
       - 'tools/**'
+      - 'services/universe/**'
       - 'src-tauri/resources/horizon/README.txt'
       - '.github/workflows/vis-nexo-build.yml'
+  pull_request:
+    branches: [main]
 jobs:
   build:
     strategy:
@@ -29,6 +32,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"
+      VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
       VIS_HORIZON_REF: 1405044d0996d37f850f5ab0dec02bab43d4945f
     steps:
       - uses: actions/checkout@v4
