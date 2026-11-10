@@ -393,12 +393,13 @@ mod tests{
         let staging=std::env::temp_dir().join(format!("vis-horizon-stamp-test-{}-{}",std::process::id(),
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir(&staging).unwrap();
-        for name in ["horizon-client","horizon-prepare","research-lock.json"]{
-            fs::write(staging.join(name),b"genuine").unwrap();
+        for name in ["horizon-client","horizon-prepare"]{
+            fs::write(binary(&staging,name),b"genuine").unwrap();
         }
+        fs::write(staging.join("research-lock.json"),b"genuine").unwrap();
         save_game_stamp(&staging,"nightly-2026-11-10-abcdef0").unwrap();
         assert_eq!(verify_managed_build(&staging).unwrap(),true);
-        fs::write(staging.join("horizon-client"),b"changed").unwrap();
+        fs::write(binary(&staging,"horizon-client"),b"changed").unwrap();
         assert!(verify_managed_build(&staging).is_err());
         fs::remove_dir_all(staging).unwrap();
     }
