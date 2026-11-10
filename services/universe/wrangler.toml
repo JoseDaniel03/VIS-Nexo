@@ -1,0 +1,7 @@
+name = "vis-universe"
+main = "worker.mjs"
+compatibility_date = "2026-11-01"
+
+[[r2_buckets]]
+binding = "UNIVERSE"
+bucket_name = "vis-universe"
