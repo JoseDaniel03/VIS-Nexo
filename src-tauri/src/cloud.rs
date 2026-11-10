@@ -1,6 +1,8 @@
 //! VIS Ombú / Universe: public, read-only catalog and verified project archives.
 //! This is distribution, not identity, and it never overwrites personal game data.
 use reqwest::{blocking::Client, Url};
+use vsui_core::GameProject;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashSet, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}, time::Duration};
@@ -22,6 +24,7 @@ pub struct PublishedProject {
     #[serde(default)] pub bundle_url: String,
     #[serde(default)] pub sha256: String,
     #[serde(default)] pub size_bytes: u64,
+    #[serde(default)] pub project: Option<GameProject>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CloudCatalog {
@@ -52,6 +55,7 @@ pub fn approved_url(uri: &str) -> bool {
     || (host.ends_with(".github.io") && host.len()>".github.io".len())
     || (host.ends_with(".pages.dev") && host.len()>".pages.dev".len())
     || (host.ends_with(".r2.dev") && host.len()>".r2.dev".len())
+    || (host.ends_with(".workers.dev") && host.len()>".workers.dev".len())
 }
 fn config_path(data_root: &Path) -> PathBuf {data_root.join("vis-cloud-config.json")}
 pub fn catalog_url(data_root:&Path) -> Option<String> {
@@ -82,6 +86,16 @@ pub fn fetch(data_root:&Path) -> Result<CloudCatalog,String> {
             || project.version=="." || project.version==".." {
                 return Err("Proyecto remoto duplicado o inválido".into());
             }
+        if let Some(detail)=&project.project {
+            if detail.id!=project.id || detail.title!=project.name || detail.mc_version!=project.minecraft_version
+                || detail.loader!=project.loader || !["java","horizon"].contains(&detail.engine.as_str())
+                || detail.posts.len()>100 || detail.calendar.len()>100
+                || detail.description.len()>2000 || detail.notes.len()>5000
+                || [&detail.banner_path,&detail.logo_path,&detail.icon_path].iter()
+                  .any(|url|!url.is_empty() && !approved_url(url)) {
+                return Err("Datos del proyecto publicado incorrectos".into());
+            }
+        }
         if !project.bundle_url.is_empty() {
             if !approved_url(&project.bundle_url) || project.sha256.len()!=64 || !project.sha256.bytes().all(|c|c.is_ascii_hexdigit())
                 || project.size_bytes==0 || project.size_bytes>MAX_BUNDLE_BYTES {return Err("Archivo de proyecto no verificable".into())}
@@ -123,6 +137,50 @@ pub fn download(data_root:&Path,id:&str)->Result<String,String>{
     if outcome.is_err(){let _=fs::remove_file(&partial);}
     outcome?;Ok(destination.to_string_lossy().into_owned())
 }
+/// Serialize only images under VIS's local asset directory. Never leak arbitrary files.
+fn encode_artwork(root:&Path, value:&mut String)->Result<(),String>{
+    if value.is_empty() || approved_url(value) {return Ok(())}
+    let path=Path::new(value);
+    let Some(ext)=path.extension().and_then(|v|v.to_str()).map(|v|v.to_ascii_lowercase()) else{value.clear();return Ok(())};
+    let mime=match ext.as_str() {"png"=>"image/png","jpg"|"jpeg"=>"image/jpeg","webp"=>"image/webp",_=>{value.clear();return Ok(())}};
+    let Ok(dir)=root.join("assets").canonicalize() else{value.clear();return Ok(())};
+    let Ok(target)=path.canonicalize() else{value.clear();return Ok(())};
+    if !target.starts_with(&dir) || !target.is_file(){value.clear();return Ok(())}
+    if fs::metadata(&target).map_err(|e|e.to_string())?.len()>4*1024*1024{return Err("Una imagen supera 4 MB. Reducí su tamaño antes de publicar.".into())}
+    let bytes=fs::read(&target).map_err(|e|e.to_string())?;
+    *value=format!("data:{mime};base64,{}",STANDARD.encode(bytes));
+    Ok(())
+}
+/// Cloud publication requires both a local administrator check (in main.rs) and
+/// a separately authenticated server. The secret is never stored in the app.
+pub fn publish(root:&Path, projects:&[GameProject], secret:&str)->Result<(),String>{
+    if secret.len()<32 || secret.len()>256 || secret.contains('\n') || secret.contains('\r') {
+        return Err("Ingresá la credencial privada de publicación de VIS Universe".into());
+    }
+    let catalog=catalog_url(root).ok_or("Configurá primero la URL pública del catálogo VIS Universe")?;
+    let mut endpoint=Url::parse(&catalog).map_err(|e|e.to_string())?;
+    if !endpoint.host_str().is_some_and(|host|host.ends_with(".workers.dev")) || endpoint.path()!="/catalog.json" {
+        return Err("La publicación requiere la URL de tu servicio Cloudflare Worker terminada en /catalog.json".into());
+    }
+    endpoint.set_path("/publish");
+    let mut prepared=projects.to_vec();
+    if prepared.len()>100{return Err("Demasiados proyectos para publicar".into())}
+    for item in &mut prepared {
+        if item.id.is_empty() || item.title.is_empty(){return Err("El proyecto necesita identificador y título".into())}
+        encode_artwork(root,&mut item.banner_path)?;
+        encode_artwork(root,&mut item.logo_path)?;
+        encode_artwork(root,&mut item.icon_path)?;
+    }
+    let payload=serde_json::json!({"format_version":1,"projects":prepared});
+    let body=serde_json::to_vec(&payload).map_err(|e|e.to_string())?;
+    if body.len()>18*1024*1024{return Err("La publicación supera 18 MB; optimizá las imágenes".into())}
+    let response=Client::builder().timeout(Duration::from_secs(90)).user_agent("VIS-Nexo/Universe-Publisher")
+      .build().map_err(|e|e.to_string())?
+      .post(endpoint).bearer_auth(secret).header("Content-Type","application/json")
+      .body(body).send().map_err(|e|format!("No se pudo publicar: {e}"))?;
+    if !response.status().is_success(){return Err(format!("El servidor rechazó la publicación (HTTP {})",response.status()))}
+    Ok(())
+}
 #[cfg(test)] mod tests {
  use super::*;
  #[test] fn url_rules(){
@@ -131,5 +189,6 @@ pub fn download(data_root:&Path,id:&str)->Result<String,String>{
    assert!(!approved_url("https://localhost/path"));
    assert!(!approved_url("http://example.pages.dev/vis.json"));
    assert!(!approved_url("https://evil.githubusercontent.com.attacker.test/path"));
+   assert!(approved_url("https://vis.joseddf.workers.dev/catalog.json"));
  }
 }
