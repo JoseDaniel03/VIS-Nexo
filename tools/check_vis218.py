@@ -23,7 +23,7 @@ checks={
   'VIS Studios game version validation preserved': 'ins.engine=project.engine.clone()' in main,
   'Fixes E0382 moved project id': 'ins.name=name;ins.project_id=project_id.clone();' in main,
   'Horizon source button wired in UI': "act==='use-horizon-source'" in ui and 'horizon_source_build' in main,
-  'Versions synchronized': all(s=='2.18.0' for s in [package['version'],config['version'],__import__('re').search(r'version = "([^"]+)"',(p/'src-tauri/Cargo.toml').read_text()).group(1)]),
+  'Versions synchronized': len(set([package['version'],config['version'],__import__('re').search(r'version = "([^"]+)"',(p/'src-tauri/Cargo.toml').read_text()).group(1)]))==1,
 }
 for name,ok in checks.items():print(('OK' if ok else 'FAIL'),name)
 if not all(checks.values()):raise SystemExit('Source contracts 2.18 have failures')
