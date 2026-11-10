@@ -28,6 +28,7 @@ jobs:
             bundles: nsis
     runs-on: ${{ matrix.os }}
     env:
+      PYTHONUTF8: "1"
       VIS_HORIZON_REF: 1405044d0996d37f850f5ab0dec02bab43d4945f
     steps:
       - uses: actions/checkout@v4
