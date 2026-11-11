@@ -298,7 +298,7 @@ function socialPanel(){
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
  <div class="social-bottom"><form id="friend-form" class="friend-add-row"><input name="username" placeholder="Agregar por usuario" aria-label="Usuario de amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
- <span class="local-hint" title="${attr(socialError)}">${I('shield',13)} ${socialMode==='connected'?'VIS Social · Mensajes cifrados':socialMode==='connecting'?'Conectando VIS Social…':socialMode==='degraded'?'VIS Social · Reconectando…':'Modo local · VIS Social desconectado'}</span></div>
+ <span class="local-hint" title="${attr(socialError)}">${I('shield',13)} ${socialMode==='connected'?'VIS Social · Mensajes cifrados':socialMode==='connecting'?'Conectando VIS Social…':socialMode==='degraded'?'VIS Social · Reconectando…':'Modo local · VIS Social desconectado'}</span>${native&&socialMode!=='connected'?`<button type="button" class="icon-btn" data-action="social-retry" title="Reintentar VIS Social" aria-label="Reintentar conexión">${I('refresh',14)}</button>`:''}</div>
  ${chatWith?chatDrawer():''}
  </aside>`;
 }
@@ -820,7 +820,7 @@ root.addEventListener('submit',async event=>{
  if(form.id==='friend-form'){
   const username=String(formData.get('username')||'');
   if(!username)return;
-  if(!social.connected()){await apply('request_friend',{username},'Solicitud local enviada');return;}
+  if(!social.connected()){message('VIS Social sin conexión: solicitud no enviada.',true);return;}
   try {await social.friendRequest(username);message('Solicitud enviada a '+username);}
   catch(e){message(String(e),true);}
   return;
@@ -828,7 +828,7 @@ root.addEventListener('submit',async event=>{
  if(form.id==='message-form'){
   const body=String(formData.get('body')||'');
   if(!body||!chatWith)return;
-  if(!social.connected()){await apply('send_message',{to:chatWith,body});return;}
+  if(!social.connected()){message('VIS Social sin conexión: mensaje no enviado.',true);return;}
   try {await social.sendMessage(chatWith,body);}
   catch(e){message(String(e),true);}
   return;
@@ -892,6 +892,7 @@ root.addEventListener('click',async event=>{
  else if(act==='open-chat'){chatWith=id;chatWindowSize=100;render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';render();},{reducedMotion:prefs.reducedMotion});}
+ else if(act==='social-retry'){if(!social.connected())void connectSocial();}
  else if(act==='social-custom-status'){
   if(!social.connected()){message('Conectá VIS Social para usar estados personalizados.',true);return;}
   const current=social.state();
@@ -902,7 +903,7 @@ root.addEventListener('click',async event=>{
   }
  }
  else if(act==='accept-friend'){
-  if(!social.connected())await apply('accept_friend',{username:id},'Solicitud local aceptada');
+  if(!social.connected()){message('VIS Social sin conexión: no se aceptó la solicitud.',true);}
   else try{await social.acceptFriend(id);message('Solicitud aceptada');}
   catch(e){message(String(e),true);}
  }
