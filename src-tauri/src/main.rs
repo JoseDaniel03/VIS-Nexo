@@ -291,7 +291,12 @@ fn social_endpoint() -> String {
 }
 #[tauri::command]
 fn get_state(state: State<'_, Mutex<Backend>>) -> Result<Snapshot, String> {
-    Ok(locked(&state)?.snapshot())
+    let mut backend = locked(&state)?;
+    // Expire native offline chat even if VIS remains open for many days.
+    if backend.storage.prune_local_chat_messages() {
+        backend.storage.save()?;
+    }
+    Ok(backend.snapshot())
 }
 #[tauri::command]
 fn register(state: State<'_, Mutex<Backend>>, username: String, password: String, confirm: String) -> Result<Snapshot, String> {
