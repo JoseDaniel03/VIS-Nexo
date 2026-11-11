@@ -8,6 +8,7 @@ use rand_core::{OsRng, RngCore};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{fs, path::Path, sync::Mutex, time::Duration};
 use tauri::State;
 
@@ -119,6 +120,28 @@ fn connect(username: &str, root: &Path) -> Result<(String, Value), String> {
     Ok((token, snapshot))
 }
 
+/// Public identity for optional out-of-band super administrator provisioning.
+/// The secret Ed25519 seed and local PIN are never returned to JavaScript.
+#[tauri::command]
+pub(crate) fn social_identity_info(
+    backend: State<'_, Mutex<Backend>>
+) -> Result<Value, String> {
+    let (username, root) = {
+        let current = backend.lock().map_err(|_| "Estado local bloqueado")?;
+        (current.active_user.clone().ok_or("Entrá con una cuenta local")?,
+         current.data_root.clone())
+    };
+    let signing = identity(&username, &root)?;
+    let public = signing.verifying_key().to_bytes();
+    let digest = Sha256::digest(public);
+    let fingerprint: String = digest.iter().map(|byte| format!("{:02x}", byte)).collect();
+    Ok(json!({
+        "username": username,
+        "public_key": STANDARD.encode(public),
+        "fingerprint_sha256": fingerprint,
+    }))
+}
+
 #[tauri::command]
 pub(crate) async fn social_connect(
     backend: State<'_, Mutex<Backend>>, social: State<'_, Mutex<SocialSession>>
@@ -150,9 +173,12 @@ pub(crate) async fn social_request(
     social: State<'_, Mutex<SocialSession>>,
     path: String, method: String, body: Option<Value>
 ) -> Result<Value, String> {
-    const GET: &[&str] = &["/v1/state"];
+    const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects"];
     const POST: &[&str] = &[
-        "/v1/keys", "/v1/presence", "/v1/friends/request",
+        "/v1/keys", "/v1/presence", "/v1/projects/subscribe",
+        "/v1/projects/unsubscribe", "/v1/admin/projects/upsert",
+        "/v1/admin/projects/staff", "/v1/admin/accounts/role",
+        "/v1/admin/accounts/disable", "/v1/friends/request",
         "/v1/friends/accept", "/v1/friends/alias",
         "/v1/messages/send", "/v1/messages/ack"
     ];
