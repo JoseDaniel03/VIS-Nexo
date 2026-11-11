@@ -282,6 +282,22 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     messages = await localHistory();
     notify(true);
   }
+  async function getAvatar(username) {
+    if (!connected()) throw Error('VIS Social no está conectado');
+    if (typeof username!=='string'||!(/^[a-z0-9_]{3,24}$/.test(username)))
+      throw Error('Usuario incorrecto');
+    return rpc('/v1/avatar/get','POST',{username});
+  }
+  async function uploadAvatar(dataUrl) {
+    if (!connected()) throw Error('VIS Social no está conectado');
+    if (typeof dataUrl!=='string' || !/^data:image\/webp;base64,[A-Za-z0-9+/]*={0,2}$/.test(dataUrl))
+      throw Error('La imagen debe ser WebP');
+    const data=dataUrl.slice('data:image/webp;base64,'.length);
+    if (data.length>32768) throw Error('Foto demasiado grande, usá una imagen más simple');
+    const result=await rpc('/v1/avatar/upload','POST',{mime:'image/webp',data});
+    await sync();
+    return result;
+  }
   async function subscribeProject(projectId, subscribe = true) {
     if (!connected()) throw Error('VIS Social no está conectado');
     await rpc(subscribe?'/v1/projects/subscribe':'/v1/projects/unsubscribe','POST',
@@ -310,5 +326,5 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
-    setAccountRole, setAccountDisabled, state: () => state };
+    setAccountRole, setAccountDisabled, getAvatar, uploadAvatar, state: () => state };
 }
