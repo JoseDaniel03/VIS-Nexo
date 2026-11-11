@@ -3,7 +3,7 @@ import sqlite3
 import pathlib
 import unittest
 
-SQL = (pathlib.Path(__file__).parent / "migrations" / "0001_ceibo_humile.sql").read_text()
+SQL = "\n".join(p.read_text() for p in sorted((pathlib.Path(__file__).parent / "migrations").glob("*.sql")))
 
 def account(db, user):
     db.execute(
@@ -50,6 +50,23 @@ class SocialSchemaTests(unittest.TestCase):
                         " VALUES('m2','chat1','anna','Hola','2026-11-11',1800000000000)")
         latest = self.db.execute("SELECT MAX(seq) AS seq FROM humile_messages WHERE chat_id='chat1'").fetchone()
         self.assertGreater(latest["seq"], 0)
+
+    def test_visibility_and_private_contact_favorites(self):
+        self.db.execute(
+            "INSERT INTO humile_presence(account_id,visibility,updated_at) VALUES('anna','invisible','2026-11-11')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO humile_presence(account_id,visibility,updated_at) VALUES('bob','hacked','2026-11-11')")
+        record = self.db.execute("SELECT visibility FROM humile_presence WHERE account_id='anna'").fetchone()
+        self.assertEqual(record["visibility"], "invisible")
+        self.db.execute("INSERT INTO humile_favorites(actor_id,target_id) VALUES('anna','bob')")
+        self.assertEqual(self.db.execute(
+            "SELECT target_id FROM humile_favorites WHERE actor_id='anna'").fetchone()["target_id"], "bob")
+        self.db.execute("INSERT INTO humile_blocks(actor_id,target_id,created_at)"
+                        " VALUES('anna','cara','2026-11-11')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO humile_blocks(actor_id,target_id,created_at)"
+                            " VALUES('anna','cara','2026-11-11')")
 
     def test_chat_summary_query_matches_worker_api(self):
         self.db.execute("INSERT INTO humile_chats(id,kind,pair_key,created_at) VALUES('c1','direct','dm:anna:bob','2026-11-11')")
