@@ -22,6 +22,33 @@ El servicio online soporta:
 - Mensajes directos y grupos de hasta diez usuarios, historial persistente y
   paginación, contadores de mensajes no leídos y notificaciones WebSocket.
 
+### Apodos privados y menús contextuales
+
+En **VIS Humile → Amigos**, hacé clic derecho sobre un amigo o pulsá su
+botón **⋯**. También funciona la tecla de menú contextual o **Shift+F10**
+cuando el elemento tiene el foco. Vas a encontrar:
+
+- **Enviar mensaje:** abre el chat privado del amigo.
+- **Cambiar apodo:** muestra un editor en la barra social para establecer
+  un nombre personalizado de 1 a 40 caracteres. **Quitar apodo** vuelve
+  al nombre de usuario verdadero.
+- **Marcar/Quitar favorito:** organiza los amigos principales.
+- **Eliminar amigo** o **Bloquear:** solicita confirmación, y elimina
+  los apodos asociados cuando termina la relación.
+
+En **Conversaciones**, clic derecho o **⋯** ofrece abrir y marcar como
+leída una conversación. En grupos también permite **Salir del grupo**.
+Si el chat es directo con un amigo, permite modificar el apodo desde
+el mismo menú.
+
+Los apodos son privados y por cuenta: si `ana` llama a `bobby` como
+`Bob el builder`, únicamente `ana` verá ese nombre en su lista de amigos,
+conversaciones y mensajes. Su identificador Ceibo sigue siendo
+`@bobby`; no cambia la cuenta ni afecta a los demás usuarios.
+Cada apodo se almacena en D1 en una tabla independiente con permisos
+por propietario. Al eliminar o bloquear la amistad, se limpia en ambos
+sentidos. El cambio no requiere reiniciar el launcher.
+
 ### Configurar tu estado desde Humile
 
 En el panel **VIS Humile (online)**, luego de entrar con Ceibo:
