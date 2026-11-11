@@ -74,10 +74,10 @@ def horizon_payload(source: Path) -> list[tuple[Path, str]]:
     return result
 
 
-def package(release_dir: Path, horizon_dir: Path) -> tuple[Path, Path]:
+def package(release_dir: Path, horizon_dir: Path, *, slim: bool = False) -> tuple[Path, Path]:
     executable = release_dir / "vslauncher-tauri.exe"
     validate_pe(executable)
-    resource_files = horizon_payload(horizon_dir)
+    resource_files = [] if slim else horizon_payload(horizon_dir)
     portable = release_dir / "portable"
     app_dir = portable / "app"
     if app_dir.exists():
@@ -95,17 +95,19 @@ def package(release_dir: Path, horizon_dir: Path) -> tuple[Path, Path]:
         shutil.copy2(source, dest)
     (app_dir / ".vis-portable").write_text("VIS Nexo portable v1\n", encoding="utf-8")
     (app_dir / "LEEME - VIS Nexo Portable.txt").write_text(
-        "VIS NEXO PARA WINDOWS - SIN INSTALADOR\n"
-        "1. Descomprimí el ZIP entero en una carpeta propia.\n"
-        "2. Abrí VIS Nexo.exe con doble clic. No abras los archivos Horizon.\n"
-        "3. Conservá juntos VIS Nexo.exe y la carpeta horizon/.\n"
-        "4. Windows 10/11 x64 necesita Microsoft Edge WebView2 Runtime.\n"
-        "5. Las cuentas, mundos e instalaciones Minecraft se guardan en los\n"
-        "   directorios de usuario VIS; no dentro de este ZIP.\n"
-        "6. Para actualizar esta edición, cerrá VIS y reemplazá la carpeta\n"
-        "   por la siguiente edición portable. No uses el actualizador NSIS.\n"
-        "7. Windows puede advertir sobre ejecutables sin firma de código.\n"
-        "   Descargá solo desde las versiones oficiales de VIS Nexo.\n",
+        ("VIS NEXO PARA WINDOWS - SIN INSTALADOR\n"
+         "1. Descomprimí todo el ZIP. Abrí VIS Nexo.exe con doble clic.\n"
+         "2. Minecraft Java y VIS Social funcionan sin Horizon Launcher.\n"
+         "3. Rust Edition descarga el motor de juego compilado por VIS desde\n"
+         "   GitHub Releases únicamente al elegir Instalar Rust Edition.\n"
+         "4. Conservá mundos y cuentas en los directorios de usuario VIS.\n"
+         "5. Windows 10/11 x64 puede requerir Microsoft Edge WebView2 Runtime.\n"
+         "6. Para actualizar, cerrá VIS y reemplazá la carpeta del launcher.\n")
+        if slim else
+        ("VIS NEXO PARA WINDOWS - SIN INSTALADOR\n"
+         "1. Descomprimí todo el ZIP y abrí VIS Nexo.exe.\n"
+         "2. Conservá la carpeta horizon junto al ejecutable.\n"
+         "3. Tus mundos y perfiles permanecen fuera del ZIP.\n"),
         encoding="utf-8",
     )
     archive = portable / "VIS-Nexo-Windows-x64-Portable.zip"
@@ -118,9 +120,12 @@ def package(release_dir: Path, horizon_dir: Path) -> tuple[Path, Path]:
         if bad:
             raise RuntimeError(f"ZIP corrupto: {bad}")
         names = set(target.namelist())
-        required = {"VIS Nexo.exe", ".vis-portable", "horizon/horizon-client.exe",
-                    "horizon/horizon-prepare.exe", "horizon/research-lock.json",
-                    "horizon/vis-horizon-source.json"}
+        required = {"VIS Nexo.exe", ".vis-portable"}
+        if not slim:
+            required.update({"horizon/horizon-client.exe", "horizon/horizon-prepare.exe",
+                             "horizon/research-lock.json", "horizon/vis-horizon-source.json"})
+        elif any(name.startswith("horizon/") for name in names):
+            raise RuntimeError("El ZIP ligero no puede contener el motor Rust Edition")
         if not required.issubset(names):
             raise RuntimeError("El ZIP portable está incompleto")
     print(f"VIS Nexo portable: {archive} ({archive.stat().st_size // (1024 * 1024)} MiB)")
@@ -132,8 +137,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release-dir", type=Path, default=Path("target/release"))
     parser.add_argument("--horizon-dir", type=Path, default=Path("src-tauri/resources/horizon"))
+    parser.add_argument("--slim", action="store_true", help="Do not include the optional Rust Edition game engine")
     args = parser.parse_args()
-    package(args.release_dir.resolve(), args.horizon_dir.resolve())
+    package(args.release_dir.resolve(), args.horizon_dir.resolve(), slim=args.slim)
 
 
 if __name__ == "__main__":
