@@ -92,6 +92,39 @@ async function main() {
   const publicStatus = await call("/v1/social", "GET", undefined, alice.token);
   assert.equal(publicStatus.friends[0].online, true, "Connected visible peer should appear online");
 
+  // Custom text and real game activity are visible only to connected friends.
+  const aliceTicket = await call("/v1/rt/ticket", "POST", {}, alice.token);
+  const aliceSocket = new WebSocket(host.replace(/^http:/, "ws:") + "/v1/rt?ticket=" + aliceTicket.ticket);
+  openSockets.push(aliceSocket);
+  await nextSocketEvent(aliceSocket, "ready");
+  const statusNotification = nextSocketEvent(aliceSocket, "social:update");
+  const custom = await call("/v1/presence", "POST",
+    { custom_status: "Armando Virgoland ☕", share_game: true }, bob.token);
+  assert.equal(custom.custom_status, "Armando Virgoland ☕");
+  await statusNotification;
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].custom_status,
+    "Armando Virgoland ☕");
+  await call("/v1/presence", "POST", { custom_status: "x".repeat(81) }, bob.token, 400);
+  await call("/v1/presence", "POST", { custom_status: "<script>" }, bob.token, 400);
+  await call("/v1/presence", "POST", { share_game: "true" }, bob.token, 400);
+  await call("/v1/activity", "POST", { engine: "minecraft" }, bob.token, 400);
+  await call("/v1/activity", "POST", { engine: "java", project: "<script>" }, bob.token, 400);
+  await call("/v1/activity", "POST", { engine: "rust", project: "Virgoland" }, bob.token);
+  const playing = await call("/v1/social", "GET", undefined, alice.token);
+  assert.deepEqual(playing.friends[0].activity, { engine: "rust", project: "Virgoland" });
+  assert.equal(playing.friends[0].online, true);
+  await call("/v1/presence", "POST", { visibility: "invisible" }, bob.token);
+  const hiddenGame = await call("/v1/social", "GET", undefined, alice.token);
+  assert.equal(hiddenGame.friends[0].activity, null);
+  assert.equal(hiddenGame.friends[0].custom_status, "");
+  await call("/v1/presence", "POST", { visibility: "online", share_game: false }, bob.token);
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].activity, null);
+  await call("/v1/presence", "POST", { share_game: true }, bob.token);
+  await call("/v1/activity", "POST", { engine: "java", project: "" }, bob.token);
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].activity.engine, "java");
+  await call("/v1/activity", "POST", { engine: null }, bob.token);
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].activity, null);
+
   const direct = await call("/v1/chats/direct", "POST", { username: "bobby" }, alice.token);
   const same = await call("/v1/chats/direct", "POST", { username: "alice" }, bob.token);
   assert.equal(direct.id, same.id, "Direct chats must be unique per user pair");
@@ -122,7 +155,7 @@ async function main() {
   await call("/v1/blocks/" + alice.account.id, "DELETE", undefined, bob.token);
   const me = await call("/v1/me", "GET", undefined, bob.token);
   assert.equal(me.username, "bobby");
-  console.log("PASS local Worker + D1 + Durable Objects social API (3 users, friendship, DM, privacy, blocking)");
+  console.log("PASS local Worker + D1 + Durable Objects (friends, DM/groups, custom status, game activity, privacy, websocket)");
 }
 try {
   await main();
