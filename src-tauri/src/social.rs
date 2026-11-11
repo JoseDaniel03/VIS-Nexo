@@ -187,6 +187,9 @@ pub(crate) async fn social_disconnect(
     if let Some(token) = token {
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let (Ok(base), Ok(http)) = (base_url(), client()) {
+                let _ = request(&http, &base, "/v1/presence", "POST",
+                    Some(&json!({"presence":"offline","custom_status":"","current_game":""})),
+                    Some(&token));
                 let _ = request(&http, &base, "/v1/auth/logout", "POST",
                     Some(&json!({})), Some(&token));
             }
