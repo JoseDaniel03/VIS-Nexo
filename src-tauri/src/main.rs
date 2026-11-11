@@ -1060,6 +1060,8 @@ fn main() {
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             social::social_identity_info,
+            social::social_cloud_register, social::social_cloud_login,
+            social::social_enable_cloud_password,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
             set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
