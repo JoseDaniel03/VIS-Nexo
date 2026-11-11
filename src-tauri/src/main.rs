@@ -8,6 +8,7 @@ mod updates;
 mod ombu;
 mod horizon;
 mod horizon_download;
+mod rust_runtime;
 
 // Reserved namespace for player-owned instances; project editor slugs cannot create this ID.
 const PERSONAL_PROJECT_ID: &str = "__personal__";
@@ -930,6 +931,14 @@ async fn fabric_loaders(version:String)->Result<Vec<String>,String>{
 fn horizon_source_build()->Result<String,String>{
     horizon::bundled_source_path()
 }
+/// Downloads only the GAME runtime compiled by our release CI from the
+/// official Rust sources. Does not install or start Horizon Launcher.
+#[tauri::command]
+async fn install_vis_rust_runtime(app:tauri::AppHandle)->Result<String,String>{
+    tauri::async_runtime::spawn_blocking(move||{
+        rust_runtime::ensure(&app).map(|path|path.to_string_lossy().into_owned())
+    }).await.map_err(|e|e.to_string())?
+}
 #[tauri::command]
 async fn horizon_diagnostics(state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Vec<horizon::HorizonCheck>,String>{
     let (owner,instance,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;(u,i,s.data_root.clone())};
@@ -1020,6 +1029,12 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
     let prepared=tauri::async_runtime::spawn_blocking(move||->Result<Instance,String>{
         let mut chosen=chosen;
         if chosen.engine=="horizon" {
+            // Only at first Rust Edition installation: fetch our CI-built game
+            // component by pinned SHA-256, not Horizon Launcher.
+            if chosen.horizon_build_dir.trim().is_empty()||
+                chosen.horizon_build_dir==horizon::SOURCE_BUILD_ID {
+                rust_runtime::ensure(&cloned_app)?;
+            }
             let dir=minecraft::instance_dir(&data_root,&user,&chosen)?;
             chosen.horizon_build_dir=horizon::install_instance_engine(&dir,&chosen)?;
             // Horizon game binaries are downloaded to VIS itself, never via horizon-launcher.
@@ -1291,7 +1306,7 @@ fn main() {
             save_project, delete_project, save_instance, set_instance_icon, ensure_project_instance, configure_shared_ram, delete_instance,
             request_friend, accept_friend, send_message,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
-            set_project_execution, set_project_active, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
+            set_project_execution, set_project_active, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, install_vis_rust_runtime, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, sync_project_content, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe
