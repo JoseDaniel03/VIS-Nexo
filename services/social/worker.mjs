@@ -17,11 +17,11 @@ export function validMessage(value) {
 }
 export function validCustomStatus(value) {
   return typeof value === "string" && [...value].length <= 80 &&
-    !/[\\u0000-\\u001f\\u007f]/.test(value) && !/[<>]/.test(value);
+    !/[\u0000-\u001f\u007f]/.test(value) && !/[<>]/.test(value);
 }
 export function validGameProject(value) {
   return typeof value === "string" && [...value].length <= 64 &&
-    !/[\\u0000-\\u001f\\u007f]/.test(value) && !/[<>]/.test(value);
+    !/[\u0000-\u001f\u007f]/.test(value) && !/[<>]/.test(value);
 }
 const GAME_TTL_MS = 4 * 60 * 1000; // Launcher refreshes activity while a game is active.
 
