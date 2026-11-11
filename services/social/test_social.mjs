@@ -10,7 +10,8 @@ test("Ceibo usernames are canonical and reject unsafe names", () => {
 test("Humile messages enforce content limits", () => {
   assert.equal(validMessage("Hola"), true);
   assert.equal(validMessage("<script>"), true); // Client escapes text on render.
-  for (const value of ["", " ", "x".repeat(2001), null, {}]) assert.equal(validMessage(value), false);
+  for (const value of ["", " ", "x".repeat(1537), "🔥".repeat(400), null, {}])
+    assert.equal(validMessage(value), false);
 });
 test("Canonical friendship pair prevents reversed duplicates", () => {
   assert.deepEqual(pair("b", "a"), ["a", "b"]);
@@ -27,7 +28,8 @@ test("Migration includes integrity and membership constraints", () => {
   assert.match(sql, /UNIQUE\(user_a, user_b\)/);
   assert.match(sql, /PRIMARY KEY\(chat_id, account_id\)/);
   assert.match(sql, /token_hash TEXT NOT NULL UNIQUE/);
-  assert.match(sql, /CHECK\(length\(body\) BETWEEN 1 AND 2000\)/);
+  const migration = readFileSync(new URL("./migrations/0005_local_messages_only.sql", import.meta.url), "utf8");
+  assert.match(migration, /DROP TABLE IF EXISTS humile_messages/);
 });
 
 test("Daily cleanup only removes stale authentication metadata", async () => {
