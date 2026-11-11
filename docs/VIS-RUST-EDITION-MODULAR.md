@@ -27,6 +27,37 @@ dentro del ejecutable VIS solamente su manifiesto:
 source_repo, source_commit, URL oficial de nuestra Release, SHA-256 del paquete,
 tamaño exacto y SHA-256 de cada recurso.
 
+## Inicio directo desde VIS Nexo (v2.20)
+
+Para el jugador solamente hay **dos motores: Minecraft Java y Minecraft Rust
+Edition**. Desde **Mis instancias** se elige un motor y la versión. Al pulsar
+**Jugar**, si el juego todavía no está instalado, VIS ejecuta la instalación
+verificada y a continuación lo lanza sin otro clic. Si ya está preparado,
+se inicia directamente.
+
+Al compilar el cliente Rust oficial, VIS aplica un parche pequeño y verificable
+de presentación a la versión exacta de su código fuente. En el lanzamiento
+desde VIS configura `VIS_NEXO_DIRECT_START=1`: la ventana de juego permanece
+oculta mientras se inicializan los recursos, **sin mostrar la pantalla de
+arranque con marca Horizon**, y aparece cuando el renderer y el menú del
+juego están listos. La inicialización del motor **no se salta ni se elimina**.
+No es una modificación del JAR de Minecraft Java.
+
+La pantalla de menú del juego y las pantallas necesarias de carga de mundos
+siguen formando parte del cliente Rust. Este cambio no promete saltar
+la carga técnica de mundos o inventarios; solo elimina la presentación
+intermedia de Horizon al jugador.
+
+El parche `vis-nexo-direct-game-window-v1` queda registrado en el manifiesto
+de compilación; VIS rechaza distribuir o instalar como oficial un motor
+sin esa modificación. Las instancias antiguas con un motor externo pueden
+seguir mostrando su interfaz propia; para la experiencia unificada, elegí
+el motor oficial de VIS.
+
+**Validación pendiente:** comprobar en una GPU real de Windows y CachyOS que
+la ventana se vuelve visible al finalizar el render y recibe foco correctamente.
+La compilación y las pruebas automáticas no reemplazan esa comprobación.
+
 ## Experiencia del usuario
 
 1. Descomprimí y abrí VIS Nexo. No hace falta el motor Rust Edition.
