@@ -171,15 +171,26 @@ async function socialSnapshot(request, env, me) {
     "WHERE m.account_id=? ORDER BY latest_seq DESC,c.created_at DESC LIMIT 100"
   ).bind(id, id, id).all();
   const friends = relationships.results.filter(x => x.status === "accepted");
-  const enriched = await Promise.all(friends.slice(0, 40).map(async f => {
+  const myPresence = await db.prepare("SELECT visibility FROM humile_presence WHERE account_id=?").bind(id).first();
+  const visibleFriends = friends.slice(0, 40);
+  const statuses = visibleFriends.length
+    ? await db.prepare("SELECT account_id,visibility FROM humile_presence WHERE account_id IN (" +
+        visibleFriends.map(() => "?").join(",") + ")").bind(...visibleFriends.map(f => f.other_id)).all()
+    : { results: [] };
+  const preferences = new Map(statuses.results.map(x => [x.account_id, x.visibility]));
+  const enriched = await Promise.all(visibleFriends.map(async f => {
+    const visibility = preferences.get(f.other_id) || "online";
+    if (visibility === "invisible") return { ...f, online: false, presence: "offline" };
     try {
       const room = env.HUB.get(env.HUB.idFromName(f.other_id));
       const res = await room.fetch("https://internal/status");
-      return { ...f, online: (await res.json()).online };
-    } catch { return { ...f, online: false }; }
+      const online = !!(await res.json()).online;
+      return { ...f, online, presence: online ? visibility : "offline" };
+    } catch { return { ...f, online: false, presence: "offline" }; }
   }));
   return response(request, env, {
-    me: { id, username: me.username }, friends: enriched.concat(friends.slice(40).map(f => ({ ...f, online: false }))),
+    me: { id, username: me.username, presence: myPresence?.visibility || "online" },
+    friends: enriched.concat(friends.slice(40).map(f => ({ ...f, online: false, presence: "offline" }))),
     incoming: relationships.results.filter(x => x.status === "pending" && x.requester_id !== id),
     outgoing: relationships.results.filter(x => x.status === "pending" && x.requester_id === id),
     blocked: blocks.results, favorites: favorites.results.map(x => x.target_id), chats: chats.results
@@ -240,6 +251,32 @@ async function changeFriend(request, env, me, targetId, operation) {
     await db.prepare("DELETE FROM humile_blocks WHERE actor_id=? AND target_id=?").bind(me.id, targetId).run();
   } else fail(400, "Operación inválida");
   await notify(env, targetId, { type: "social:update" });
+  return response(request, env, { ok: true });
+}
+async function setPresence(request, env, me) {
+  const { visibility } = await json(request);
+  if (!["online", "away", "busy", "invisible"].includes(visibility)) fail(400, "Estado inválido");
+  await rate(env.DB, "presence:" + me.id, 80, 3600000);
+  await env.DB.prepare("INSERT INTO humile_presence(account_id,visibility,updated_at) VALUES(?,?,?) " +
+    "ON CONFLICT(account_id) DO UPDATE SET visibility=excluded.visibility, updated_at=excluded.updated_at")
+    .bind(me.id, visibility, ISO()).run();
+  const contacts = await env.DB.prepare(
+    "SELECT CASE WHEN user_a=? THEN user_b ELSE user_a END AS peer FROM humile_friendships " +
+    "WHERE status='accepted' AND (user_a=? OR user_b=?) LIMIT 100"
+  ).bind(me.id, me.id, me.id).all();
+  await Promise.all(contacts.results.map(x => notify(env, x.peer, { type: "social:update" })));
+  return response(request, env, { visibility });
+}
+async function setFavorite(request, env, me, targetId, add) {
+  if (!ID.test(targetId)) fail(400, "Usuario inválido");
+  if (add) {
+    await requireFriend(env.DB, me.id, targetId);
+    await env.DB.prepare("INSERT OR IGNORE INTO humile_favorites(actor_id,target_id) VALUES(?,?)")
+      .bind(me.id, targetId).run();
+  } else {
+    await env.DB.prepare("DELETE FROM humile_favorites WHERE actor_id=? AND target_id=?")
+      .bind(me.id, targetId).run();
+  }
   return response(request, env, { ok: true });
 }
 async function createDirect(request, env, me) {
@@ -391,6 +428,10 @@ export default {
       }
       if (path === "/v1/me" && method === "GET") return response(request, env, { id: me.id, username: me.username });
       if (path === "/v1/social" && method === "GET") return await socialSnapshot(request, env, me);
+      if (path === "/v1/presence" && method === "POST") return await setPresence(request, env, me);
+      const favorites = /^\/v1\/favorites\/([a-f0-9-]{36})$/i.exec(path);
+      if (favorites && ["POST", "DELETE"].includes(method))
+        return await setFavorite(request, env, me, favorites[1], method === "POST");
       if (path === "/v1/users" && method === "GET") {
         const q = normalizeUsername(url.searchParams.get("q"));
         if (!q) fail(400, "Búsqueda inválida");
