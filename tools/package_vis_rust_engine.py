@@ -40,6 +40,8 @@ def verify_source(source: Path, system: str) -> tuple[dict, list[tuple[str, Path
     manifest = json.loads(original.read_text(encoding="utf-8"))
     if manifest.get("source_repo") != REPOSITORY:
         raise ValueError("El motor debe compilarse desde el repositorio oficial Horizon")
+    if manifest.get("vis_direct_patch") != "vis-nexo-direct-game-window-v1":
+        raise ValueError("El motor no incorpora el inicio directo de VIS Nexo")
     commit = manifest.get("source_commit", "")
     if not isinstance(commit, str) or len(commit) != 40 or any(x not in "0123456789abcdef" for x in commit):
         raise ValueError("Commit del motor de juego inválido")
