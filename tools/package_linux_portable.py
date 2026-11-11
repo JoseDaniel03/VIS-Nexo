@@ -102,13 +102,35 @@ def verify_embedded_horizon(image: Path, manifest: dict) -> None:
                 raise RuntimeError(f"Falta o cambió el recurso Horizon dentro de AppImage: {name}")
 
 
+def verify_slim_appimage(image: Path) -> None:
+    """Inspect the real portable bundle: no heavyweight Rust engine inside."""
+    with tempfile.TemporaryDirectory(prefix="vis-slim-audit-") as directory:
+        result = subprocess.run([str(image.resolve()), "--appimage-extract"], cwd=directory,
+                                capture_output=True, text=True, timeout=240, check=False)
+        if result.returncode:
+            raise RuntimeError("No se pudo inspeccionar AppImage ligera: " + result.stderr[-600:])
+        root = Path(directory) / "squashfs-root"
+        manifests = list(root.rglob("vis-rust-runtime.json"))
+        if len(manifests) != 1:
+            raise RuntimeError("El AppImage ligero debe incluir exactamente un manifiesto Rust Edition")
+        descriptor = json.loads(manifests[0].read_text(encoding="utf-8"))
+        if descriptor.get("format") != 1 or descriptor.get("source_repo") != "https://github.com/horizon-rust/horizon.git":
+            raise RuntimeError("Manifiesto de Rust Edition inválido dentro de AppImage")
+        forbidden = {"horizon-client", "horizon-prepare", "horizon-client.exe", "horizon-prepare.exe"}
+        if any(file.name in forbidden for file in root.rglob("*") if file.is_file()):
+            raise RuntimeError("La AppImage ligera contiene ejecutables del motor Rust Edition")
+
+
 def package(bundle_dir: Path, horizon_dir: Path, release_dir: Path, *, inspect: bool = True, slim: bool = False) -> tuple[Path, Path]:
     images = sorted(bundle_dir.glob("*.AppImage"))
     if len(images) != 1:
         raise RuntimeError(f"Se esperaba una sola AppImage en {bundle_dir}; encontradas {len(images)}")
     image = images[0]
     validate_appimage(image)
-    if not slim:
+    if slim:
+        if inspect:
+            verify_slim_appimage(image)
+    else:
         manifest = verify_horizon_source(horizon_dir)
         if inspect:
             verify_embedded_horizon(image, manifest)
