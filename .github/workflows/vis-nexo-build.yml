@@ -19,7 +19,7 @@ on:
       - 'src-tauri/resources/horizon/README.txt'
       - '.github/workflows/vis-nexo-build.yml'
   pull_request:
-    branches: [main]
+    branches: [main, feature/project-modpacks-instance-controls]
 jobs:
   build:
     strategy:
@@ -27,8 +27,8 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            name: linux
-            bundles: deb,appimage
+            name: linux-portable
+            bundles: appimage
           - os: windows-2022
             name: windows-portable
             bundles: portable
@@ -62,8 +62,10 @@ jobs:
         run: |
           npm run validate
           npm run check:release
-      - name: Portable Windows payload tests (all platforms)
-        run: python tools/test_windows_portable.py
+      - name: Portable payload regression tests (both platforms)
+        run: |
+          python tools/test_windows_portable.py
+          python tools/test_linux_portable.py
       - name: Cargo check and Rust unit tests
         run: |
           cargo check -p vslauncher-tauri --all-targets --locked
@@ -72,21 +74,24 @@ jobs:
         run: npm run horizon:source
       - name: Verify bundled game's source manifest
         run: npm run horizon:verify
-      - name: Build Linux packages
+      - name: Build standalone Linux AppImage (no DEB or installer)
         if: runner.os == 'Linux'
-        run: npm run build -- --bundles ${{ matrix.bundles }} --config src-tauri/tauri.unsigned.json
+        run: npm run build -- --bundles appimage --config src-tauri/tauri.unsigned.json
+      - name: Audit AppImage and package Linux portable folder
+        if: runner.os == 'Linux'
+        run: python tools/package_linux_portable.py
       - name: Build Windows launcher (no installer)
         if: runner.os == 'Windows'
         run: npm run build -- --no-bundle --config src-tauri/tauri.unsigned.json
       - name: Package Windows portable ZIP
         if: runner.os == 'Windows'
         run: python tools/package_windows_portable.py
-      - name: Upload Linux packages
+      - name: Upload Linux portable TAR.GZ (executable permissions preserved)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: vis-nexo-linux
-          path: target/release/bundle/**
+          name: vis-nexo-linux-portable
+          path: target/release/portable-linux/VIS-Nexo-Linux-x86_64-Portable.tar.gz
           if-no-files-found: error
       - name: Upload Windows portable app (unzip and run VIS Nexo.exe)
         if: runner.os == 'Windows'
