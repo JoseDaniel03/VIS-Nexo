@@ -211,7 +211,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     await rpc('/v1/friends/alias', 'POST', { username, alias });
     await sync();
   }
-  async function setPresence(presence, custom_status = '', current_game = '') {
+  async function setPresence(presence, custom_status = state?.custom_status || '', current_game = state?.current_game || '') {
     if (!connected()) return;
     await rpc('/v1/presence', 'POST', { presence, custom_status, current_game });
     state.presence = presence;
