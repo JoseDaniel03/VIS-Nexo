@@ -1003,6 +1003,10 @@ async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,proj
         instance.player_name=playing_as.to_owned();
     }
     tauri::async_runtime::spawn_blocking(move||{
+        if instance.horizon_build_dir.trim().is_empty() ||
+            instance.horizon_build_dir==horizon::SOURCE_BUILD_ID {
+            rust_runtime::ensure(&app)?;
+        }
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
         if let Some(player)=visitor {
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
