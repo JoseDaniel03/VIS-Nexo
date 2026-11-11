@@ -141,6 +141,15 @@ const visible=await request("/v1/state",undefined,a.token);
 assert(visible.friends.some(f=>f.username===b.username&&f.presence==="online"));
 await deliver(a,b,"VIS Social live A -> B");
 await deliver(b,a,"VIS Social live B -> A");
+// A real 2x2 WebP thumbnail is stored and retrieved only by friends.
+const tinyWebP="UklGRjYAAABXRUJQVlA4ICoAAACQAQCdASoCAAIAAkA4JaACdLoAA5gA/u921/5mj7zfZb1J/UREFJWwAAA=";
+const uploaded=await request("/v1/avatar/upload",{
+ mime:"image/webp",data:tinyWebP
+},a.token);
+assert.equal(uploaded.ok,true);
+const friendAvatar=await request("/v1/avatar/get",{username:a.username},b.token);
+assert.equal(friendAvatar.avatar,"data:image/webp;base64,"+tinyWebP);
+assert(friendAvatar.avatar_version>0);
 await request("/v1/avatar/upload",{
  mime:"image/svg+xml",data:"PHN2Zz48L3N2Zz4="
 },a.token,400);
