@@ -57,6 +57,7 @@ let mcSelected = null, modKind = 'mod', modSearchQuery = '', installProgress = n
 let lastDialogTrigger = null;
 let prefs = {reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches};
 let demoAccounts=[];
+const demoOfflineProfiles=new Map();
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const esc = (v) => String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 const attr=esc;
@@ -152,9 +153,9 @@ function mockCommand(name,args){
   if(name==='login_offline'){
     const nick=String(args.nickname||'').trim();
     if(!/^[a-zA-Z0-9_]{3,16}$/.test(nick))throw new Error('Nick offline: 3–16 letras, números o _.');
-    db.user={username:nick,role:'user',presence:'offline',avatar:'',skin:'',cape:'',avatar_layer:'',profile_banner:''};db.mode='offline';db.instances=[];return clone(db);
+    const key=nick.toLowerCase();db.user={username:key,role:'user',presence:'offline',avatar:'',skin:'',cape:'',avatar_layer:'',profile_banner:''};db.mode='offline';db.instances=clone(demoOfflineProfiles.get(key)||[]);db.paused_projects=[];return clone(db);
   }
-  if(name==='logout'){db.user=null;db.mode='preview';return clone(db);}
+  if(name==='logout'){if(db.mode==='offline')demoOfflineProfiles.set(db.user.username.toLowerCase(),clone(ownedInstances()));db.user=null;db.mode='preview';db.instances=[];db.paused_projects=[];return clone(db);}
   if(name==='clear_asset') { if(!db.user)throw new Error('Iniciá sesión');
     if(['home','launcher_logo'].includes(args.kind)){if(db.user.role!=='admin')throw new Error('Solo admin');db.branding[args.kind==='home'?'home_image':'launcher_logo']='';}
     else if(['avatar','skin','cape','avatar_layer','profile_banner'].includes(args.kind))db.user[args.kind]='';
@@ -162,7 +163,7 @@ function mockCommand(name,args){
   if(name==='commit_profile_asset'){if(!db.user||db.mode==='offline')throw new Error('Iniciá sesión');db.user[args.kind]=args.path;return clone(db);}
   if(name==='set_avatar_preset'){if(!db.user)throw new Error('Iniciá sesión');if(!['nova','orbit','eclipse','nebula','pulse'].includes(args.preset))throw new Error('Avatar inválido');db.user.avatar='preset:'+args.preset;return clone(db);}
   if(!u)throw new Error('Iniciá sesión primero');
-  if(db.mode==='offline')throw new Error('El modo offline solo permite jugar instancias instaladas.');
+  // The browser preview can edit fake guest profiles, but cannot install native game files.
   if(name==='save_project'){
     if(u.role!=='admin')throw new Error('Solo admin');
     const p=args.project;p.id=p.id||p.title.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
@@ -171,9 +172,30 @@ function mockCommand(name,args){
   }
   if(name==='set_project_execution'){if(u.role!=='admin')throw new Error('Solo admin');db.project_execution[args.projectId]=args.enabled;return clone(db);}
   if(name==='delete_project'){db.projects=db.projects.filter(p=>p.id!==args.projectId);return clone(db);}
-  if(name==='save_instance'){const i=db.instances.findIndex(x=>x.name===args.instance.name&&x.project_id===args.instance.project_id);if(i>=0)db.instances[i]=args.instance;else db.instances.push(args.instance);return clone(db);}
-  if(name==='delete_instance'){db.instances=db.instances.filter(x=>x.name!==args.name||x.project_id!==args.projectId);return clone(db);}
+  if(name==='save_instance'){
+    if(db.mode==='offline'&&(args.instance.project_id!==PERSONAL_PROJECT_ID||args.instance.engine!=='java'))throw Error('El modo offline crea únicamente instancias Java personales.');
+    if(!args.instance.game_dir)throw Error('Elegí la carpeta de esta instancia.');
+    const i=db.instances.findIndex(x=>x.name===args.instance.name&&x.project_id===args.instance.project_id&&!x.source_owner);
+    if(i>=0)db.instances[i]=args.instance;else db.instances.push(args.instance);
+    if(db.mode==='offline')demoOfflineProfiles.set(u.username.toLowerCase(),clone(ownedInstances()));
+    return clone(db);
+  }
+  if(name==='delete_instance'){db.instances=db.instances.filter(x=>x.name!==args.name||x.project_id!==args.projectId);if(db.mode==='offline')demoOfflineProfiles.set(u.username.toLowerCase(),clone(ownedInstances()));return clone(db);}
   if(name==='list_instance_files')return [];
+  if(name==='set_project_active'){
+    db.paused_projects=db.paused_projects||[];
+    db.paused_projects=db.paused_projects.filter(id=>id!==args.projectId);
+    if(!args.enabled)db.paused_projects.push(args.projectId);
+    return clone(db);
+  }
+  if(name==='ensure_project_instance'){
+    const p=db.projects.find(p=>p.id===args.projectId);
+    if(!p||db.mode==='offline'&&p.engine!=='java')throw Error('Proyecto no disponible para este perfil.');
+    const instance={name:'VIS '+p.id,project_id:p.id,version:p.mc_version,loader:p.loader,
+      loader_version:p.loader_version||'',engine:p.engine,ram_mb:args.ramMb,game_dir:args.gameDir,installed:false,source_owner:''};
+    db.instances.push(instance);
+    return clone(db);
+  }
   if(name==='update_presence'){db.user.presence=args.presence;return clone(db);}
   if(name==='save_brand_name'){db.branding.name=args.name;return clone(db);}
   if(name==='request_friend')throw new Error('El modo de vista previa no tiene otras cuentas conectadas.');
@@ -557,15 +579,15 @@ function instanceDialog(){const a=dialog?.data||{};const p=db.projects.find(p=>p
  ${isAdmin()?db.projects.map(x=>`<option value="${attr(x.id)}" ${a.project_id===x.id?'selected':''}>VIS Universe · ${esc(x.title)}</option>`).join(''):''}</select></label>
  <label>Motor de juego<select name="engine" id="mc-instance-engine"><option value="java" ${(a.engine||'java')==='java'?'selected':''}>Minecraft Java Edition</option><option value="horizon" ${a.engine==='horizon'?'selected':''}>Minecraft Rust Edition — Horizon</option></select></label>
  <div class="form-pair"><label>Versión de Minecraft<select id="mc-version-channel" aria-label="Canal del catálogo"><option value="release" ${minecraftVersionChannel==='release'?'selected':''}>Versiones estables (incluidas anteriores)</option><option value="snapshot" ${minecraftVersionChannel==='snapshot'?'selected':''}>Snapshots (últimas 60)</option></select><input list="mc-version-catalog" id="mc-instance-version" name="version" required value="${attr(a.version||p?.mc_version||'')}" placeholder="Seleccioná del catálogo oficial"/><datalist id="mc-version-catalog">${versionSuggestions(a.version||p?.mc_version||'').map(v=>`<option value="${attr(v.id)}">${esc(v.kind)}</option>`).join('')}</datalist></label><label>RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${attr(a.ram_mb||4096)}"/></label></div>
- <div class="form-pair"><label>Modloader<select name="loader" id="mc-instance-loader"><option value="horizon" ${a.loader==='horizon'?'selected':''}>Horizon (Rust)</option><option value="vanilla" ${(a.loader||'vanilla')==='vanilla'?'selected':''}>Minecraft Vanilla</option><option value="fabric" ${a.loader==='fabric'?'selected':''}>Fabric</option></select></label><label id="fabric-version-field" class="${a.loader==='fabric'?'':'hidden'}">Versión de Fabric Loader<input list="mc-fabric-catalog" id="fabric-loader-version" name="loader_version" value="${attr(a.loader_version||'')}" placeholder="Versión estable"/><datalist id="mc-fabric-catalog">${fabricLoaders.map(v=>`<option value="${attr(v)}"></option>`).join('')}</datalist></label></div>
+ <div class="form-pair"><label>Modloader<select name="loader" id="mc-instance-loader"><option value="horizon" ${a.loader==='horizon'?'selected':''} ${isGuest()?'disabled':''}>Horizon (Rust)</option><option value="vanilla" ${(a.loader||'vanilla')==='vanilla'?'selected':''}>Minecraft Vanilla</option><option value="fabric" ${a.loader==='fabric'?'selected':''}>Fabric</option></select></label><label id="fabric-version-field" class="${a.loader==='fabric'?'':'hidden'}">Versión de Fabric Loader<input list="mc-fabric-catalog" id="fabric-loader-version" name="loader_version" value="${attr(a.loader_version||'')}" placeholder="Versión estable"/><datalist id="mc-fabric-catalog">${fabricLoaders.map(v=>`<option value="${attr(v)}"></option>`).join('')}</datalist></label></div>
  <section id="vis-horizon-fields" class="vis-horizon-fields ${a.engine==='horizon'?'':'hidden'}"><div class="vis-smart-tip">${I('info',17)} Elegí la carpeta de tu instancia. VIS descarga y prepara los recursos de Minecraft 26.3; después podés abrir el juego con <b>Jugar</b>. La primera preparación puede tardar varios minutos. Requiere una copia legítima de Minecraft Java.</div>
  <details><summary>Opciones avanzadas de Horizon</summary><label>Motor Horizon<div class="folder-row"><input id="horizon-build-dir" name="horizon_build_dir" value="${attr(a.horizon_build_dir||'vis:source')}" placeholder="vis:source (incluido en VIS)"/><button type="button" data-action="use-horizon-source" title="Usar cliente Rust incorporado">${I('check',18)}</button></div></label><div class="vis-horizon-download-options"><button type="button" class="primary-btn" data-action="use-horizon-source">${I('game',16)} Usar Horizon compilado con VIS</button><button type="button" class="outline-btn vis-horizon-find" data-action="detect-horizon-build">${I('search',16)} Builds anteriores (opcional)</button></div><div id="vis-horizon-library" class="vis-horizon-library" role="region" aria-label="Builds antiguos de Horizon" aria-live="polite" hidden></div><p class="vis-horizon-download-note">Horizon se incorpora al instalador de VIS desde el repositorio Git oficial y queda fijado al commit compilado. Ningún jugador necesita instalar Rust, Cargo, ni Horizon Launcher. Los recursos oficiales de Minecraft se preparan por separado con una cuenta propietaria.</p>
  <label>Carpeta Minecraft Java 26.3 instalada<div class="folder-row"><input id="horizon-minecraft-dir" name="horizon_minecraft_dir" value="${attr(a.horizon_minecraft_dir||'')}" placeholder=".../.minecraft"/><button type="button" data-action="pick-horizon-minecraft">${I('folder',18)}</button></div></label>
  <label>Server JAR oficial 26.3<div class="folder-row"><input id="horizon-server-jar" name="horizon_server_jar" value="${attr(a.horizon_server_jar||'')}" placeholder=".../server.jar"/><button type="button" data-action="pick-horizon-server">${I('folder',18)}</button></div></label>
  </details><p class="form-notice">Instalar descarga y prepara los recursos oficiales automáticamente. Jugar abre Minecraft en Rust en modo local. Microsoft y los servidores con autenticación oficial todavía no están integrados.</p></section>
  <label>Carpeta del juego<div class="folder-row"><input id="instance-folder-path" name="game_dir" required value="${attr(a.game_dir||'')}" placeholder="Elegí la carpeta de esta instancia"/><button type="button" data-action="pick-folder" title="Elegir carpeta">${I('folder',20)}</button></div></label><label>Instalación existente para reutilizar (opcional)<div class="folder-row"><input id="instance-reuse-path" name="reuse_source" value="${attr(a.reuse_source||'')}" placeholder="Detección automática si está vacío"/><button type="button" data-action="pick-reuse-folder" title="Elegir carpeta de origen sin modificarla">${I('folder',20)}</button></div><small class="muted">VIS examina carpetas conocidas de Minecraft y otras instancias. Esta ruta adicional solo se lee; nunca se sobrescribe.</small></label>
- <label>Nick dentro de Minecraft (máximo 16 caracteres)<input name="player_name" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" value="${attr(a.player_name||'')}" placeholder="Por defecto, usuario local"/></label><input type="hidden" name="java_path" value="${attr(a.java_path||'')}"/><p class="muted">VIS instala un Java privado dentro de la instancia.</p>
- <p class="form-notice">${I('users',16)} Los archivos instalados son visibles para todos los perfiles VIS de esta computadora. Las cuentas Microsoft y las partidas nunca se comparten automáticamente.</p>
+ <label>Nick dentro de Minecraft (máximo 16 caracteres)<input name="player_name" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" value="${attr(isGuest()?db.user?.username:(a.player_name||''))}" ${isGuest()?'readonly':''} placeholder="Por defecto, usuario local"/></label><input type="hidden" name="java_path" value="${attr(a.java_path||'')}"/><p class="muted">VIS instala un Java privado dentro de la instancia.</p>
+ <p class="form-notice">${I('users',16)} ${isGuest()?'Este nickname offline conserva su propio perfil de instancias. No tiene contraseña; otras personas con acceso al equipo pueden reutilizarlo.':'Los archivos instalados pueden ser visibles para otros perfiles VIS de esta computadora. Las cuentas Microsoft y partidas no se comparten automáticamente.'}</p>
  <label class="toggle-line large"><span><b>Pantalla completa</b><small>Se aplica al iniciar Minecraft Java.</small></span><input type="checkbox" name="fullscreen" ${a.fullscreen?'checked':''}/></label><p class="form-notice">${I('info',16)} VIS Smart Install busca copias locales verificadas (otras instancias y launchers conocidos), y solo descarga de Mojang/Fabric lo que falta. Minecraft, Java, el motor Rust, los recursos y los registros se guardan dentro de la carpeta de la instancia. Si falta Java, usamos Temurin verificado con SHA-256. Las cuentas locales permiten jugar sin autenticación oficial; para servidores online premium será necesaria una cuenta Microsoft.</p></form>
  <footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="outline-btn" data-action="submit-instance">${I('check',17)} Guardar</button><button class="primary-btn" data-action="submit-install-instance">${I('play',17)} ${a.installed?'Guardar y jugar':'Crear, instalar y jugar'}</button></footer></div></div>`;
 }
@@ -930,8 +952,7 @@ root.addEventListener('click',async event=>{
    while(existing.has(candidate)&&number<100){candidate=`${original.name} - copia ${number++}`;}
    if(existing.has(candidate)||candidate.length>60)return message('No se puede generar un nombre único de instancia.',true);
    copy.name=candidate;
-   const ok=await apply('save_instance',{instance:copy},'Instancia duplicada: instalá sus archivos para jugar.');
-   if(ok){dialog={type:'instance',data:copy};render();void loadMinecraftVersions();if(copy.loader==='fabric')void loadFabricLoaders(copy.version);}
+   dialog={type:'instance',data:copy};render();void loadMinecraftVersions();if(copy.loader==='fabric')void loadFabricLoaders(copy.version);
  }
  else if(act==='pick-folder'){await chooseFolder();}
  else if(act==='pick-reuse-folder'){await chooseReuseFolder();}
