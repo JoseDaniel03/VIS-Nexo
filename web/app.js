@@ -388,7 +388,7 @@ function chatDock(){
  for(const msg of db.messages||[]){const peer=msg.from===me?msg.to:msg.from;if(peer&&peer!==me)latest.set(peer,msg);}
  if(chatWith&&!latest.has(chatWith)) latest.set(chatWith,null);
  const contacts=[...latest.entries()].sort((a,b)=>Date.parse(b[1]?.created||0)-Date.parse(a[1]?.created||0));
- return `<div class="chat-floating" role="dialog" aria-label="Conversaciones de VIS Portals"><nav class="chat-recent" aria-label="Chats recientes"><div class="chat-recent-heading">${I('users',16)} RECientes</div>${contacts.slice(0,35).map(([user,m])=>`<button type="button" data-action="open-chat" data-id="${attr(user)}" class="chat-recent-item ${user===chatWith?'active':''}"><b>${esc(db.friends.find(f=>f.username===user)?.alias||user)}</b><small>${esc(m?.body||'Iniciar conversación')}</small></button>`).join('')}</nav>${chatDrawer()}</div>`;
+ return `<div class="chat-floating" role="dialog" aria-label="Conversaciones de VIS Portals"><nav class="chat-recent" aria-label="Chats recientes"><div class="chat-recent-heading">${I('users',16)} RECIENTES</div>${contacts.slice(0,35).map(([user,m])=>`<button type="button" data-action="open-chat" data-id="${attr(user)}" class="chat-recent-item ${user===chatWith?'active':''}"><b>${esc(db.friends.find(f=>f.username===user)?.alias||user)}</b><small>${esc(m?.body||'Iniciar conversación')}</small></button>`).join('')}</nav>${chatDrawer()}</div>`;
 }
 function chatDrawer(){
  const msgs=db.messages.filter(m=>(m.from===db.user?.username&&m.to===chatWith)||(m.to===db.user?.username&&m.from===chatWith));
@@ -869,7 +869,7 @@ root.addEventListener('change',async event=>{
   const presence=el.value;
   await apply('update_presence',{presence});
   if(social.connected()){
-    try{await social.setPresence(presence);}
+    try{await social.setPresence(presence);stateEditorOpen=false;}
     catch(e){message(String(e),true);}
   }
  }
@@ -987,9 +987,9 @@ root.addEventListener('click',async event=>{
  else if(act==='toggle-social'){if(socialVisible){beginSurfaceDismiss(root,'.social-pane',()=>{socialVisible=false;render();},{reducedMotion:prefs.reducedMotion});}else{socialVisible=true;render();}}
  else if(act==='social-global'){socialTab='global';render();}
  else if(act==='social-projects'){socialTab='projects';render();}
- else if(act==='open-chat'){chatWith=id;chatWindowSize=100;render();}
+ else if(act==='open-chat'){chatWith=id;chatWindowSize=100;social.setChatActive(true);render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
- else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';render();},{reducedMotion:prefs.reducedMotion});}
+ else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';social.setChatActive(false);render();},{reducedMotion:prefs.reducedMotion});}
  else if(act==='social-upload-avatar'){void selectAndUploadSocialAvatar();}
  else if(act==='social-enable-cloud'){void enableSocialCloudPassword();}
  else if(act==='social-public-identity'){
@@ -1057,7 +1057,7 @@ root.addEventListener('click',async event=>{
   else try{await social.acceptFriend(id);message('Solicitud aceptada');}
   catch(e){message(String(e),true);}
  }
- else if(act==='logout'){cancelPendingSectionChange();await social.stop();socialOverlay=null;db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
+ else if(act==='logout'){cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
  else if(act==='create-project'){startProject();void loadMinecraftVersions();}
  else if(act==='quick-publish'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind||'news'};render();}
  else if(act==='edit-publication'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind,index:Number(button.dataset.index)};render();}
