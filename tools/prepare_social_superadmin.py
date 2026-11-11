@@ -28,11 +28,9 @@ print("No device private key, local PIN or Cloudflare token is needed here.")
 
 # No account is created, transferred or guessed. User must first enroll from
 # the intended launcher device. Existing superadmins cannot be replaced by CI.
-grant = """BEGIN IMMEDIATE;
-UPDATE social_users SET role='super_admin',updated_at=unixepoch()
+grant = """UPDATE social_users SET role='super_admin',updated_at=unixepoch()
 WHERE username='{name}' AND signing_public_key='{pub}' AND role='user'
   AND NOT EXISTS(SELECT 1 FROM social_users WHERE role='super_admin');
-COMMIT;
 """.format(name=name, pub=public_key)
 verify = """SELECT username,role,signing_public_key
 FROM social_users WHERE username='{name}'
