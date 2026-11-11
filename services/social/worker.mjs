@@ -47,8 +47,8 @@ async function verifySignature(publicKey, signature, message) {
     return crypto.subtle.verify("Ed25519", key, signatureBytes, te.encode(message));
   } catch { return false; }
 }
-async function parseBody(request) {
-  if (Number(request.headers.get("content-length") || 0) > MAX_BODY) bad(413, "Request too large");
+async function parseBody(request, maxSize = MAX_BODY) {
+  if (Number(request.headers.get("content-length") || 0) > maxSize) bad(413, "Request too large");
   const reader = request.body?.getReader();
   if (!reader) bad(400, "JSON body required");
   const chunks = [];
@@ -57,7 +57,7 @@ async function parseBody(request) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_BODY) { await reader.cancel(); bad(413, "Request too large"); }
+    if (total > maxSize) { await reader.cancel(); bad(413, "Request too large"); }
     chunks.push(value);
   }
   const bytes = new Uint8Array(total);
@@ -98,7 +98,7 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.public_id,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at " +
+    "SELECT u.id,u.username,u.public_id,u.avatar_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
   ).bind(tokenHash, now()).first();
@@ -268,13 +268,13 @@ async function setKey(request, db, user) {
 }
 async function currentState(db, user) {
   const friends = await db.prepare(
-    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.last_seen_at," +
+    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.last_seen_at," +
     "a.alias FROM social_users u LEFT JOIN friend_aliases a ON a.owner_id=? AND a.friend_id=u.id " +
     "WHERE u.id IN (SELECT user_b FROM friendships WHERE user_a=? UNION " +
     "SELECT user_a FROM friendships WHERE user_b=?) ORDER BY u.username LIMIT 500"
   ).bind(user.id, user.id, user.id).all();
   const visible = (friends.results || []).map(f => ({
-    username: f.username, alias: f.alias || "",
+    username: f.username, alias: f.alias || "", avatar_version:f.avatar_version,
     presence: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.presence : "offline",
     custom_status: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.custom_status : "",
     current_game: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.current_game : "",
@@ -308,7 +308,7 @@ async function currentState(db, user) {
   for (const friend of visible) friend.shared_projects=idsByFriend.get(friend.username)||[];
   return reply({
     projects,
-    username: user.username, public_id: user.public_id, presence: user.presence, role: user.role,
+    username: user.username, public_id: user.public_id, avatar_version:user.avatar_version, presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
     public_key: user.encryption_public_key,
     friends: visible,
@@ -444,11 +444,11 @@ function auditStatement(db, actorId, operation, target) {
 }
 async function accountInfo(db, user) {
   const row = await db.prepare(
-    "SELECT id,username,public_id,role,signing_public_key,disabled_at,created_at,password_hash FROM social_users WHERE id=?"
+    "SELECT id,username,public_id,avatar_version,role,signing_public_key,disabled_at,created_at,password_hash FROM social_users WHERE id=?"
   ).bind(user.id).first();
   if (!row || row.disabled_at !== null) bad(403, "Account disabled");
   return reply({ account: {
-    username: row.username, public_id: row.public_id, role: row.role,
+    username: row.username, public_id: row.public_id, avatar_version:row.avatar_version, role: row.role,
     cloud_login_enabled: !!row.password_hash,
     signing_public_key: row.signing_public_key, created_at: row.created_at
   } });
@@ -587,6 +587,55 @@ async function adminAccountDisable(request, db, user) {
   return reply({ok:true,username,disabled});
 }
 
+// Profile pictures stay on the server while per-project installations stay local.
+// Limit D1 thumbnails to 24 KiB WebP; never accept SVG or HTML.
+async function uploadAvatar(request, db, user) {
+  await rateLimit(db,request,"avatar-upload:"+user.id,8);
+  const body = await parseBody(request, 40000);
+  if (body.mime !== "image/webp" || typeof body.data !== "string" ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(body.data) || body.data.length > 32768) {
+    bad(400,"Only WebP thumbnails up to 24 KiB are accepted");
+  }
+  const bytes=unbase64(body.data);
+  if (bytes.length<24 || bytes.length>24576 ||
+      String.fromCharCode(...bytes.slice(0,4))!=="RIFF" ||
+      String.fromCharCode(...bytes.slice(8,12))!=="WEBP") {
+    bad(400,"Invalid WebP image");
+  }
+  // Validate RIFF container byte length. Discard misleading headers.
+  const size = bytes[4] | (bytes[5]<<8) | (bytes[6]<<16) | (bytes[7]<<24);
+  if ((size>>>0) !== bytes.length-8) bad(400,"Malformed WebP container");
+  await db.batch([
+    db.prepare(
+      "INSERT INTO social_avatars(user_id,mime,data_base64,byte_size) VALUES (?,'image/webp',?,?) " +
+      "ON CONFLICT(user_id) DO UPDATE SET data_base64=excluded.data_base64," +
+      "byte_size=excluded.byte_size,updated_at=unixepoch()"
+    ).bind(user.id,body.data,bytes.length),
+    db.prepare(
+      "UPDATE social_users SET avatar_version=avatar_version+1,updated_at=unixepoch() WHERE id=?"
+    ).bind(user.id)
+  ]);
+  return reply({ok:true,byte_size:bytes.length});
+}
+async function getAvatar(request, db, user) {
+  await rateLimit(db,request,"avatar-get:"+user.id,120);
+  const body=await parseBody(request);
+  const username=normalName(body.username);
+  const peer=await db.prepare(
+    "SELECT id,avatar_version FROM social_users WHERE username=? AND disabled_at IS NULL"
+  ).bind(username).first();
+  if (!peer) bad(404,"Account not found");
+  if (peer.id!==user.id && !await areFriends(db,user.id,peer.id)) {
+    bad(403,"Profile picture visible to friends only");
+  }
+  const data=await db.prepare(
+    "SELECT data_base64 FROM social_avatars WHERE user_id=?"
+  ).bind(peer.id).first();
+  if (!data) return reply({username,avatar_version:peer.avatar_version,avatar:null});
+  return reply({username,avatar_version:peer.avatar_version,
+    avatar:"data:image/webp;base64,"+data.data_base64});
+}
+
 async function cleanup(db) {
   const t = now();
   await db.batch([
@@ -611,15 +660,15 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
-          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations')"
+          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 10 &&
-          new Set((columns.results || []).map(x=>x.name)).size === 4;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 4 : 0 },
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 11 &&
+          new Set((columns.results || []).map(x=>x.name)).size === 5;
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 5 : 0 },
           ready ? 200 : 503);
       }
       if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
@@ -639,6 +688,8 @@ export default {
       if (method === "POST" && path === "/v1/admin/projects/staff") return await adminProjectStaff(request,db,user);
       if (method === "POST" && path === "/v1/admin/accounts/role") return await adminAccountRole(request,db,user);
       if (method === "POST" && path === "/v1/admin/accounts/disable") return await adminAccountDisable(request,db,user);
+      if (method === "POST" && path === "/v1/avatar/upload") return await uploadAvatar(request,db,user);
+      if (method === "POST" && path === "/v1/avatar/get") return await getAvatar(request,db,user);
       if (method === "POST" && path === "/v1/keys") return await setKey(request, db, user);
       if (method === "POST" && path === "/v1/friends/request") return await friendRequest(request, db, user);
       if (method === "POST" && path === "/v1/friends/accept") return await friendAccept(request, db, user);
