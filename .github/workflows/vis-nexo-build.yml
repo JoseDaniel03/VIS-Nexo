@@ -30,8 +30,8 @@ jobs:
             name: linux
             bundles: deb,appimage
           - os: windows-2022
-            name: windows
-            bundles: nsis
+            name: windows-portable
+            bundles: portable
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"
@@ -61,6 +61,8 @@ jobs:
         run: |
           npm run validate
           npm run check:release
+      - name: Portable Windows payload tests (all platforms)
+        run: python tools/test_windows_portable.py
       - name: Cargo check and Rust unit tests
         run: |
           cargo check -p vslauncher-tauri --all-targets --locked
@@ -69,11 +71,27 @@ jobs:
         run: npm run horizon:source
       - name: Verify bundled game's source manifest
         run: npm run horizon:verify
-      - name: Build installer
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
         run: npm run build -- --bundles ${{ matrix.bundles }} --config src-tauri/tauri.unsigned.json
-      - name: Upload installer artifacts
+      - name: Build Windows launcher (no installer)
+        if: runner.os == 'Windows'
+        run: npm run build -- --no-bundle --config src-tauri/tauri.unsigned.json
+      - name: Package Windows portable ZIP
+        if: runner.os == 'Windows'
+        run: python tools/package_windows_portable.py
+      - name: Upload Linux packages
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: vis-nexo-${{ matrix.name }}
+          name: vis-nexo-linux
           path: target/release/bundle/**
+          if-no-files-found: error
+      - name: Upload Windows portable app (unzip and run VIS Nexo.exe)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-windows-portable
+          path: target/release/portable/app/**
+          include-hidden-files: true
           if-no-files-found: error
