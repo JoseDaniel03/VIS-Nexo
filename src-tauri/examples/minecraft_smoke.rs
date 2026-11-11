@@ -4,6 +4,7 @@
 #[path = "../src/minecraft.rs"] mod minecraft;
 #[path = "../src/horizon.rs"] mod horizon;
 #[path = "../src/horizon_download.rs"] mod horizon_download;
+#[path = "../src/rust_runtime.rs"] mod rust_runtime;
 use tauri::{Listener, Manager};
 
 fn main() {
