@@ -1,0 +1,20 @@
+name = "vis-social-test"
+main = "worker.mjs"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vis-social-test"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "SocialHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SocialHub"]
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:1420,http://tauri.localhost"
