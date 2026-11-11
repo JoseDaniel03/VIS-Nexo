@@ -2,6 +2,7 @@
 //! enter the WebView. Bearer sessions exist in process memory only.
 use crate::accounts::atomic_json;
 use crate::Backend;
+use argon2::Argon2;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ed25519_dalek::{Signer, SigningKey};
 use rand_core::{OsRng, RngCore};
@@ -142,6 +143,33 @@ pub(crate) fn social_identity_info(
     }))
 }
 
+/// Password -> device-independent Argon2id-derived Ed25519 credential.
+/// The derived private key is ephemeral; D1 stores only its public verifier.
+fn cloud_signing_key(password: &str, salt: &[u8]) -> Result<SigningKey,String> {
+    if !(10..=128).contains(&password.len()) || salt.len()!=16 {
+        return Err("Contraseña online o salt inválidos".into());
+    }
+    let mut seed=[0u8;32];
+    Argon2::default().hash_password_into(password.as_bytes(),salt,&mut seed)
+        .map_err(|_| "No se pudo derivar la clave protegida de VIS Social")?;
+    let result=SigningKey::from_bytes(&seed);
+    seed.fill(0);
+    Ok(result)
+}
+fn cloud_registration_payload(username: &str,password: &str) -> Result<Value,String> {
+    let mut salt=[0u8;16];
+    OsRng.fill_bytes(&mut salt);
+    let signer=cloud_signing_key(password,&salt)?;
+    let salt_base64=STANDARD.encode(salt);
+    salt.fill(0);
+    let message=format!("VIS-CLOUD-REGISTER-V2\n{username}\n{salt_base64}");
+    Ok(json!({
+        "username":username,"password_salt":salt_base64,
+        "password_public_key":STANDARD.encode(signer.verifying_key().to_bytes()),
+        "registration_signature":STANDARD.encode(signer.sign(message.as_bytes()).to_bytes())
+    }))
+}
+
 fn activate_cloud_user(
     backend: &Mutex<Backend>, social: &Mutex<SocialSession>, authenticated: Value
 ) -> Result<crate::Snapshot,String> {
@@ -184,8 +212,9 @@ pub(crate) async fn social_cloud_register(
         }
     }
     let data = tauri::async_runtime::spawn_blocking(move || {
+        let payload=cloud_registration_payload(&name,&password)?;
         request(&client()?,&base_url()?,"/v1/accounts/register","POST",
-            Some(&json!({"username":name,"password":password})),None)
+            Some(&payload),None)
     }).await.map_err(|_| "Registro online interrumpido")??;
     activate_cloud_user(&backend,&social,data)
 }
@@ -199,8 +228,28 @@ pub(crate) async fn social_cloud_login(
         return Err("Ingresá tu usuario o ID y contraseña".into());
     }
     let data = tauri::async_runtime::spawn_blocking(move || {
-        request(&client()?,&base_url()?,"/v1/accounts/login","POST",
-            Some(&json!({"identifier":identifier,"password":password})),None)
+        let http=client()?;
+        let base=base_url()?;
+        let challenge=request(&http,&base,"/v1/accounts/login/challenge","POST",
+            Some(&json!({"identifier":identifier})),None)?;
+        let salt=challenge.get("salt").and_then(Value::as_str)
+            .ok_or("Desafío de autenticación inválido")?;
+        let username=challenge.get("username").and_then(Value::as_str)
+            .ok_or("Usuario remoto inválido")?;
+        let id=challenge.get("challenge_id").and_then(Value::as_str)
+            .ok_or("Identificador de desafío inválido")?;
+        let nonce=challenge.get("nonce").and_then(Value::as_str)
+            .ok_or("Desafío de seguridad inválido")?;
+        if challenge.get("kdf").and_then(Value::as_str)!=Some("argon2id-19m-t2") {
+            return Err("Método de autenticación remoto incompatible".into());
+        }
+        let salt_bytes=STANDARD.decode(salt).map_err(|_|"Salt remoto inválido")?;
+        let signer=cloud_signing_key(&password,&salt_bytes)?;
+        let proof=format!("VIS-CLOUD-AUTH-V2\n{username}\n{id}\n{nonce}");
+        let signature=STANDARD.encode(signer.sign(proof.as_bytes()).to_bytes());
+        request(&http,&base,"/v1/accounts/login/verify","POST",
+            Some(&json!({"identifier":identifier,"challenge_id":id,
+                "signature":signature})),None)
     }).await.map_err(|_| "Inicio de sesión online interrumpido")??;
     activate_cloud_user(&backend,&social,data)
 }
@@ -223,8 +272,9 @@ pub(crate) async fn social_enable_cloud_password(
         active.bearer.clone().ok_or("Sesión social vencida")?
     };
     tauri::async_runtime::spawn_blocking(move || {
+        let payload=cloud_registration_payload(&username,&password)?;
         request(&client()?,&base_url()?,"/v1/accounts/upgrade","POST",
-            Some(&json!({"password":password})),Some(&token))
+            Some(&payload),Some(&token))
     }).await.map_err(|_| "Vinculación de cuenta interrumpida")?
 }
 
