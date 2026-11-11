@@ -14,8 +14,41 @@ El servicio online soporta:
 - Registro/inicio de sesión Ceibo con contraseña (distinto del acceso local).
 - Solicitudes, aceptar, rechazar, cancelar, quitar amistades y bloquear/desbloquear.
 - Favoritos, presencia conectado/ausente/ocupado/invisible con privacidad.
+- Estado personalizado de hasta 80 caracteres, sincronizado con los amigos.
+- Actividad automática de Minecraft Java y Rust Edition (proyecto opcional).
+- Casilla para no compartir el juego y modo invisible que oculta toda la actividad.
+- Los estados de juego tienen una caducidad automática de cuatro minutos si VIS se
+  cierra o pierde conexión; mientras se juega, VIS renueva la actividad.
 - Mensajes directos y grupos de hasta diez usuarios, historial persistente y
   paginación, contadores de mensajes no leídos y notificaciones WebSocket.
+
+### Configurar tu estado desde Humile
+
+En el panel **VIS Humile (online)**, luego de entrar con Ceibo:
+
+1. Elegí **Conectado / Ausente / Ocupado / Invisible**.
+2. Escribí un estado propio, por ejemplo `Construyendo Virgoland`, y pulsá
+   **Guardar estado**. El texto se valida, se guarda en D1 y aparece entre
+   tus amigos conectados.
+3. Marcá o desmarcá **Mostrar el juego a mis amigos**. Es independiente del
+   texto personalizado: podés mostrar un mensaje propio sin revelar a qué jugás.
+4. Al iniciar Minecraft Java/Rust desde VIS, tus amigos podrán ver
+   `Jugando Minecraft Java` o `Jugando Minecraft Rust Edition`, junto al
+   nombre del proyecto si corresponde.
+5. Cuando el proceso se cierra, VIS elimina esa actividad inmediatamente;
+   ante apagones o fallos de conexión, el registro caduca automáticamente.
+6. Si elegís **Invisible**, nadie ve tu conexión, mensaje personalizado ni
+   actividad, aunque los conserves configurados.
+
+La información del juego se comparte **solo entre amistades aceptadas**;
+un desconocido, un usuario bloqueado o alguien fuera de tu lista no puede
+consultarla. El servidor valida las peticiones y notifica cambios mediante
+Durable Objects; los WebSockets nunca autorizan datos por sí mismos.
+
+Los estados de juego informan sobre procesos iniciados desde VIS Nexo. No
+se detectan juegos iniciados por otros launchers. Una declaración recibida
+de la API social es un dato de presencia auto-reportado, no prueba de
+participación en un servidor Minecraft.
 
 **Limitaciones:** el registro usa autenticación independiente de la cuenta
 local. Unir ambas identidades requiere un mecanismo seguro de verificación.
