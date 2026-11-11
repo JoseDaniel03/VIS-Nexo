@@ -8,6 +8,7 @@ let poll = null, socketPing = null, chatBefore = null, connected = false;
 const chatDrafts = new Map();
 let renderedChatId = "", olderScroll = null;
 let statusDraft = null;
+let contextMenu = null, nicknameEditor = null;
 let cloudActive = false;
 const runningGames = new Map(); // pid => { engine, project }; never supplied by user input.
 const exitedBeforeLaunchAck = new Set(); // A fast crash can arrive before the launch promise resolves.
@@ -95,6 +96,8 @@ export function syncSocialOwner(name, guest = false) {
   cloudActive = false; activityGeneration++; runningGames.clear();
   localOwner = next; token = ""; account = null; snapshot = null; chatId = ""; chatMessages = [];
   chatDrafts.clear(); renderedChatId = ""; olderScroll = null; statusDraft = null;
+  contextMenu = null; nicknameEditor = null;
+  contextMenu = null; nicknameEditor = null;
   stopSocket(); stopPolling();
 }
 export function socialOnlinePanel(visible) {
@@ -235,29 +238,92 @@ function gameLabel(activity) {
   if (!activity || !["rust", "java"].includes(activity.engine)) return "";
   return gameName(activity.engine) + (activity.project ? " · " + activity.project : "");
 }
+function friendById(id) {
+  return snapshot?.friends?.find(friend => friend.other_id === id && friend.status === "accepted");
+}
+function friendByUsername(username) {
+  return snapshot?.friends?.find(friend => friend.username === username && friend.status === "accepted");
+}
+function displayFriend(friend) {
+  return friend?.nickname || friend?.username || "";
+}
+function contextButton(label, action, id, username = "") {
+  return '<button type="button" role="menuitem" data-cloud="' + esc(action) +
+    '" data-id="' + key(id) + '" data-name="' + key(username) + '">' + esc(label) + '</button>';
+}
+function menuMarkup() {
+  if (!contextMenu) return "";
+  let options = "";
+  let title = "Acciones";
+  if (contextMenu.type === "friend") {
+    const friend = friendById(contextMenu.id);
+    if (!friend) return "";
+    const favorites = new Set(snapshot?.favorites || []);
+    title = displayFriend(friend);
+    options += contextButton("Enviar mensaje", "chat-friend", friend.other_id, friend.username);
+    options += contextButton("Cambiar apodo", "edit-nickname", friend.other_id);
+    if (friend.nickname) options += contextButton("Quitar apodo", "clear-nickname", friend.other_id);
+    options += contextButton(favorites.has(friend.other_id) ? "Quitar favorito" : "Marcar favorito", "favorite", friend.other_id);
+    options += '<div class="vis-cloud-menu-divider" role="separator"></div>';
+    options += contextButton("Eliminar amigo", "remove-friend", friend.other_id);
+    options += contextButton("Bloquear usuario", "block", friend.other_id);
+  } else if (contextMenu.type === "chat") {
+    const chat = snapshot?.chats?.find(c => c.id === contextMenu.id);
+    if (!chat) return "";
+    title = chat.kind === "group" ? chat.title : (displayFriend(friendByUsername(chat.peer_username)) || chat.peer_username || "Conversación");
+    options += contextButton("Abrir conversación", "open-chat", chat.id);
+    options += contextButton("Marcar como leído", "mark-chat-read", chat.id);
+    if (chat.kind === "group") {
+      options += '<div class="vis-cloud-menu-divider" role="separator"></div>' +
+        contextButton("Salir del grupo", "leave-group-menu", chat.id);
+    } else {
+      const friend = friendByUsername(chat.peer_username);
+      if (friend) options += contextButton("Cambiar apodo", "edit-nickname", friend.other_id);
+    }
+  }
+  const x = Math.max(8, Math.min(window.innerWidth - 224, contextMenu.x));
+  const y = Math.max(8, Math.min(window.innerHeight - 306, contextMenu.y));
+  return '<nav class="vis-cloud-context-menu" role="menu" aria-label="Acciones para ' +
+    esc(title) + '" style="left:' + x + 'px;top:' + y + 'px">' + options + '</nav>';
+}
+function openContext(type, id, x, y) {
+  if (type === "friend" && !friendById(id)) return;
+  if (type === "chat" && !snapshot?.chats?.some(chat => chat.id === id)) return;
+  contextMenu = { type, id, x, y };
+  draw();
+  mounted?.querySelector(".vis-cloud-context-menu [role=menuitem]")?.focus({ preventScroll: true });
+}
 function friendList() {
   const favorites = new Set(snapshot?.favorites || []);
   const friends = [...(snapshot?.friends || [])].sort((a,b) =>
     Number(favorites.has(b.other_id)) - Number(favorites.has(a.other_id)) ||
-    a.username.localeCompare(b.username));
+    displayFriend(a).localeCompare(displayFriend(b), "es", { sensitivity: "base" }));
   const incoming = snapshot?.incoming || [], outgoing = snapshot?.outgoing || [];
   let markup = '<section class="vis-social-block"><h4>Amigos <small>' + friends.length + '</small></h4>';
   markup += '<form data-cloud-form="friend" class="vis-cloud-inline"><input name="username" maxlength="24" placeholder="Agregar por usuario" required>' +
     '<button aria-label="Enviar solicitud">+</button></form>';
+  if (nicknameEditor && !friendById(nicknameEditor.id)) nicknameEditor = null;
+  if (nicknameEditor) {
+    markup += '<form data-cloud-form="nickname" class="vis-cloud-nickname-form">' +
+      '<label>Apodo privado para @' + esc(nicknameEditor.username) +
+      '<input data-cloud-nickname name="nickname" maxlength="40" minlength="1" required ' +
+      'placeholder="Cómo querés llamar a tu amigo" value="' + esc(nicknameEditor.draft) + '"></label>' +
+      '<div class="vis-cloud-nickname-actions"><button type="submit">Guardar</button>' +
+      '<button type="button" class="secondary" data-cloud="cancel-nickname">Cancelar</button></div></form>';
+  }
   for (const friend of friends) {
-    markup += '<div class="vis-social-row"><span class="vis-presence-dot ' +
+    markup += '<div class="vis-social-row vis-cloud-friend-row" data-cloud-context="friend" data-id="' +
+      key(friend.other_id) + '"><span class="vis-presence-dot ' +
       (friend.online ? (friend.presence === "away" ? "is-away" : friend.presence === "busy" ? "is-busy" : "is-online") : "") +
-      '"></span>' +
-      '<button data-cloud="chat-friend" data-name="' + key(friend.username) + '">' + esc(friend.username) +
+      '"></span><button data-cloud="chat-friend" data-name="' + key(friend.username) + '">' +
+      esc(displayFriend(friend)) +
+      (friend.nickname ? '<small class="vis-cloud-real-name">@' + esc(friend.username) + '</small>' : '') +
       '<small>' + esc(stateLabel(friend)) + '</small>' +
       (friend.online && friend.custom_status ? '<small class="vis-cloud-custom">' + esc(friend.custom_status) + '</small>' : '') +
       (friend.online && friend.activity ? '<small class="vis-cloud-playing">' + esc('Jugando ' + gameLabel(friend.activity)) + '</small>' : '') + '</button>' +
-      '<button class="vis-cloud-mini" data-cloud="favorite" data-id="' + key(friend.other_id) +
-      '" aria-label="' + (favorites.has(friend.other_id) ? 'Quitar favorito' : 'Marcar favorito') +
-      '" title="' + (favorites.has(friend.other_id) ? 'Quitar favorito' : 'Marcar favorito') + '">' +
-      (favorites.has(friend.other_id) ? '★' : '☆') + '</button>' +
-      '<button class="vis-cloud-mini" data-cloud="remove-friend" data-id="' + key(friend.other_id) + '" title="Eliminar amigo">×</button>' +
-      '<button class="vis-cloud-mini" data-cloud="block" data-id="' + key(friend.other_id) + '" title="Bloquear">⊘</button></div>';
+      '<button type="button" class="vis-cloud-mini vis-cloud-menu-button" data-cloud-menu="friend" data-id="' +
+      key(friend.other_id) + '" aria-haspopup="menu" aria-label="Más acciones para ' +
+      esc(displayFriend(friend)) + '" title="Más acciones">⋯</button></div>';
   }
   if (!friends.length) markup += '<p class="vis-social-note">Todavía no tenés amigos online.</p>';
   if (incoming.length) {
@@ -282,10 +348,18 @@ function friendList() {
 function chatList() {
   let markup = '<section class="vis-social-block"><h4>Conversaciones</h4>';
   for (const chat of snapshot?.chats || []) {
-    const label = chat.kind === "group" ? chat.title : (chat.peer_username || "Chat privado");
-    markup += '<button class="vis-cloud-chatitem ' + (chatId === chat.id ? "selected" : "") +
-      '" data-cloud="open-chat" data-id="' + key(chat.id) + '">' + esc(label) +
-      (chat.unread ? '<b class="vis-cloud-unread">' + Number(chat.unread) + '</b>' : "") + '</button>';
+    const friend = chat.kind === "direct" ? friendByUsername(chat.peer_username) : null;
+    const label = chat.kind === "group" ? chat.title : (displayFriend(friend) || chat.peer_username || "Chat privado");
+    markup += '<div class="vis-cloud-chat-row" data-cloud-context="chat" data-id="' + key(chat.id) + '">' +
+      '<button class="vis-cloud-chatitem ' + (chatId === chat.id ? "selected" : "") +
+      '" data-cloud="open-chat" data-id="' + key(chat.id) + '">' +
+      '<span>' + esc(label) +
+      (friend?.nickname ? '<small class="vis-cloud-real-name">@' + esc(chat.peer_username) + '</small>' : '') +
+      '</span>' +
+      (chat.unread ? '<b class="vis-cloud-unread">' + Number(chat.unread) + '</b>' : "") + '</button>' +
+      '<button type="button" class="vis-cloud-mini vis-cloud-menu-button" data-cloud-menu="chat" data-id="' +
+      key(chat.id) + '" aria-haspopup="menu" aria-label="Más opciones para ' +
+      esc(label) + '" title="Opciones del chat">⋯</button></div>';
   }
   markup += '<form data-cloud-form="group" class="vis-cloud-form"><label>Nuevo grupo<input name="title" maxlength="80" placeholder="Nombre del grupo" required></label>' +
     '<label>Amigos (separados por comas)<input name="members" placeholder="ana, pepe" required></label><button>Crear grupo</button></form>';
@@ -294,14 +368,15 @@ function chatList() {
 function thread() {
   const chat = snapshot?.chats?.find(item => item.id === chatId);
   let markup = '<section class="vis-cloud-thread"><div class="vis-cloud-thread-head"><b>' +
-    esc(chat?.kind === "group" ? chat.title : "Conversación") +
+    esc(chat?.kind === "group" ? chat.title : (displayFriend(friendByUsername(chat?.peer_username)) || chat?.peer_username || "Conversación")) +
     '</b>' + (chat?.kind === "group" ? '<button class="vis-cloud-mini" data-cloud="leave-group" title="Salir del grupo">Salir del grupo</button>' : '') +
     '<button data-cloud="close-chat" aria-label="Cerrar conversación">×</button></div>' +
     '<div class="vis-cloud-messages">';
   if (chatBefore) markup += '<button data-cloud="older">Ver mensajes anteriores</button>';
   if (!chatMessages.length) markup += '<p class="vis-social-note">Todavía no hay mensajes.</p>';
   for (const msg of chatMessages) markup += '<div class="vis-cloud-bubble ' +
-    (msg.sender_id === account?.id ? "mine" : "") + '"><b>' + esc(msg.sender) +
+    (msg.sender_id === account?.id ? "mine" : "") + '"><b>' +
+    esc(displayFriend(friendById(msg.sender_id)) || msg.sender) +
     '</b><span>' + esc(msg.body) + '</span><small>' + esc(new Date(msg.created_at).toLocaleString("es-AR")) + '</small></div>';
   markup += '</div><form data-cloud-form="message" class="vis-cloud-inline">' +
     '<input name="body" maxlength="2000" placeholder="Escribí un mensaje..." required>' +
@@ -334,6 +409,7 @@ function draw() {
         '<p class="vis-cloud-self-game">' + esc('Jugando ' + gameLabel(snapshot.me.activity)) + '</p>' : '');
     markup += loading && !snapshot ? '<p class="vis-social-note">Cargando…</p>' : friendList() + chatList();
     if (chatId) markup += thread();
+    markup += menuMarkup();
   }
   captureChatDraft();
   captureCustomDraft();
@@ -342,7 +418,8 @@ function draw() {
   const focused = document.activeElement;
   const focusSelector = focused?.matches?.('[data-cloud-custom-status]') ?
     '[data-cloud-custom-status]' : focused?.matches?.('form[data-cloud-form="message"] input[name="body"]') ?
-    'form[data-cloud-form="message"] input[name="body"]' : null;
+    'form[data-cloud-form="message"] input[name="body"]' : focused?.matches?.('[data-cloud-nickname]') ?
+    '[data-cloud-nickname]' : null;
   const caret = focusSelector && focused ? [focused.selectionStart, focused.selectionEnd] : null;
   const previousRegion = host.querySelector(".vis-cloud-messages");
   const sameThread = !!chatId && renderedChatId === chatId;
@@ -396,6 +473,13 @@ async function onSubmit(event) {
       const result = await api("/v1/presence", "POST", { custom_status: String(data.get("custom") || "") });
       statusDraft = null;
       if (snapshot?.me) snapshot.me.custom_status = result.custom_status;
+    } else if (action === "nickname") {
+      if (!nicknameEditor || !friendById(nicknameEditor.id)) throw new Error("El amigo ya no está disponible.");
+      const name = String(data.get("nickname") || "").trim();
+      if (!name || [...name].length > 40) throw new Error("Ingresá un apodo de 1 a 40 caracteres.");
+      await api("/v1/friends/" + nicknameEditor.id + "/nickname", "PUT", { nickname: name });
+      nicknameEditor = null;
+      await refresh();
     } else if (action === "friend") {
       await api("/v1/friends/requests", "POST", { username: String(data.get("username") || "") }); await refresh();
     } else if (action === "group") {
@@ -412,10 +496,54 @@ async function onSubmit(event) {
   });
 }
 async function onClick(event) {
+  const menuButton = event.target.closest("[data-cloud-menu]");
+  if (menuButton && mounted?.contains(menuButton)) {
+    event.preventDefault(); event.stopPropagation();
+    const rect = menuButton.getBoundingClientRect();
+    openContext(menuButton.dataset.cloudMenu, menuButton.dataset.id, rect.left, rect.bottom + 4);
+    return;
+  }
   const button = event.target.closest("[data-cloud]");
-  if (!button) return;
+  if (!button) {
+    if (contextMenu) { contextMenu = null; draw(); }
+    return;
+  }
   event.preventDefault(); event.stopPropagation();
   const action = button.dataset.cloud, id = button.dataset.id;
+  contextMenu = null;
+  if (action === "cancel-nickname") { nicknameEditor = null; draw(); return; }
+  if (action === "edit-nickname") {
+    const friend = friendById(id);
+    if (!friend) return showError("El usuario ya no es tu amigo.");
+    nicknameEditor = { id, username: friend.username, draft: friend.nickname || "" };
+    draw();
+    mounted?.querySelector("[data-cloud-nickname]")?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "clear-nickname") {
+    await perform(async () => {
+      await api("/v1/friends/" + id + "/nickname", "DELETE");
+      if (nicknameEditor?.id === id) nicknameEditor = null;
+      await refresh();
+    });
+    return;
+  }
+  if (action === "mark-chat-read") {
+    await perform(async () => {
+      await api("/v1/chats/" + id + "/read", "POST", {});
+      await refresh();
+    });
+    return;
+  }
+  if (action === "leave-group-menu") {
+    if (!confirm("¿Querés salir de este grupo?")) return;
+    await perform(async () => {
+      await api("/v1/chats/" + id + "/leave", "POST", {});
+      if (chatId === id) { chatId = ""; chatMessages = []; chatBefore = null; }
+      await refresh();
+    });
+    return;
+  }
   if (action === "logout") {
     if (token) { try { await api("/v1/auth/logout", "POST", {}); } catch {} }
     signOut(); return;
@@ -439,6 +567,7 @@ async function onClick(event) {
       await api("/v1/friends/answer", "POST", { id, action }); await refresh();
     } else if (["block", "unblock", "remove-friend"].includes(action)) {
       if (action === "block" && !confirm("¿Bloquear a este usuario?")) return;
+      if (action === "remove-friend" && !confirm("¿Eliminar a este amigo de tus contactos?")) return;
       const path = action === "remove-friend" ? "/v1/friends/" + id : "/v1/blocks/" + id;
       await api(path, action === "block" ? "POST" : "DELETE"); await refresh();
     } else if (action === "favorite") {
@@ -472,6 +601,26 @@ async function onChange(event) {
 function onInput(event) {
   const field = event.target.closest("[data-cloud-custom-status]");
   if (field) statusDraft = field.value;
+  const nickname = event.target.closest("[data-cloud-nickname]");
+  if (nickname && nicknameEditor) nicknameEditor.draft = nickname.value;
+}
+function onContextMenu(event) {
+  const row = event.target.closest("[data-cloud-context]");
+  if (!row || !mounted?.contains(row)) return;
+  event.preventDefault(); event.stopPropagation();
+  openContext(row.dataset.cloudContext, row.dataset.id, event.clientX, event.clientY);
+}
+function onMenuKeydown(event) {
+  if (event.key === "Escape") {
+    if (contextMenu) { event.preventDefault(); contextMenu = null; draw(); }
+    return;
+  }
+  if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
+  const row = event.target.closest("[data-cloud-context]");
+  if (!row || !mounted?.contains(row)) return;
+  event.preventDefault();
+  const rect = row.getBoundingClientRect();
+  openContext(row.dataset.cloudContext, row.dataset.id, rect.left + 16, rect.bottom + 4);
 }
 function mount() {
   const next = document.querySelector("#vis-social-root");
@@ -482,6 +631,8 @@ function mount() {
   next.addEventListener("click", onClick);
   next.addEventListener("change", onChange);
   next.addEventListener("input", onInput);
+  next.addEventListener("contextmenu", onContextMenu);
+  next.addEventListener("keydown", onMenuKeydown);
   draw();
 }
 // A production build supplies the public Worker URL at compile time.
@@ -496,6 +647,12 @@ async function discoverEndpoint() {
     draw();
   } catch { /* Keep manual Worker URL configuration available. */ }
 }
+document.addEventListener("pointerdown", event => {
+  if (contextMenu && mounted && !mounted.contains(event.target)) {
+    contextMenu = null;
+    draw();
+  }
+});
 const observer = new MutationObserver(mount);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 mount();
