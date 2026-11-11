@@ -35,6 +35,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"
+      # Strip Rust symbols from launcher and official-source Horizon release binaries.
+      CARGO_PROFILE_RELEASE_STRIP: symbols
       VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
       VIS_SOCIAL_URL: ${{ vars.VIS_SOCIAL_URL }}
       VIS_HORIZON_REF: 1405044d0996d37f850f5ab0dec02bab43d4945f
@@ -62,6 +64,8 @@ jobs:
         run: |
           npm run validate
           npm run check:release
+      - name: Portable download size-policy tests
+        run: python tools/test_portable_size.py
       - name: Windows portable payload regression tests
         run: python tools/test_windows_portable.py
       - name: Linux portable payload and executable-permission tests
@@ -87,6 +91,11 @@ jobs:
       - name: Package Windows portable ZIP
         if: runner.os == 'Windows'
         run: python tools/package_windows_portable.py
+      - name: Report Linux download size — goal 50 MB, maximum 150 MB
+        if: runner.os == 'Linux'
+        run: |
+          python tools/check_portable_size.py target/release/portable-linux/VIS-Nexo-Linux-x86_64-Portable.tar.gz
+          python tools/check_portable_size.py target/release/bundle/appimage/*.AppImage
       - name: Upload Linux portable TAR.GZ (executable permissions preserved)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -101,6 +110,9 @@ jobs:
           name: vis-nexo-linux-appimage
           path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
+      - name: Report Windows download size — goal 50 MB, maximum 150 MB
+        if: runner.os == 'Windows'
+        run: python tools/check_portable_size.py target/release/portable/VIS-Nexo-Windows-x64-Portable.zip
       - name: Upload Windows portable app (unzip and run VIS Nexo.exe)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
