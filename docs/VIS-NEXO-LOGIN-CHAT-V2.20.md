@@ -84,8 +84,13 @@ independiente.
   iniciar la misma cuenta online desde otra computadora requiere un flujo
   seguro de migración/recuperación de claves para leer y enviar mensajes
   cifrados de esa identidad. **No** se resuelve copiando contraseñas.
-- La supercuenta se aprovisiona por operación protegida desde GitHub
-  vinculada a la clave pública del dispositivo, sin contraseña predeterminada.
+- La supercuenta **todavía no está creada**. El procedimiento actual de
+  aprovisionamiento requiere una identidad de dispositivo registrada con
+  Ed25519. Las nuevas cuentas con contraseña online todavía no vinculan
+  automáticamente esa clave de dispositivo; habrá que añadir una operación
+  autenticada para vincularla antes de promover una cuenta online.
+  No crear una supercuenta por nombre, ni asumir que la primera cuenta
+  online es administradora.
 - Protección contra bots, recuperación de credenciales, validación cruzada
   de claves y auditoría independiente siguen siendo requisitos antes de
   abrir registro público a gran escala.
