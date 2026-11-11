@@ -152,8 +152,10 @@ Las cuentas, chats/grupos, amigos y estados no se eliminan.
   update. Never use a wildcard CORS origin for bearer-authenticated operations.
 - On every message operation the Worker verifies chat membership and blocking.
   Direct messaging also requires accepted friendship.
-- Real-time tickets expire after 30 seconds and are single-use. WebSocket events
-  merely trigger refetches; they cannot modify data directly.
+- Real-time tickets expire after 30 seconds and are single-use. Notifications
+  request a refetch; chat messages contain transient content sent directly to
+  authorized recipient WebSockets and immediately saved on the recipient device.
+  No message bodies remain in D1.
 - The cloud retains accounts, friendships and chat membership, not messages.
   Device-only log cleanup occurs when the account starts or opens its chats.
   Account erasure/export, moderation, attachments and message editing remain
