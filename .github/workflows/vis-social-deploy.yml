@@ -29,7 +29,9 @@ jobs:
         with:
           node-version: '22'
       - name: Validate Worker unit tests
-        run: node tools/test_social_worker.mjs
+        run: |
+          node tools/test_social_worker.mjs
+          node tools/test_social_peer_key.mjs
       - name: Verify existing Cloudflare deployment credentials
         shell: bash
         run: |
