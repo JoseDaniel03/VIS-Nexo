@@ -59,11 +59,15 @@ jobs:
           PY
       - name: Install Wrangler
         run: npm install --no-package-lock --ignore-scripts
-      - name: Validate Worker and migrations locally
+      - name: Validate Worker and local-only chat before cloud changes
         run: |
           node --check worker.mjs
+          node --check ../../web/social-cloud.js
+          node --check ../../web/humile-local-log.js
+          node --test test_social.mjs test_local_chat.mjs
           python3 test_schema.py
-          npx --no-install wrangler d1 migrations apply vis-social --local
+          npx --no-install wrangler d1 migrations apply vis-social-test --local --config wrangler.test.toml --persist-to .wrangler-test
+          node test_integration.mjs
       - name: Apply production D1 migrations (requires confirmed prior history export)
         run: npx --no-install wrangler d1 migrations apply vis-social --remote
       - name: Publish Social Worker and Durable Object
