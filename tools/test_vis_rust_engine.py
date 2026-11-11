@@ -41,6 +41,7 @@ class RustEditionModuleTests(unittest.TestCase):
         (self.source/"vis-horizon-source.json").write_text(json.dumps({
           "source_repo":runtime.REPOSITORY,
           "source_commit":"a"*40,
+          "vis_direct_patch":"vis-nexo-direct-game-window-v1",
           "sha256":hashes
         }))
     def test_windows_optional_zip_and_pinned_manifest(self):
