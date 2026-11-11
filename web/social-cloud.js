@@ -33,6 +33,8 @@ function stopSocket() {
   reconnect = null;
 }
 function stopPolling() { if (poll) clearInterval(poll); poll = null; }
+export function suspendSocialCloud() { stopSocket(); stopPolling(); }
+export function resumeSocialCloud() { if (token && endpointReady() && !socket) startLive(); }
 export function syncSocialOwner(name, guest = false) {
   const next = guest ? "" : String(name || "").toLowerCase();
   if (localOwner === next) return;
@@ -45,6 +47,7 @@ export function socialOnlinePanel(visible) {
   return '<aside class="social-pane vis-cloud-pane ' + (visible ? "" : "is-hidden") +
     '" aria-label="VIS Social"><div class="social-top"><div class="social-brand">' +
     '<span class="social-title">VIS HUMILE</span><small>Amigos y chats en línea</small></div>' +
+    '<button class="vis-cloud-mini vis-switch-local" data-action="social-local" title="Volver a amigos locales">Local</button>' +
     '<button class="icon-btn" data-action="toggle-social" title="Ocultar panel" aria-label="Ocultar panel">×</button></div>' +
     '<div id="vis-social-root"></div></aside>';
 }
