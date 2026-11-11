@@ -161,9 +161,13 @@ async function refresh() {
 }
 async function connect() {
   stopSocket();
-  if (!token || !endpointReady()) return;
+  if (!cloudActive || !token || !endpointReady()) return;
+  const credentials = token, connectingAccount = account?.id;
   try {
     const data = await api("/v1/rt/ticket", "POST", {});
+    // A sign-out, owner switch or local-mode switch while requesting a
+    // one-use ticket must not reopen an authenticated private connection.
+    if (!cloudActive || token !== credentials || account?.id !== connectingAccount) return;
     const url = endpoint.replace(/^https:/, "wss:") + "/v1/rt?ticket=" + encodeURIComponent(data.ticket);
     socket = new WebSocket(url);
     socket.onopen = () => { connected = true; draw(); };
@@ -176,12 +180,12 @@ async function connect() {
     };
     socket.onclose = () => {
       connected = false;
-      if (token) reconnect = setTimeout(() => void connect(), 4500);
+      if (cloudActive && token) reconnect = setTimeout(() => void connect(), 4500);
       draw();
     };
     socket.onerror = () => { connected = false; };
   } catch {
-    if (token) reconnect = setTimeout(() => void connect(), 9000);
+    if (cloudActive && token) reconnect = setTimeout(() => void connect(), 9000);
   }
 }
 function startLive() {
