@@ -352,6 +352,19 @@ function mount() {
   next.addEventListener("change", onChange);
   draw();
 }
+// A production build supplies the public Worker URL at compile time.
+// Fall back to manual configuration in development and older portable builds.
+async function discoverEndpoint() {
+  try {
+    const invoke = globalThis.__TAURI__?.core?.invoke;
+    if (typeof invoke !== "function" || endpointReady()) return;
+    const fromBuild = safeEndpoint(await invoke("social_endpoint"));
+    if (!fromBuild || endpointReady()) return;
+    endpoint = fromBuild;
+    draw();
+  } catch { /* Keep manual Worker URL configuration available. */ }
+}
 const observer = new MutationObserver(mount);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 mount();
+void discoverEndpoint();
