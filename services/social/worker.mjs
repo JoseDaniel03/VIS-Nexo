@@ -15,6 +15,12 @@ export function normalizeUsername(value) {
 export function validMessage(value) {
   return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 2000;
 }
+export function validFriendNickname(value) {
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  return text.length > 0 && [...text].length <= 40 &&
+    !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(text);
+}
 export function validCustomStatus(value) {
   return typeof value === "string" && [...value].length <= 80 &&
     !/[\u0000-\u001f\u007f]/.test(value) && !/[<>]/.test(value);
@@ -66,7 +72,7 @@ function response(request, env, body, status = 200) {
   if (origin && isAllowedOrigin(origin, env.ALLOWED_ORIGINS)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Headers"] = "Authorization,Content-Type";
-    headers["Access-Control-Allow-Methods"] = "GET,POST,DELETE,OPTIONS";
+    headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS";
     headers["Access-Control-Max-Age"] = "600";
   }
   return new Response(JSON.stringify(body), { status, headers });
@@ -164,10 +170,12 @@ async function requireFriend(db, a, b) {
 async function socialSnapshot(request, env, me) {
   const db = env.DB, id = me.id;
   const relationships = await db.prepare(
-    "SELECT f.id,f.status,f.requester_id,a.id AS other_id,a.username AS username " +
+    "SELECT f.id,f.status,f.requester_id,a.id AS other_id,a.username AS username, " +
+    "CASE WHEN f.status='accepted' THEN n.nickname ELSE NULL END AS nickname " +
     "FROM humile_friendships f JOIN ceibo_accounts a ON a.id=CASE WHEN f.user_a=? THEN f.user_b ELSE f.user_a END " +
+    "LEFT JOIN humile_friend_nicknames n ON n.owner_id=? AND n.target_id=a.id " +
     "WHERE f.user_a=? OR f.user_b=? ORDER BY f.created_at DESC LIMIT 250"
-  ).bind(id, id, id).all();
+  ).bind(id, id, id, id).all();
   const blocks = await db.prepare(
     "SELECT a.id,a.username FROM humile_blocks b JOIN ceibo_accounts a ON a.id=b.target_id WHERE b.actor_id=?"
   ).bind(id).all();
@@ -257,19 +265,43 @@ async function answerFriend(request, env, me) {
   await notify(env, recipient, { type: "social:update" });
   return response(request, env, { ok: true });
 }
+async function setFriendNickname(request, env, me, targetId, remove) {
+  if (!ID.test(targetId) || targetId === me.id) fail(400, "Amigo inválido");
+  await requireFriend(env.DB, me.id, targetId);
+  await rate(env.DB, "friendnick:" + me.id, 60, 3600000);
+  if (remove) {
+    await env.DB.prepare("DELETE FROM humile_friend_nicknames WHERE owner_id=? AND target_id=?")
+      .bind(me.id, targetId).run();
+    return response(request, env, { nickname: "" });
+  }
+  const body = await json(request);
+  if (!validFriendNickname(body.nickname)) fail(400, "Apodo inválido (entre 1 y 40 caracteres)");
+  const nickname = body.nickname.trim();
+  await env.DB.prepare("INSERT INTO humile_friend_nicknames(owner_id,target_id,nickname,updated_at) VALUES(?,?,?,?) " +
+    "ON CONFLICT(owner_id,target_id) DO UPDATE SET nickname=excluded.nickname,updated_at=excluded.updated_at")
+    .bind(me.id, targetId, nickname, ISO()).run();
+  // Private to the nickname owner: do not broadcast a social update to the target.
+  return response(request, env, { nickname });
+}
 async function changeFriend(request, env, me, targetId, operation) {
   if (!ID.test(targetId) || targetId === me.id) fail(400, "Usuario inválido");
   const db = env.DB, sorted = pair(me.id, targetId);
   if (operation === "remove") {
-    await db.prepare("DELETE FROM humile_friendships WHERE user_a=? AND user_b=? AND status='accepted'")
-      .bind(sorted[0], sorted[1]).run();
+    await db.batch([
+      db.prepare("DELETE FROM humile_friendships WHERE user_a=? AND user_b=? AND status='accepted'")
+        .bind(sorted[0], sorted[1]),
+      db.prepare("DELETE FROM humile_friend_nicknames WHERE (owner_id=? AND target_id=?) OR (owner_id=? AND target_id=?)")
+        .bind(me.id, targetId, targetId, me.id)
+    ]);
   } else if (operation === "block") {
     const other = await db.prepare("SELECT id FROM ceibo_accounts WHERE id=?").bind(targetId).first();
     if (!other) fail(404, "Usuario no encontrado");
     await db.batch([
       db.prepare("INSERT OR IGNORE INTO humile_blocks(actor_id,target_id,created_at) VALUES(?,?,?)").bind(me.id, targetId, ISO()),
       db.prepare("DELETE FROM humile_friendships WHERE user_a=? AND user_b=?").bind(sorted[0], sorted[1]),
-      db.prepare("DELETE FROM humile_favorites WHERE actor_id=? AND target_id=?").bind(me.id, targetId)
+      db.prepare("DELETE FROM humile_favorites WHERE actor_id=? AND target_id=?").bind(me.id, targetId),
+      db.prepare("DELETE FROM humile_friend_nicknames WHERE (owner_id=? AND target_id=?) OR (owner_id=? AND target_id=?)")
+        .bind(me.id, targetId, targetId, me.id)
     ]);
   } else if (operation === "unblock") {
     await db.prepare("DELETE FROM humile_blocks WHERE actor_id=? AND target_id=?").bind(me.id, targetId).run();
@@ -520,6 +552,9 @@ export default {
       }
       if (path === "/v1/friends/requests" && method === "POST") return await requestFriend(request, env, me);
       if (path === "/v1/friends/answer" && method === "POST") return await answerFriend(request, env, me);
+      const nicknameRoute = /^\/v1\/friends\/([a-f0-9-]{36})\/nickname$/i.exec(path);
+      if (nicknameRoute && ["PUT", "DELETE"].includes(method))
+        return await setFriendNickname(request, env, me, nicknameRoute[1], method === "DELETE");
       const relationship = /^\/v1\/friends\/([a-f0-9-]{36})$/i.exec(path);
       if (relationship && method === "DELETE") return await changeFriend(request, env, me, relationship[1], "remove");
       const blocks = /^\/v1\/blocks\/([a-f0-9-]{36})$/i.exec(path);
