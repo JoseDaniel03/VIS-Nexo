@@ -8,6 +8,7 @@ mod updates;
 mod ombu;
 mod horizon;
 mod horizon_download;
+mod social;
 
 // Reserved namespace for player-owned instances; project editor slugs cannot create this ID.
 const PERSONAL_PROJECT_ID: &str = "__personal__";
@@ -1050,12 +1051,14 @@ fn main() {
             horizon::initialize_bundled_source(&app.handle());
             let backend = init_backend(&app.handle()).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(backend));
+            app.manage(Mutex::new(social::SocialSession::default()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
             save_project, delete_project, save_instance, ensure_project_instance, configure_shared_ram, delete_instance,
             request_friend, accept_friend, send_message,
+            social::social_connect, social::social_request, social::social_disconnect,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
             set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
