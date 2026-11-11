@@ -1,0 +1,195 @@
+//! VIS Social remote bridge. User PINs stay local, device signing keys never
+//! enter the WebView. Bearer sessions exist in process memory only.
+use crate::accounts::atomic_json;
+use crate::Backend;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use ed25519_dalek::{Signer, SigningKey};
+use rand_core::{OsRng, RngCore};
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{fs, path::Path, sync::Mutex, time::Duration};
+use tauri::State;
+
+const DEFAULT_URL: &str = "https://vis-social.defreitascarranza-845.workers.dev";
+
+#[derive(Clone, Serialize, Deserialize)]
+struct DeviceKey { signing_secret: String }
+
+#[derive(Default)]
+pub(crate) struct SocialSession {
+    username: Option<String>,
+    bearer: Option<String>,
+}
+
+fn base_url() -> Result<String, String> {
+    let raw = option_env!("VIS_SOCIAL_URL").unwrap_or(DEFAULT_URL).trim_end_matches('/');
+    let url = url::Url::parse(raw).map_err(|_| "VIS Social URL incorrecta".to_owned())?;
+    if url.scheme() != "https" || url.host_str().is_none()
+        || !url.username().is_empty() || url.password().is_some()
+        || url.query().is_some() || url.fragment().is_some() || url.path() != "/" {
+        return Err("VIS Social requiere una URL HTTPS de origen (sin ruta ni credenciales).".into());
+    }
+    Ok(raw.to_owned())
+}
+
+fn client() -> Result<Client, String> {
+    Client::builder()
+        .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(7))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "No se pudo crear el cliente de VIS Social".to_owned())
+}
+
+fn request(
+    client: &Client, base: &str, path: &str, method: &str,
+    body: Option<&Value>, token: Option<&str>
+) -> Result<Value, String> {
+    let verb = reqwest::Method::from_bytes(method.as_bytes())
+        .map_err(|_| "Método HTTP no permitido".to_owned())?;
+    let mut builder = client.request(verb, format!("{base}{path}"));
+    if let Some(token) = token {
+        builder = builder.bearer_auth(token);
+    }
+    if let Some(json) = body {
+        builder = builder.json(json);
+    }
+    let response = builder.send()
+        .map_err(|_| "No hay conexión con el servicio VIS Social".to_owned())?;
+    let status = response.status();
+    let data: Value = response.json()
+        .map_err(|_| "Respuesta inválida del servicio VIS Social".to_owned())?;
+    if !status.is_success() {
+        let server_error = data.get("error").and_then(Value::as_str)
+            .unwrap_or("El servicio rechazó la solicitud");
+        return Err(format!("VIS Social (HTTP {}): {}", status.as_u16(),
+            server_error.chars().take(170).collect::<String>()));
+    }
+    Ok(data)
+}
+
+fn identity(username: &str, root: &Path) -> Result<SigningKey, String> {
+    if !username.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        || !(3..=24).contains(&username.len()) {
+        return Err("Nombre de usuario local no válido para VIS Social".into());
+    }
+    let file = root.join("social-device-keys").join(format!("{username}.json"));
+    if file.exists() {
+        let encoded: DeviceKey = serde_json::from_slice(&fs::read(file)
+            .map_err(|_| "No se pudo leer la identidad del dispositivo".to_owned())?)
+            .map_err(|_| "Identidad de dispositivo dañada".to_owned())?;
+        let decoded = STANDARD.decode(encoded.signing_secret)
+            .map_err(|_| "Identidad de dispositivo dañada".to_owned())?;
+        let seed: [u8; 32] = decoded.try_into()
+            .map_err(|_| "Identidad de dispositivo dañada".to_owned())?;
+        return Ok(SigningKey::from_bytes(&seed));
+    }
+    let mut seed = [0u8; 32];
+    OsRng.fill_bytes(&mut seed);
+    let key = SigningKey::from_bytes(&seed);
+    atomic_json(&file, &DeviceKey { signing_secret: STANDARD.encode(seed) })?;
+    seed.fill(0);
+    Ok(key)
+}
+
+fn connect(username: &str, root: &Path) -> Result<(String, Value), String> {
+    let base = base_url()?;
+    let client = client()?;
+    let signing = identity(username, root)?;
+    let public = STANDARD.encode(signing.verifying_key().to_bytes());
+    let proof = STANDARD.encode(signing.sign(
+        format!("VIS-SOCIAL-REGISTER-V1\n{username}").as_bytes()).to_bytes());
+    request(&client, &base, "/v1/auth/register", "POST",
+        Some(&json!({"username": username, "public_key": public, "signature": proof})), None)?;
+    let challenge = request(&client, &base, "/v1/auth/challenge", "POST",
+        Some(&json!({"username": username})), None)?;
+    let id = challenge.get("id").and_then(Value::as_str)
+        .ok_or("VIS Social devolvió un desafío incorrecto")?;
+    let nonce = challenge.get("nonce").and_then(Value::as_str)
+        .ok_or("VIS Social devolvió un desafío incorrecto")?;
+    let text = format!("VIS-SOCIAL-AUTH-V1\n{username}\n{id}\n{nonce}");
+    let signature = STANDARD.encode(signing.sign(text.as_bytes()).to_bytes());
+    let auth = request(&client, &base, "/v1/auth/session", "POST",
+        Some(&json!({"username": username, "challenge_id": id, "signature": signature})), None)?;
+    let token = auth.get("token").and_then(Value::as_str)
+        .ok_or("VIS Social no entregó una sesión autenticada")?.to_owned();
+    let snapshot = request(&client, &base, "/v1/state", "GET", None, Some(&token))?;
+    Ok((token, snapshot))
+}
+
+#[tauri::command]
+pub(crate) async fn social_connect(
+    backend: State<'_, Mutex<Backend>>, social: State<'_, Mutex<SocialSession>>
+) -> Result<Value, String> {
+    let (username, root) = {
+        let current = backend.lock().map_err(|_| "Estado local bloqueado")?;
+        (current.active_user.clone().ok_or("Entrá primero con una cuenta local")?,
+         current.data_root.clone())
+    };
+    let username_for_thread = username.clone();
+    let (token, snapshot) = tauri::async_runtime::spawn_blocking(move || {
+        connect(&username_for_thread, &root)
+    }).await.map_err(|_| "VIS Social interrumpido")??;
+    {
+        let current = backend.lock().map_err(|_| "Estado local bloqueado")?;
+        if current.active_user.as_deref() != Some(&username) {
+            return Err("La cuenta cambió durante la conexión a VIS Social".into());
+        }
+    }
+    let mut active = social.lock().map_err(|_| "Estado social bloqueado")?;
+    active.username = Some(username);
+    active.bearer = Some(token);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub(crate) async fn social_request(
+    backend: State<'_, Mutex<Backend>>,
+    social: State<'_, Mutex<SocialSession>>,
+    path: String, method: String, body: Option<Value>
+) -> Result<Value, String> {
+    const GET: &[&str] = &["/v1/state"];
+    const POST: &[&str] = &[
+        "/v1/keys", "/v1/presence", "/v1/friends/request",
+        "/v1/friends/accept", "/v1/friends/alias",
+        "/v1/messages/send", "/v1/messages/ack"
+    ];
+    if !(method == "GET" && GET.contains(&path.as_str())
+        || method == "POST" && POST.contains(&path.as_str())) {
+        return Err("Operación VIS Social no autorizada".into());
+    }
+    let username = backend.lock().map_err(|_| "Estado local bloqueado")?
+        .active_user.clone().ok_or("No hay cuenta local activa")?;
+    let token = {
+        let active = social.lock().map_err(|_| "Estado social bloqueado")?;
+        if active.username.as_deref() != Some(username.as_str()) {
+            return Err("La sesión social no pertenece a la cuenta actual".into());
+        }
+        active.bearer.clone().ok_or("Conectá VIS Social nuevamente")?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let base = base_url()?;
+        request(&client()?, &base, &path, &method, body.as_ref(), Some(&token))
+    }).await.map_err(|_| "Solicitud VIS Social interrumpida")?
+}
+
+#[tauri::command]
+pub(crate) async fn social_disconnect(
+    social: State<'_, Mutex<SocialSession>>
+) -> Result<(), String> {
+    let token = {
+        let mut active = social.lock().map_err(|_| "Estado social bloqueado")?;
+        active.username = None;
+        active.bearer.take()
+    };
+    if let Some(token) = token {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let (Ok(base), Ok(http)) = (base_url(), client()) {
+                let _ = request(&http, &base, "/v1/auth/logout", "POST",
+                    Some(&json!({})), Some(&token));
+            }
+        }).await;
+    }
+    Ok(())
+}
