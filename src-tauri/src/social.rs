@@ -261,7 +261,8 @@ pub(crate) async fn social_request(
 ) -> Result<Value, String> {
     const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects"];
     const POST: &[&str] = &[
-        "/v1/keys", "/v1/presence", "/v1/accounts/upgrade", "/v1/projects/subscribe",
+        "/v1/keys", "/v1/presence", "/v1/avatar/upload", "/v1/avatar/get",
+        "/v1/accounts/upgrade", "/v1/projects/subscribe",
         "/v1/projects/unsubscribe", "/v1/admin/projects/upsert",
         "/v1/admin/projects/staff", "/v1/admin/accounts/role",
         "/v1/admin/accounts/disable", "/v1/friends/request",
