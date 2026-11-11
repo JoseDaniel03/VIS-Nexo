@@ -68,6 +68,30 @@ class SocialSchemaTests(unittest.TestCase):
             self.db.execute("INSERT INTO humile_blocks(actor_id,target_id,created_at)"
                             " VALUES('anna','cara','2026-11-11')")
 
+    def test_custom_status_game_privacy_and_expiration(self):
+        self.db.execute("INSERT INTO humile_presence(account_id,visibility,custom_status,share_game,updated_at)"
+                        " VALUES('anna','online','Creando mundo',0,'2026-11-11')")
+        record = self.db.execute("SELECT * FROM humile_presence WHERE account_id='anna'").fetchone()
+        self.assertEqual(record["custom_status"], "Creando mundo")
+        self.assertEqual(record["share_game"], 0)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE humile_presence SET custom_status=? WHERE account_id='anna'", ("x" * 81,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE humile_presence SET share_game=3 WHERE account_id='anna'")
+        self.db.execute("INSERT INTO humile_game_activity(account_id,engine,project,expires_at,updated_at)"
+                        " VALUES('anna','rust','Virgoland',2000,'2026-11-11')")
+        self.assertEqual(self.db.execute(
+            "SELECT engine FROM humile_game_activity WHERE account_id='anna' AND expires_at>?",
+            (1000,)).fetchone()["engine"], "rust")
+        self.assertIsNone(self.db.execute(
+            "SELECT engine FROM humile_game_activity WHERE account_id='anna' AND expires_at>?",
+            (3000,)).fetchone())
+        self.db.execute("DELETE FROM humile_game_activity WHERE expires_at<?", (3000,))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM humile_game_activity").fetchone()[0], 0)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO humile_game_activity(account_id,engine,project,expires_at,updated_at)"
+                            " VALUES('bob','other','',2000,'2026-11-11')")
+
     def test_chat_summary_query_matches_worker_api(self):
         self.db.execute("INSERT INTO humile_chats(id,kind,pair_key,created_at) VALUES('c1','direct','dm:anna:bob','2026-11-11')")
         for user in ("anna", "bob"):
