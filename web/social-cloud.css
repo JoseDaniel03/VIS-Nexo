@@ -43,3 +43,10 @@
 .vis-cloud-pane .vis-cloud-bubble small{font-size:9px;color:#b6a8cb}
 .vis-cloud-pane .vis-cloud-thread>.vis-cloud-inline{padding:8px;border-top:1px solid #49385f}
 @media(max-width:980px){.vis-cloud-pane #vis-social-root{max-height:calc(100vh - 150px)}}
+
+
+.vis-cloud-pane .vis-cloud-presence-label{margin:12px 0;display:grid;gap:7px;font-size:11px;color:#bcb0d2;}
+.vis-cloud-pane .vis-cloud-presence-label select{width:100%;appearance:auto;background:#211832;border:1px solid #54426e;border-radius:9px;color:#f5eaff;padding:8px;font:inherit;}
+.vis-cloud-pane .vis-cloud-presence-label select:focus-visible{outline:2px solid #a88cff;outline-offset:2px;}
+.vis-cloud-pane .vis-social-row .vis-cloud-mini[data-cloud="favorite"]{font-size:17px;color:#ead29e;padding:4px 7px}
+.vis-cloud-pane .vis-social-row button[data-cloud="favorite"]:hover{color:#fff0ac}
