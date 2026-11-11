@@ -8,3 +8,7 @@ binding = "DB"
 database_name = "vis-social-db"
 database_id = "3f1a6ccf-2d84-4233-bde3-d3887d1ea60a"
 migrations_dir = "migrations"
+
+# Purge expired authentication challenges, sessions and queued messages hourly.
+[triggers]
+crons = ["0 * * * *"]
