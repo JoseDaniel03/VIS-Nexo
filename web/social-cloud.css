@@ -66,3 +66,21 @@
 
 .vis-cloud-pane .vis-presence-dot.is-away{background:#f0c569;box-shadow:0 0 0 2px #f0c56922}
 .vis-cloud-pane .vis-presence-dot.is-busy{background:#ec8390;box-shadow:0 0 0 2px #ec839022}
+
+/* Shared context menu for friends and chats. Prefer one action surface to repeated buttons. */
+.vis-cloud-pane .vis-cloud-friend-row{border-radius:9px}
+.vis-cloud-pane .vis-cloud-friend-row:hover{background:#241b38}
+.vis-cloud-pane .vis-cloud-real-name{display:block;font-weight:400;color:#ada3c8;font-size:10px;overflow-wrap:anywhere}
+.vis-cloud-pane .vis-cloud-menu-button{min-width:29px;min-height:29px;font-size:19px;padding:2px 6px;border:1px solid #4b3b65;border-radius:9px;background:transparent;line-height:1}
+.vis-cloud-pane .vis-cloud-menu-button:hover{background:#4f3a72}
+.vis-cloud-pane .vis-cloud-chat-row{display:flex;align-items:center;gap:6px;min-width:0}
+.vis-cloud-pane .vis-cloud-chat-row .vis-cloud-chatitem{flex:1;width:auto;min-width:0;display:flex;align-items:center;justify-content:space-between;overflow-wrap:anywhere}
+.vis-cloud-pane .vis-cloud-chatitem small{display:block;margin-top:3px}
+.vis-cloud-pane .vis-cloud-context-menu{position:fixed;z-index:4000;width:204px;max-height:min(390px,90vh);overflow-y:auto;box-shadow:0 16px 42px #080313bb;background:#231933;border:1px solid #826aa9;border-radius:12px;padding:6px;display:grid;gap:3px}
+.vis-cloud-pane .vis-cloud-context-menu button[role=menuitem]{width:100%;background:transparent;border:0;text-align:left;border-radius:7px;min-height:32px;padding:8px 10px;color:#ede3ff;font-size:12px}
+.vis-cloud-pane .vis-cloud-context-menu button[role=menuitem]:hover,.vis-cloud-pane .vis-cloud-context-menu button[role=menuitem]:focus-visible{background:#544071}
+.vis-cloud-pane .vis-cloud-menu-divider{height:1px;margin:4px 6px;background:#54456d}
+.vis-cloud-pane .vis-cloud-nickname-form{border:1px solid #725b99;border-radius:11px;background:#291e3e;padding:11px;display:grid;gap:9px}
+.vis-cloud-pane .vis-cloud-nickname-form label{font-size:11px;color:#d9c8f5;display:grid;gap:6px}
+.vis-cloud-pane .vis-cloud-nickname-actions{display:flex;gap:8px}
+.vis-cloud-pane .vis-cloud-nickname-actions button{flex:1}
