@@ -93,6 +93,14 @@ def package(release_dir: Path, horizon_dir: Path, *, slim: bool = False) -> tupl
         dest = app_dir / Path(relative)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, dest)
+    if slim:
+        metadata = horizon_dir.parent / "vis-rust-runtime.json"
+        if not metadata.is_file():
+            raise RuntimeError("El portable ligero necesita el manifiesto verificado VIS Rust Edition")
+        data = json.loads(metadata.read_text(encoding="utf-8"))
+        if data.get("format") != 1 or data.get("source_repo") != "https://github.com/horizon-rust/horizon.git":
+            raise RuntimeError("No se compiló el manifiesto válido de Rust Edition")
+        shutil.copy2(metadata, app_dir / "vis-rust-runtime.json")
     (app_dir / ".vis-portable").write_text("VIS Nexo portable v1\n", encoding="utf-8")
     (app_dir / "LEEME - VIS Nexo Portable.txt").write_text(
         ("VIS NEXO PARA WINDOWS - SIN INSTALADOR\n"
@@ -121,6 +129,8 @@ def package(release_dir: Path, horizon_dir: Path, *, slim: bool = False) -> tupl
             raise RuntimeError(f"ZIP corrupto: {bad}")
         names = set(target.namelist())
         required = {"VIS Nexo.exe", ".vis-portable"}
+        if slim:
+            required.add("vis-rust-runtime.json")
         if not slim:
             required.update({"horizon/horizon-client.exe", "horizon/horizon-prepare.exe",
                              "horizon/research-lock.json", "horizon/vis-horizon-source.json"})
