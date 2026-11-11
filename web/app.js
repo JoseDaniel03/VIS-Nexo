@@ -288,7 +288,7 @@ function socialPanel(){
  <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
  <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
  <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span></div>
- <label class="social-small-title" for="social-presence">TU ESTADO</label><div class="presence-picker">${I('circle',16)}<select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select>${I('chevrondown',14)}</div>
+ <label class="social-small-title" for="social-presence">TU ESTADO</label><div class="presence-picker"><button type="button" class="icon-btn" data-action="social-custom-status" title="Editar estado personalizado" aria-label="Editar estado personalizado">${I('edit',14)}</button>${I('circle',16)}<select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select>${I('chevrondown',14)}</div>
  <div class="social-group-head"><span>${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'}</span><span>${friends.length}</span></div>
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
@@ -655,10 +655,15 @@ function render(){
  const keepScroll=old&&old.screen===next.screen;
  const mainScrollTop=keepScroll?currentMain?.scrollTop:0;
  const chatScrollTop=currentChat?.scrollTop||0;
+ const composeDraft=root.querySelector('#message-form [name="body"]')?.value;
  const wasAtBottom=currentChat?currentChat.scrollHeight-currentChat.scrollTop-currentChat.clientHeight<30:true;
  document.title=`VIS Nexo${db.user?` · ${displayAccount(db.user.username)}`:''}`;
  document.body.classList.toggle('reduce-motion',!!prefs.reducedMotion);
  root.innerHTML=db.user?shell():loginView();
+ if(composeDraft!=null&&next.chatWith===old?.chatWith){
+   const input=root.querySelector('#message-form [name="body"]');
+   if(input)input.value=composeDraft;
+ }
  if(dialog?.type==='crop')startCropCanvas();
  if(keepScroll)root.querySelector('#main-scroll')?.scrollTo({top:mainScrollTop||0,behavior:'instant'});
  const newChat=root.querySelector('.chat-messages');
@@ -795,7 +800,7 @@ root.addEventListener('change',async event=>{
  else if(wizard&&el instanceof HTMLElement&&el.matches('[data-visible]')){wizard.visible_sections ||= {};wizard.visible_sections[el.dataset.visible]=el.checked;}
  else if(wizard&&el instanceof HTMLElement&&el.matches('[data-field]')) {if(el.dataset.field==='versions_csv')wizard.versions=el.value.split(',').map(s=>s.trim()).filter(Boolean).slice(0,30);else wizard[el.dataset.field]=el.type==='checkbox'?el.checked:el.value;}
 });
-root.addEventListener('input',e=>{if(e.target?.id==='friend-filter'){friendFilter=e.target.value;document.querySelectorAll('.friend-item').forEach(item=>{item.hidden=!item.dataset.id.toLowerCase().includes(friendFilter.toLowerCase());});}});
+root.addEventListener('input',e=>{if(e.target?.id==='friend-filter'){friendFilter=e.target.value;document.querySelectorAll('.friend-item').forEach(item=>{item.hidden=!(item.dataset.id+' '+item.textContent).toLowerCase().includes(friendFilter.toLowerCase());});}});
 root.addEventListener('submit',async event=>{
  const form=event.target;
  if(!(form instanceof HTMLFormElement))return;
@@ -887,6 +892,15 @@ root.addEventListener('click',async event=>{
  else if(act==='open-chat'){chatWith=id;chatWindowSize=100;render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';render();},{reducedMotion:prefs.reducedMotion});}
+ else if(act==='social-custom-status'){
+  if(!social.connected()){message('Conectá VIS Social para usar estados personalizados.',true);return;}
+  const current=social.state();
+  const custom=window.prompt('Estado personalizado (máximo 160 caracteres):',current?.custom_status||'');
+  if(custom!==null){
+    try{await social.setPresence(db.user?.presence||'online',custom,current?.current_game||'');}
+    catch(error){message(String(error),true);}
+  }
+ }
  else if(act==='accept-friend'){
   if(!social.connected())await apply('accept_friend',{username:id},'Solicitud local aceptada');
   else try{await social.acceptFriend(id);message('Solicitud aceptada');}
@@ -1039,8 +1053,21 @@ root.addEventListener('click',async event=>{
   else if(dialog?.kind==='instance'){const ok=await apply('delete_instance',{projectId:dialog.projectId,name:dialog.name},'Instancia eliminada');if(ok){dialog=null;render();}}
  }
 });
-root.addEventListener('contextmenu',e=>{
- if(!(e.target instanceof Element)||!isAdmin())return;
+root.addEventListener('contextmenu',async e=>{
+ if(!(e.target instanceof Element))return;
+ const friend=e.target.closest('.friend-item');
+ if(friend&&social.connected()){
+   e.preventDefault();
+   const username=friend.dataset.id;
+   const previous=db.friends.find(f=>f.username===username)?.alias||'';
+   const alias=window.prompt('Apodo privado para '+username+' (vacío para quitarlo):',previous);
+   if(alias!==null){
+     try{await social.setAlias(username,alias);}
+     catch(error){message(String(error),true);}
+   }
+   return;
+ }
+ if(!isAdmin())return;
  const proj=e.target.closest('[data-context]');if(!proj)return;
  e.preventDefault();contextMenu={id:proj.dataset.context,x:e.clientX,y:e.clientY};render();
 });
