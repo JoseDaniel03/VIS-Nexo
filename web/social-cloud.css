@@ -1,0 +1,45 @@
+/* VIS Humile: live social panel extending existing VIS Nexo dark-purple sidebar. */
+.vis-cloud-pane { display:flex; flex-direction:column; min-height:0; }
+.vis-cloud-pane #vis-social-root { min-height:0; flex:1; overflow-y:auto; padding:0 13px 20px; scrollbar-width:thin; }
+.vis-cloud-pane .vis-cloud-intro {display:grid;gap:7px;padding:16px 4px;color:#eeeafa}
+.vis-cloud-pane .vis-cloud-intro b{font-size:16px;letter-spacing:.01em}
+.vis-cloud-pane .vis-cloud-intro small,.vis-cloud-pane .vis-social-note{color:#bcb3d5;font-size:12px;line-height:1.5}
+.vis-cloud-pane .vis-cloud-form {display:grid;gap:10px;margin:12px 2px;padding:14px 12px;border:1px solid #483a66;border-radius:12px;background:#211832}
+.vis-cloud-pane label{display:grid;gap:6px;color:#d5cbe8;font-size:12px}
+.vis-cloud-pane input{min-width:0;box-sizing:border-box;width:100%;border:1px solid #51436c;border-radius:8px;padding:10px 12px;background:#140e25;color:#fff;font:inherit;font-size:13px}
+.vis-cloud-pane input:focus-visible,.vis-cloud-pane button:focus-visible{outline:2px solid #a88cff;outline-offset:2px}
+.vis-cloud-pane button{cursor:pointer;border:1px solid #6c53aa;border-radius:8px;background:#6c43b5;color:#fff;padding:8px 10px;font:inherit;font-size:12px}
+.vis-cloud-pane button:hover{background:#8257cf}
+.vis-cloud-pane button.secondary,.vis-cloud-pane .vis-cloud-mini{background:#261c3a;border-color:#54426e}
+.vis-cloud-pane button.vis-cloud-link{border:0;background:transparent;color:#bea8ef;margin:8px 0}
+.vis-cloud-pane .vis-cloud-actions{display:flex;gap:8px;flex-wrap:wrap}
+.vis-cloud-pane .vis-cloud-error{border-left:3px solid #f28caf;background:#3b1d3d;color:#ffd8e6;padding:11px;margin-top:10px;border-radius:4px;font-size:12px}
+.vis-cloud-pane .vis-cloud-identity{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:12px 0;border-bottom:1px solid #413453}
+.vis-cloud-pane .vis-cloud-identity span{font-weight:700;color:#e9ddff;font-size:12px;overflow-wrap:anywhere}
+.vis-cloud-pane .vis-cloud-identity small{color:#ae9fcf;font-size:10px}
+.vis-cloud-pane .vis-cloud-identity button{background:transparent;padding:5px}
+.vis-cloud-pane .vis-social-block{padding-top:13px;margin-top:8px;border-top:1px solid #413453;display:grid;gap:8px}
+.vis-cloud-pane .vis-social-block h4{font-size:11px;text-transform:uppercase;color:#d1bddf;letter-spacing:.06em;margin:3px 0}
+.vis-cloud-pane .vis-social-block h4 small{font-weight:400;color:#9f8fb9}
+.vis-cloud-pane .vis-cloud-inline{display:flex;gap:5px;min-width:0}
+.vis-cloud-pane .vis-cloud-inline input{flex:1}
+.vis-cloud-pane .vis-social-row{display:flex;align-items:center;gap:6px;min-height:36px}
+.vis-cloud-pane .vis-social-row>button:not(.vis-cloud-mini){display:flex;flex:1;min-width:0;flex-direction:column;text-align:left;border:0;background:transparent;padding:5px 4px;font-weight:600}
+.vis-cloud-pane .vis-social-row>button small{font-weight:400;color:#a99bc4;font-size:10px}
+.vis-cloud-pane .vis-social-row>span:not(.vis-presence-dot){flex:1;overflow-wrap:anywhere}
+.vis-cloud-pane .vis-social-row .vis-cloud-mini{padding:5px 8px;flex-shrink:0}
+.vis-cloud-pane .vis-presence-dot{width:7px;height:7px;border-radius:50%;background:#7c7391}
+.vis-cloud-pane .vis-presence-dot.is-online{background:#60d4ab;box-shadow:0 0 0 2px #60d4ab22}
+.vis-cloud-pane .vis-cloud-chatitem{display:flex;align-items:center;justify-content:space-between;text-align:left;width:100%;background:#291c43;border-color:#45335e}
+.vis-cloud-pane .vis-cloud-chatitem.selected{border-color:#9975dd;background:#3d2c5f}
+.vis-cloud-pane .vis-cloud-unread{background:#ae7cff;color:#140d21;border-radius:20px;min-width:15px;text-align:center;font-size:10px;padding:2px 4px}
+.vis-cloud-pane .vis-cloud-thread{margin-top:13px;border:1px solid #5c487a;background:#181127;border-radius:12px;overflow:hidden}
+.vis-cloud-pane .vis-cloud-thread-head{display:flex;align-items:center;justify-content:space-between;padding:9px 10px;border-bottom:1px solid #4b3d62;font-size:12px}
+.vis-cloud-pane .vis-cloud-thread-head button{padding:3px 8px;background:transparent}
+.vis-cloud-pane .vis-cloud-messages{height:200px;overflow:auto;display:grid;align-content:start;gap:9px;padding:10px}
+.vis-cloud-pane .vis-cloud-bubble{background:#33254a;padding:9px 11px;border-radius:9px;max-width:95%;display:grid;gap:5px;font-size:12px;overflow-wrap:anywhere}
+.vis-cloud-pane .vis-cloud-bubble.mine{background:#553888;margin-left:auto}
+.vis-cloud-pane .vis-cloud-bubble b{font-size:10px;color:#dfcafd}
+.vis-cloud-pane .vis-cloud-bubble small{font-size:9px;color:#b6a8cb}
+.vis-cloud-pane .vis-cloud-thread>.vis-cloud-inline{padding:8px;border-top:1px solid #49385f}
+@media(max-width:980px){.vis-cloud-pane #vis-social-root{max-height:calc(100vh - 150px)}}
