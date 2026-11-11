@@ -10,6 +10,7 @@ let renderedChatId = "", olderScroll = null;
 let statusDraft = null;
 let cloudActive = false;
 const runningGames = new Map(); // pid => { engine, project }; never supplied by user input.
+const exitedBeforeLaunchAck = new Set(); // A fast crash can arrive before the launch promise resolves.
 let activityHeartbeat = null;
 let activityGeneration = 0;
 const gameName = engine => engine === "rust" ? "Minecraft Rust Edition" : "Minecraft Java";
@@ -31,11 +32,16 @@ async function publishGameActivity() {
 }
 export function socialGameStarted({ pid, engine, project = "" }) {
   if (!Number.isSafeInteger(pid) || pid <= 0 || !["java", "rust"].includes(engine)) return;
+  if (exitedBeforeLaunchAck.has(pid)) return; // Do not report a crashed game as running.
   runningGames.set(pid, { engine, project: String(project).slice(0, 64) });
   void publishGameActivity();
 }
 export function socialGameStopped(pid) {
-  if (!runningGames.delete(Number(pid))) return;
+  const gamePid = Number(pid);
+  if (!Number.isSafeInteger(gamePid) || gamePid <= 0) return;
+  exitedBeforeLaunchAck.add(gamePid);
+  setTimeout(() => exitedBeforeLaunchAck.delete(gamePid), 30000);
+  if (!runningGames.delete(gamePid)) return;
   void publishGameActivity();
 }
 function captureCustomDraft() {
@@ -186,7 +192,7 @@ function startLive() {
     if (token && currentGame()) void publishGameActivity();
   }, 75000);
   void connect();
-  if (currentGame()) void publishGameActivity();
+  void publishGameActivity(); // Also clears an old activity after a launcher crash.
 }
 function banner(title, detail) {
   return '<div class="vis-cloud-intro"><b>' + esc(title) + '</b><small>' + esc(detail) + '</small></div>';
@@ -222,7 +228,9 @@ function friendList() {
   markup += '<form data-cloud-form="friend" class="vis-cloud-inline"><input name="username" maxlength="24" placeholder="Agregar por usuario" required>' +
     '<button aria-label="Enviar solicitud">+</button></form>';
   for (const friend of friends) {
-    markup += '<div class="vis-social-row"><span class="vis-presence-dot ' + (friend.online ? "is-online" : "") + '"></span>' +
+    markup += '<div class="vis-social-row"><span class="vis-presence-dot ' +
+      (friend.online ? (friend.presence === "away" ? "is-away" : friend.presence === "busy" ? "is-busy" : "is-online") : "") +
+      '"></span>' +
       '<button data-cloud="chat-friend" data-name="' + key(friend.username) + '">' + esc(friend.username) +
       '<small>' + esc(stateLabel(friend)) + '</small>' +
       (friend.online && friend.custom_status ? '<small class="vis-cloud-custom">' + esc(friend.custom_status) + '</small>' : '') +
