@@ -31,7 +31,7 @@ pub struct Friendship {
     pub accepted: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalMessage {
     pub from: String,
     pub to: String,
