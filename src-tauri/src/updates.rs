@@ -21,20 +21,31 @@ fn manifest_url()->Result<Option<url::Url>,String>{
     if url.scheme()!="https" {return Err("El manifiesto de actualizaciones requiere HTTPS".into())}
     Ok(Some(url))
 }
-/// A portable ZIP must not invoke the updater's NSIS installer. A marker next
-/// to the executable selects the portable channel without a second Rust build.
+/// AppImages and Windows ZIP releases are portable: neither invokes a Tauri
+/// installer/update mechanism. Updating means replacing the launcher files.
 fn portable_mode()->bool{
-    if !cfg!(target_os="windows"){return false;}
-    std::env::current_exe().ok()
-        .and_then(|binary|binary.parent().map(|dir|dir.join(".vis-portable").is_file()))
-        .unwrap_or(false)
+    #[cfg(target_os="linux")]
+    {
+        // The AppImage launcher exports APPIMAGE even if started from the
+        // portable shell wrapper. There is no .deb/.rpm installer to switch to.
+        if std::env::var_os("APPIMAGE").is_some() || std::env::var_os("VIS_NEXO_PORTABLE").is_some() {
+            return true;
+        }
+    }
+    #[cfg(target_os="windows")]
+    {
+        return std::env::current_exe().ok()
+            .and_then(|binary|binary.parent().map(|dir|dir.join(".vis-portable").is_file()))
+            .unwrap_or(false);
+    }
+    false
 }
 pub fn enabled()->bool{!portable_mode() && manifest_url().ok().flatten().is_some()}
 pub async fn check(app:&AppHandle)->Result<UpdateInfo,String>{
     let version=app.package_info().version.to_string();
     if portable_mode(){
         return Ok(UpdateInfo{configured:false,current_version:version,available:false,version:String::new(),
-            notes:"Versión portable: actualizá reemplazando la carpeta ZIP completa".into()});
+            notes:"Versión portable: actualizá reemplazando el ZIP o TAR.GZ completo".into()});
     }
     let Some(endpoint)=manifest_url()? else{return Ok(UpdateInfo{configured:false,current_version:version,available:false,version:String::new(),notes:String::new()})};
     let updater=app.updater_builder().endpoints(vec![endpoint]).map_err(|e|e.to_string())?
@@ -69,7 +80,7 @@ fn backup_before_update(app:&AppHandle)->Result<(),String>{
     Ok(())
 }
 pub async fn install(app:&AppHandle)->Result<(),String>{
-    if portable_mode(){return Err("La edición portable no usa instaladores: descargá el nuevo ZIP y reemplazá la carpeta con VIS cerrado.".into());}
+    if portable_mode(){return Err("La edición portable no usa instaladores: descargá el nuevo ZIP o TAR.GZ y reemplazá la carpeta con VIS cerrado.".into());}
     let Some(endpoint)=manifest_url()? else{return Err("El canal de actualizaciones no está configurado".into())};
     let updater=app.updater_builder().endpoints(vec![endpoint]).map_err(|e|e.to_string())?
         .timeout(std::time::Duration::from_secs(60)).build().map_err(|e|e.to_string())?;
