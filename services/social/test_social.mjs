@@ -55,6 +55,6 @@ test("Statuses and game labels reject controls, markup and oversized text", () =
   assert.equal(validCustomStatus("<b>unsafe</b>"), false);
   assert.equal(validGameProject("Virgoland 26.3"), true);
   assert.equal(validGameProject("x".repeat(65)), false);
-  assert.equal(validGameProject("Incorrecto\\u0000"), true);
+  assert.equal(validGameProject("Incorrecto" + String.fromCharCode(0)), false);
   assert.equal(validGameProject("<img src=x>"), false);
 });
