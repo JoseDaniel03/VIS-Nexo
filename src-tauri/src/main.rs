@@ -516,7 +516,7 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
             let existing_dir=minecraft::instance_dir(&s.data_root,&username,previous)?;
             if existing_dir==dir ||
                (s.guest_name.is_some()&&(existing_dir.starts_with(&dir)||dir.starts_with(&existing_dir))) {
-                return Err("Otra instancia ya usa esta carpeta o una subcarpeta. Elegí una ruta independiente.".into());
+                return Err("Otra instancia ya usa esa carpeta o una subcarpeta. Elegí una ruta independiente.".into());
             }
         }
     }
