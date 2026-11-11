@@ -76,12 +76,21 @@ function logOf(id) {
   if (!account || !endpointReady()) return { messages: [], unread: 0, bytes: 0, latest: 0 };
   return loadLocalChat(localStorage, endpoint, account.id, id);
 }
+function isThreadVisible() {
+  return !!chatId && !!mounted?.isConnected &&
+    !mounted.closest(".vis-cloud-pane")?.classList.contains("is-hidden") &&
+    !document.hidden && document.hasFocus();
+}
 function activateChat(id) {
   chatId = id; chatBefore = null;
-  const log = markLocalChatRead(localStorage, endpoint, account.id, id);
+  // Never mark messages read while VIS is minimized or the social pane is hidden.
+  const visible = isThreadVisible();
+  const log = visible
+    ? markLocalChatRead(localStorage, endpoint, account.id, id)
+    : logOf(id);
   chatMessages = log.messages;
   const active = snapshot?.chats?.find(c => c.id === id);
-  if (active) active.unread = 0;
+  if (active) active.unread = log.unread;
 }
 function localInboxSnapshot(data) {
   if (!account) return;
@@ -142,7 +151,6 @@ export function syncSocialOwner(name, guest = false) {
   cloudActive = false; activityGeneration++; runningGames.clear();
   localOwner = next; token = ""; account = null; snapshot = null; chatId = ""; chatMessages = [];
   chatDrafts.clear(); renderedChatId = ""; olderScroll = null; statusDraft = null;
-  contextMenu = null; nicknameEditor = null;
   contextMenu = null; nicknameEditor = null;
   stopSocket(); stopPolling();
 }
@@ -706,6 +714,13 @@ document.addEventListener("pointerdown", event => {
     draw();
   }
 });
+function readVisibleThread() {
+  if (!account || !token || !isThreadVisible()) return;
+  try { activateChat(chatId); draw(); }
+  catch (err) { showError("No se pudo actualizar el chat local: " + String(err.message || err)); }
+}
+document.addEventListener("visibilitychange", readVisibleThread);
+window.addEventListener("focus", readVisibleThread);
 const observer = new MutationObserver(mount);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 mount();
