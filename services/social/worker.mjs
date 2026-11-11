@@ -105,7 +105,6 @@ async function getSession(request, db) {
   return { ...user, tokenHash };
 }
 async function register(request, db) {
-  await rateLimit(db, request, "register", 8);
   const body = await parseBody(request);
   const username = normalName(body.username);
   if (!await verifySignature(body.public_key, body.signature,
@@ -115,6 +114,7 @@ async function register(request, db) {
     if (current.signing_public_key !== body.public_key) bad(409, "Username already registered on another device");
     return reply({ ok: true, username, existing: true });
   }
+  await rateLimit(db, request, "register", 8);
   const id = crypto.randomUUID();
   try {
     await db.prepare(
@@ -225,6 +225,7 @@ async function lookupUser(db, username) {
   return user;
 }
 async function friendRequest(request, db, user) {
+  await rateLimit(db, request, "friend-request:" + user.id, 30);
   const { username } = await parseBody(request);
   const peer = await lookupUser(db, username);
   if (peer.id === user.id) bad(400, "Cannot add yourself");
@@ -286,6 +287,7 @@ async function presence(request, db, user) {
   return reply({ ok: true });
 }
 async function sendMessage(request, db, user) {
+  await rateLimit(db, request, "send:" + user.id, 60);
   const body = await parseBody(request);
   const peer = await lookupUser(db, body.to);
   if (!await areFriends(db, user.id, peer.id)) bad(403, "Messages require friendship");
@@ -299,6 +301,10 @@ async function sendMessage(request, db, user) {
       !/^[A-Za-z0-9+/]{16}$/.test(parsed.iv) || parsed.ct.length < 24 ||
       !/^[A-Za-z0-9+/]*={0,2}$/.test(parsed.ct)) bad(400, "Invalid encrypted envelope");
   // The server cannot decrypt or read the message plaintext.
+  const pending = await db.prepare(
+    "SELECT count(*) AS n FROM pending_messages WHERE recipient_id=? AND expires_at>? AND acknowledged_at IS NULL"
+  ).bind(peer.id, now()).first();
+  if (pending && pending.n >= 500) bad(429, "Recipient inbox is full; retry later");
   await db.prepare(
     "INSERT OR IGNORE INTO pending_messages " +
     "(id,sender_id,recipient_id,client_message_id,payload,expires_at) VALUES (?,?,?,?,?,?)"
