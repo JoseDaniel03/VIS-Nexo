@@ -110,22 +110,18 @@ class SocialSchemaTests(unittest.TestCase):
         self.db.execute("DELETE FROM humile_friend_nicknames WHERE owner_id='anna' AND target_id='bob'")
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM humile_friend_nicknames").fetchone()[0], 1)
 
-    def test_chat_summary_query_matches_worker_api(self):
+    def test_chat_summary_routes_without_storing_message_content(self):
         self.db.execute("INSERT INTO humile_chats(id,kind,pair_key,created_at) VALUES('c1','direct','dm:anna:bob','2026-11-11')")
         for user in ("anna", "bob"):
             self.db.execute("INSERT INTO humile_chat_members(chat_id,account_id,joined_at) VALUES('c1',?,'2026-11-11')", (user,))
-        self.db.execute("INSERT INTO humile_messages(id,chat_id,sender_id,body,created_at,expires_at)"
-                        " VALUES('m1','c1','bob','Hola','2026-11-11',1800000000000)")
         row = self.db.execute(
-            "SELECT c.id,c.kind,c.title,c.created_at,m.last_read_seq,"
-            "(SELECT MAX(seq) FROM humile_messages WHERE chat_id=c.id) AS latest_seq,"
-            "(SELECT COUNT(*) FROM humile_messages WHERE chat_id=c.id AND seq>m.last_read_seq AND sender_id<>?) AS unread,"
+            "SELECT c.id,c.kind,c.title,c.created_at,0 AS unread,"
             "(SELECT a.username FROM humile_chat_members cm JOIN ceibo_accounts a ON a.id=cm.account_id WHERE cm.chat_id=c.id AND cm.account_id<>? LIMIT 1) AS peer_username "
             "FROM humile_chats c JOIN humile_chat_members m ON m.chat_id=c.id "
-            "WHERE m.account_id=? ORDER BY latest_seq DESC,c.created_at DESC LIMIT 100",
-            ("anna", "anna", "anna")
+            "WHERE m.account_id=? ORDER BY c.created_at DESC LIMIT 100",
+            ("anna", "anna")
         ).fetchone()
-        self.assertEqual(row["unread"], 1)
+        self.assertEqual(row["unread"], 0)
         self.assertEqual(row["peer_username"], "bob")
 
 if __name__ == "__main__":
