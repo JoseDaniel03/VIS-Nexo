@@ -1,0 +1,27 @@
+name: VIS Social - checks
+on:
+  pull_request:
+    paths:
+      - 'services/social/**'
+      - 'web/social-cloud.js'
+      - 'web/social-cloud.css'
+      - 'web/app.js'
+      - '.github/workflows/vis-social-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/social/**'
+      - 'web/social-cloud.js'
+      - 'web/app.js'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check services/social/worker.mjs
+      - run: node --check web/social-cloud.js
+      - run: node --check web/app.js
+      - run: node --test services/social/test_social.mjs
