@@ -217,7 +217,18 @@ async function main() {
   });
   socket.close();
   await closed;
-  await sleep(150); // Give the Durable Object a chance to remove the socket.
+  // A WebSocket closing locally does not instantly mean its Durable Object
+  // removed the connection. Wait for server-observed offline presence.
+  let offline = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const state = await call("/v1/social", "GET", undefined, alice.token);
+    if (state.friends.find(item => item.other_id === bob.account.id)?.online === false) {
+      offline = true;
+      break;
+    }
+    await sleep(150);
+  }
+  assert.equal(offline, true, "SocialHub must release the disconnected socket");
   await call("/v1/chats/" + direct.id + "/messages", "POST",
     { body: "No se entrega offline" }, alice.token, 409);
   assert.deepEqual((await call("/v1/chats/" + direct.id + "/messages", "GET",
