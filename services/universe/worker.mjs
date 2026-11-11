@@ -60,6 +60,16 @@ export default { fetch: async function universeServe(request, env) {
       input.posts.some(x=>!x||typeof x.title!=="string"||x.title.length>120||typeof x.body!=="string"||x.body.length>4000)||
       input.calendar.some(x=>!x||typeof x.title!=="string"||x.title.length>120||typeof x.description!=="string"||x.description.length>4000))
       return reply({error:"Invalid project"},400);
+    // The catalog is public. Bound remote manifests so clients never receive
+    // unbounded mod queues, arbitrary URLs or a mixed loader configuration.
+    const content=[input.required_mods??[],input.required_resourcepacks??[],input.required_shaders??[]];
+    if(content.some(list=>!Array.isArray(list))||
+       content.reduce((count,list)=>count+list.length,0)>32 ||
+       content.some(list=>list.some(id=>typeof id!=="string"||id.length<1||id.length>80||!/^[a-z0-9_-]+$/i.test(id)||
+          list.filter(x=>typeof x==="string"&&x.toLowerCase()===id.toLowerCase()).length!==1))||
+       (input.engine==="horizon"&&content.some(list=>list.length))||
+       (input.loader!=="fabric"&&content[0].length))
+      return reply({error:"Invalid project content"},400);
     ids.add(input.id);
     const project=structuredClone(input);
     try{for(const field of ["banner_path","logo_path","icon_path"])project[field]=await publishImage(project[field]);}
