@@ -70,14 +70,16 @@ jobs:
           [[ "$VIS_HORIZON_REF" =~ ^[0-9a-fA-F]{40}$ ]] || { echo 'Configure VIS_HORIZON_COMMIT (40 hex SHA) to ship the same game source on Windows/Linux'; exit 1; }
       - name: Build Minecraft Horizon GAME from the pinned official Rust sources
         run: npm run horizon:source
-      - name: Verify bundled game's source manifest
+      - name: Verify official Rust Edition game source
         run: npm run horizon:verify
+      - name: Separate optional Rust Edition engine and embed SHA-256 download manifest
+        run: python tools/package_vis_rust_engine.py --release-tag ${{ github.ref_name }}
       - name: Build Linux AppImage only (no installer)
         if: runner.os == 'Linux'
         run: npm run build -- --bundles appimage --config src-tauri/tauri.unsigned.json
-      - name: Verify bundled official Horizon and pack Linux portable archive
+      - name: Package Linux launcher without game binaries
         if: runner.os == 'Linux'
-        run: python tools/package_linux_portable.py
+        run: python tools/package_linux_portable.py --slim
       - name: Report Linux download size — goal 50 MB, maximum 150 MB
         if: runner.os == 'Linux'
         run: |
@@ -93,6 +95,7 @@ jobs:
           files: |
             target/release/portable-linux/VIS-Nexo-Linux-x86_64-Portable.tar.gz
             target/release/bundle/appimage/*.AppImage
+            target/release/rust-engine/VIS-Rust-Edition-Linux-x86_64-Engine.tar.gz
           fail_on_unmatched_files: true
           overwrite_files: true
       - name: Build Windows portable (no setup, no NSIS)
@@ -100,7 +103,7 @@ jobs:
         run: npm run build -- --no-bundle --config src-tauri/tauri.unsigned.json
       - name: Package Windows with Horizon verified source
         if: runner.os == 'Windows'
-        run: python tools/package_windows_portable.py
+        run: python tools/package_windows_portable.py --slim
       - name: Report Windows download size — goal 50 MB, maximum 150 MB
         if: runner.os == 'Windows'
         run: python tools/check_portable_size.py target/release/portable/VIS-Nexo-Windows-x64-Portable.zip --strict
@@ -110,6 +113,8 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: VIS Nexo ${{ github.ref_name }}
-          files: target/release/portable/VIS-Nexo-Windows-x64-Portable.zip
+          files: |
+            target/release/portable/VIS-Nexo-Windows-x64-Portable.zip
+            target/release/rust-engine/VIS-Rust-Edition-Windows-x64-Engine.zip
           fail_on_unmatched_files: true
           overwrite_files: true
