@@ -69,6 +69,9 @@ async function refresh() {
     if (chatId) {
       const messages = await api("/v1/chats/" + encodeURIComponent(chatId) + "/messages");
       chatMessages = messages.messages || []; chatBefore = messages.before;
+      await api("/v1/chats/" + encodeURIComponent(chatId) + "/read", "POST", {});
+      const active = data.chats?.find(c => c.id === chatId);
+      if (active) active.unread = 0;
     }
     draw();
   } catch (err) { showError(err.message); }
@@ -115,7 +118,7 @@ function configForm() {
 function accountForm() {
   return banner("VIS Ceibo", "La cuenta social online requiere contraseña; el nickname offline no autentica en la nube.") +
     '<form data-cloud-form="auth" class="vis-cloud-form">' +
-    '<label>Usuario<input name="username" maxlength="24" minlength="3" autocomplete="username" required placeholder="Tu usuario VIS"></label>' +
+    '<label>Usuario<input name="username" maxlength="24" minlength="3" autocomplete="username" value="\' + esc(localOwner) + \'" required placeholder="Tu usuario VIS"></label>' +
     '<label>Contraseña<input name="password" type="password" autocomplete="current-password" minlength="12" required placeholder="12 caracteres o más"></label>' +
     '<div class="vis-cloud-actions"><button name="mode" value="login">Entrar</button>' +
     '<button name="mode" value="register" class="secondary">Crear cuenta online</button></div></form>' +
@@ -157,7 +160,7 @@ function friendList() {
 function chatList() {
   let markup = '<section class="vis-social-block"><h4>Conversaciones</h4>';
   for (const chat of snapshot?.chats || []) {
-    const label = chat.kind === "group" ? chat.title : "Chat privado";
+    const label = chat.kind === "group" ? chat.title : (chat.peer_username || "Chat privado");
     markup += '<button class="vis-cloud-chatitem ' + (chatId === chat.id ? "selected" : "") +
       '" data-cloud="open-chat" data-id="' + key(chat.id) + '">' + esc(label) +
       (chat.unread ? '<b class="vis-cloud-unread">' + Number(chat.unread) + '</b>' : "") + '</button>';
