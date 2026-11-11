@@ -763,18 +763,23 @@ fn save_cropped_asset(state: State<'_, Mutex<Backend>>, data_url: String, kind: 
     if let Some(ref id) = project_id {
         if slug(id) != *id { return Err("ID de proyecto inválido".into()); }
     }
-    let payload = data_url.strip_prefix("data:image/png;base64,")
-        .ok_or_else(|| "El recorte debe ser PNG".to_string())?;
+    let (mime, ext, payload) = if let Some(payload) = data_url.strip_prefix("data:image/webp;base64,") {
+        ("image/webp", "webp", payload)
+    } else if let Some(payload) = data_url.strip_prefix("data:image/png;base64,") {
+        ("image/png", "png", payload)
+    } else {
+        return Err("Los recortes deben ser WebP o PNG".into());
+    };
     if payload.is_empty() || payload.len() > 16 * 1024 * 1024 { return Err("Recorte demasiado grande".into()); }
-    let bytes = STANDARD.decode(payload).map_err(|_| "PNG no válido".to_string())?;
-    if bytes.len() > 12 * 1024 * 1024 || !image_magic_ok("image/png", &bytes) {
-        return Err("Recorte PNG incorrecto o demasiado grande".into());
+    let bytes = STANDARD.decode(payload).map_err(|_| "Imagen base64 no válida".to_string())?;
+    if bytes.len() > 12 * 1024 * 1024 || !image_magic_ok(mime, &bytes) {
+        return Err("Recorte WebP/PNG incorrecto o demasiado grande".into());
     }
     let directory = asset_dir(&s);
     fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
     let owner = project_id.as_deref().unwrap_or(&username);
-    let target = directory.join(format!("{}-{}-crop-{}.png",slug(owner),kind,stamp));
+    let target = directory.join(format!("{}-{}-crop-{}.{}",slug(owner),kind,stamp,ext));
     fs::write(&target,&bytes).map_err(|e|e.to_string())?;
     let target_string = target.to_string_lossy().into_owned();
     if personal {
@@ -784,7 +789,7 @@ fn save_cropped_asset(state: State<'_, Mutex<Backend>>, data_url: String, kind: 
         }
         s.storage.save()?;
     }
-    Ok(AssetReply {path:target_string,data_url:format!("data:image/png;base64,{}",STANDARD.encode(&bytes))})
+    Ok(AssetReply {path:target_string,data_url:format!("data:{mime};base64,{}",STANDARD.encode(&bytes))})
 }
 /// Removes an image assignment, not the original imported file. Existing files remain reusable.
 #[tauri::command]
