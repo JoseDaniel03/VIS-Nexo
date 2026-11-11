@@ -66,6 +66,8 @@ jobs:
           npm run check:release
       - name: Portable download size-policy tests
         run: python tools/test_portable_size.py
+      - name: Optional Rust Edition game runtime integrity tests
+        run: python tools/test_vis_rust_engine.py
       - name: Windows portable payload regression tests
         run: python tools/test_windows_portable.py
       - name: Linux portable payload and executable-permission tests
