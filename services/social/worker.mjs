@@ -165,10 +165,11 @@ async function socialSnapshot(request, env, me) {
   const chats = await db.prepare(
     "SELECT c.id,c.kind,c.title,c.created_at,m.last_read_seq," +
     "(SELECT MAX(seq) FROM humile_messages WHERE chat_id=c.id) AS latest_seq," +
-    "(SELECT COUNT(*) FROM humile_messages WHERE chat_id=c.id AND seq>m.last_read_seq) AS unread " +
+    "(SELECT COUNT(*) FROM humile_messages WHERE chat_id=c.id AND seq>m.last_read_seq AND sender_id<>?) AS unread," +
+    "(SELECT a.username FROM humile_chat_members cm JOIN ceibo_accounts a ON a.id=cm.account_id WHERE cm.chat_id=c.id AND cm.account_id<>? LIMIT 1) AS peer_username " +
     "FROM humile_chats c JOIN humile_chat_members m ON m.chat_id=c.id " +
     "WHERE m.account_id=? ORDER BY latest_seq DESC,c.created_at DESC LIMIT 100"
-  ).bind(id).all();
+  ).bind(id, id, id).all();
   const friends = relationships.results.filter(x => x.status === "accepted");
   const enriched = await Promise.all(friends.slice(0, 40).map(async f => {
     try {
