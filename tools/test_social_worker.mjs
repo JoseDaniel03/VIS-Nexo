@@ -128,6 +128,17 @@ response = await call('/v1/state',undefined,bob.token);
 assert.equal(response.data.pending_messages.length,1);
 assert(!JSON.stringify(response.data).includes('hello encrypted chat'));
 assert.equal(response.data.pending_messages[0].from, 'alice');
+// Two independently generated device ECDH keypairs must decrypt the same
+// ciphertext delivered through D1, without the Worker seeing plaintext.
+const bobSecret = await crypto.subtle.importKey('spki',
+  Buffer.from(alice.encryptionPublic,'base64'),
+  {name:'ECDH',namedCurve:'P-256'},false,[]);
+const bobAes = await crypto.subtle.deriveKey({name:'ECDH',public:bobSecret},
+  bob.ecdh.privateKey,{name:'AES-GCM',length:256},false,['decrypt']);
+const cleartext = await crypto.subtle.decrypt({
+  name:'AES-GCM',iv,additionalData:aad
+},bobAes,Buffer.from(JSON.parse(response.data.pending_messages[0].payload).ct,'base64'));
+assert.equal(new TextDecoder().decode(cleartext),'hello encrypted chat');
 const pendingID = response.data.pending_messages[0].id;
 assert.equal((await call('/v1/messages/ack',{ids:[pendingID]},alice.token)).status,200);
 assert.equal((await call('/v1/state',undefined,bob.token)).data.pending_messages.length,1);
