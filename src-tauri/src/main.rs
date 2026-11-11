@@ -943,16 +943,6 @@ async fn horizon_local_builds()->Result<Vec<String>,String>{
 async fn horizon_probe(state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<horizon::Probe,String>{
     let (owner,instance,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;(u,i,s.data_root.clone())};
     if instance.engine!="horizon" {return Err("No es una instancia Horizon".into())}
-    let mut instance=instance;
-    // Offline Horizon otherwise invents a Player#### fallback when --name is missing.
-    // A Microsoft session provides its own authenticated username; never replace it.
-    if session_file.is_empty() && (instance.player_name.trim().is_empty() || visitor.is_some()) {
-        let playing_as=visitor.as_deref().unwrap_or(&owner);
-        if !valid_game_nickname(playing_as) {
-            return Err("Configurá un nick Minecraft de 3 a 16 caracteres en la instancia".into());
-        }
-        instance.player_name=playing_as.to_owned();
-    }
     tauri::async_runtime::spawn_blocking(move||{
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
         horizon::inspect(&dir,&instance)
@@ -983,6 +973,16 @@ async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,proj
         (owner,instance,s.data_root.clone(),from.map(|_|active))
     };
     if instance.engine!="horizon" {return Err("No es una instancia Horizon".into())}
+    let mut instance=instance;
+    // In local mode Horizon must receive a concrete game name.
+    // Authenticated Microsoft sessions retain the profile identity from their session.
+    if session_file.is_empty() && (instance.player_name.trim().is_empty() || visitor.is_some()) {
+        let playing_as=visitor.as_deref().unwrap_or(&owner);
+        if !valid_game_nickname(playing_as) {
+            return Err("Configurá un nick Minecraft de 3 a 16 caracteres en la instancia".into());
+        }
+        instance.player_name=playing_as.to_owned();
+    }
     tauri::async_runtime::spawn_blocking(move||{
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
         if let Some(player)=visitor {
