@@ -150,6 +150,34 @@ impl LocalStore {
     pub fn get_mut(&mut self, username: &str) -> Option<&mut Account> {
         self.data.accounts.iter_mut().find(|a| a.username == username)
     }
+    /// Persistent local profile directory for a cloud-authenticated player.
+    /// Does not store the online password or its verifier on the device.
+    /// Never inherits local admin privileges from an existing profile.
+    pub fn ensure_cloud_profile(&mut self, username: &str) -> Result<(), String> {
+        if let Some(error)=&self.load_error {return Err(error.clone());}
+        if !(3..=24).contains(&username.len())
+            || !username.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+            return Err("Nombre de cuenta VIS no válido".into());
+        }
+        if let Some(account)=self.get(username) {
+            return if account.password_hash.is_empty() && account.role == Role::User {
+                Ok(())
+            } else {
+                Err("Ya existe una cuenta local con este nombre. Entrá por Cuenta local y vinculala, para no mezclar perfiles ni permisos.".into())
+            };
+        }
+        self.data.accounts.push(Account {
+            username: username.into(), password_hash: String::new(), role: Role::User,
+            avatar:String::new(), skin:String::new(), cape:String::new(),
+            avatar_layer:String::new(), profile_banner:String::new(),
+            microsoft_linked:false,
+        });
+        if let Err(error)=self.save() {
+            self.data.accounts.pop();
+            return Err(error);
+        }
+        Ok(())
+    }
     pub fn register(&mut self, name: &str, password: &str, repeat: &str) -> Result<String, String> {
         if let Some(error)=&self.load_error {return Err(error.clone());}
         let normalized = name.trim().to_ascii_lowercase();
