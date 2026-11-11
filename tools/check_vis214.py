@@ -15,7 +15,7 @@ checks={
  'Child killed on token-pipe failure': 'let _=child.kill();let _=child.wait();' in h,
  'Offline sharing preserved': 'offline-guests' in (p/'src-tauri/src/minecraft.rs').read_text(),
  'Local build discovery bounded': 'entries.take(60)' in h and 'found.truncate(20)' in h,
- 'Diagnostics registered': 'fn horizon_diagnostics(' in main and 'horizon_diagnostics, horizon_source_build, horizon_local_builds,' in main,
+ 'Diagnostics registered': 'fn horizon_diagnostics(' in main and 'horizon_diagnostics, horizon_source_build, install_vis_rust_runtime, horizon_local_builds,' in main,
  'Diagnostics escaped in UI': '${esc(c.label)}' in ui and '${esc(c.detail)}' in ui,
  'Java controls unavailable for Horizon': "i.engine==='horizon'?'':`<div class=\"mc-manager-grid\"" in ui,
  'VIS v2.14 CSS loaded': 'vis-nexo-v2.14.css' in (p/'web/index.html').read_text(),
