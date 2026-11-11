@@ -11,8 +11,8 @@ satisfactoriamente `VIS Social - Cloudflare D1` y el endpoint `/health` responda
 - URL por defecto del cliente: `https://vis-social.defreitascarranza-845.workers.dev`.
 - URL alternativa en compilación: variable pública `VIS_SOCIAL_URL`.
 - No afecta a `vis-universe` ni a sus R2/KV.
-- Las migraciones `0001_social_core.sql` y `0002_device_auth.sql` se
-  aplican mediante Wrangler antes de desplegar el Worker.
+- Las migraciones `0001_social_core.sql`, `0002_device_auth.sql` y
+  `0003_roles_projects.sql` se aplican mediante Wrangler antes de desplegar el Worker.
 
 ## GitHub Actions y credenciales
 
@@ -29,13 +29,15 @@ automático no concede acceso a Cloudflare. Nunca pegar tokens en commits,
 configuración del launcher, scripts, documentación o conversaciones.
 
 El workflow verifica el token, ejecuta las migraciones remotas y publica el
-Worker. No pasar a las pruebas en dos PC antes de que el job sea verde.
+Worker. Las pruebas contra Cloudflare con dos identidades independientes
+se ejecutan automáticamente y borran sus usuarios temporales.
+La prueba con dos equipos físicos sigue pendiente.
 La URL final aparecerá en el log del despliegue de Wrangler.
 
 Comprobar:
 ```sh
 curl -fsS https://vis-social.defreitascarranza-845.workers.dev/health
-# Esperado: {"service":"vis-social","status":"ready","schema":2}
+# Esperado: {"service":"vis-social","status":"ready","schema":3}
 ```
 
 ## Modelo de autenticación
@@ -111,3 +113,14 @@ sesiones, amistades, privacidad de presencia y colas de mensajería. Esto
 
 Importante: si aparece `Modo local · VIS Social desconectado`, **NO** asumir
 que se enviaron mensajes por Internet. El botón Cloud permite reintentar.
+
+## Roles administrativos y seguridad
+
+El alta de la primera supercuenta usa una operación separada y manual de
+GitHub Actions y la clave pública Ed25519 de la cuenta ya registrada. El primer
+usuario local **no** recibe autoridad Cloudflare automáticamente. Las cuentas
+sin privilegios no pueden crear proyectos ni asignarse roles.
+
+Consultá [Seguridad, cuentas y proyectos](VIS-SOCIAL-SEGURIDAD-Y-PROYECTOS.md)
+para ver el procedimiento de supercuenta, los permisos, las pruebas de seguridad
+y los riesgos que todavía requieren revisión antes de distribución masiva.
