@@ -1,0 +1,23 @@
+name = "vis-social"
+main = "worker.mjs"
+compatibility_date = "2026-11-01"
+
+# Do not reuse VIS Universe's bucket; Social is a separate, authenticated service.
+# Replace database_id after: npx wrangler d1 create vis-social
+[[d1_databases]]
+binding = "DB"
+database_name = "vis-social"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "SocialHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SocialHub"]
+
+[vars]
+# Extra trusted desktop/browser origins, comma-separated if needed.
+ALLOWED_ORIGINS = "http://tauri.localhost,https://tauri.localhost,tauri://localhost,http://localhost:1420,http://127.0.0.1:1420"
