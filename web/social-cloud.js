@@ -5,6 +5,13 @@ try { endpoint = localStorage.getItem(endpointKey) || ""; } catch {}
 let localOwner = "", account = null, token = "", snapshot = null, chatId = "", chatMessages = [];
 let loading = false, error = "", socket = null, mounted = null, reconnect = null;
 let poll = null, chatBefore = null, connected = false;
+const chatDrafts = new Map();
+let renderedChatId = "", olderScroll = null;
+function captureChatDraft() {
+  if (!renderedChatId || !mounted?.isConnected) return;
+  const input = mounted.querySelector('form[data-cloud-form="message"] input[name="body"]');
+  if (input) chatDrafts.set(renderedChatId, input.value);
+}
 
 const esc = value => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -30,9 +37,11 @@ export function syncSocialOwner(name, guest = false) {
   const next = guest ? "" : String(name || "").toLowerCase();
   if (localOwner === next) return;
   localOwner = next; token = ""; account = null; snapshot = null; chatId = ""; chatMessages = [];
+  chatDrafts.clear(); renderedChatId = ""; olderScroll = null;
   stopSocket(); stopPolling();
 }
 export function socialOnlinePanel(visible) {
+  captureChatDraft();
   return '<aside class="social-pane vis-cloud-pane ' + (visible ? "" : "is-hidden") +
     '" aria-label="VIS Social"><div class="social-top"><div class="social-brand">' +
     '<span class="social-title">VIS HUMILE</span><small>Amigos y chats en línea</small></div>' +
@@ -59,6 +68,7 @@ async function api(path, method = "GET", body = undefined, needsAuth = true) {
 }
 function signOut(drawAfter = true) {
   token = ""; account = null; snapshot = null; chatId = ""; chatMessages = []; chatBefore = null;
+  chatDrafts.clear(); renderedChatId = ""; olderScroll = null;
   stopSocket(); stopPolling(); if (drawAfter) draw();
 }
 async function refresh() {
@@ -68,7 +78,14 @@ async function refresh() {
     snapshot = data; error = "";
     if (chatId) {
       const messages = await api("/v1/chats/" + encodeURIComponent(chatId) + "/messages");
-      chatMessages = messages.messages || []; chatBefore = messages.before;
+      const recent = messages.messages || [];
+      if (chatMessages.length) {
+        const found = new Map(chatMessages.concat(recent).map(msg => [msg.id, msg]));
+        chatMessages = [...found.values()].sort((a,b) => a.seq - b.seq).slice(-250);
+      } else {
+        chatMessages = recent;
+        chatBefore = messages.before;
+      }
       await api("/v1/chats/" + encodeURIComponent(chatId) + "/read", "POST", {});
       const active = data.chats?.find(c => c.id === chatId);
       if (active) active.unread = 0;
@@ -213,9 +230,21 @@ function draw() {
     markup += loading && !snapshot ? '<p class="vis-social-note">Cargando…</p>' : friendList() + chatList();
     if (chatId) markup += thread();
   }
+  captureChatDraft();
+  const previousRegion = host.querySelector(".vis-cloud-messages");
+  const sameThread = !!chatId && renderedChatId === chatId;
+  const wasAtBottom = !previousRegion || previousRegion.scrollHeight - previousRegion.scrollTop - previousRegion.clientHeight < 36;
+  const previousTop = previousRegion?.scrollTop || 0;
   host.innerHTML = markup;
+  renderedChatId = chatId;
+  const input = host.querySelector('form[data-cloud-form="message"] input[name="body"]');
+  if (input && chatDrafts.has(chatId)) input.value = chatDrafts.get(chatId);
   const region = host.querySelector(".vis-cloud-messages");
-  if (region) region.scrollTop = region.scrollHeight;
+  if (region) {
+    if (olderScroll && sameThread) region.scrollTop = olderScroll.top + region.scrollHeight - olderScroll.height;
+    else region.scrollTop = sameThread && !wasAtBottom ? previousTop : region.scrollHeight;
+  }
+  olderScroll = null;
 }
 async function perform(fn) {
   if (loading) return;
@@ -252,6 +281,8 @@ async function onSubmit(event) {
     } else if (action === "message") {
       if (!chatId) return;
       await api("/v1/chats/" + encodeURIComponent(chatId) + "/messages", "POST", { body: String(data.get("body") || "") });
+      chatDrafts.set(chatId, "");
+      const field = form.querySelector('input[name="body"]'); if (field) field.value = "";
       await refresh();
     }
   });
@@ -270,8 +301,8 @@ async function onClick(event) {
   await perform(async () => {
     if (action === "chat-friend") {
       const result = await api("/v1/chats/direct", "POST", { username: button.dataset.name });
-      chatId = result.id; await refresh();
-    } else if (action === "open-chat") { chatId = id; await refresh(); }
+      chatId = result.id; chatMessages = []; chatBefore = null; await refresh();
+    } else if (action === "open-chat") { chatId = id; chatMessages = []; chatBefore = null; await refresh(); }
     else if (["accept", "reject", "cancel"].includes(action)) {
       await api("/v1/friends/answer", "POST", { id, action }); await refresh();
     } else if (["block", "unblock", "remove-friend"].includes(action)) {
@@ -282,6 +313,8 @@ async function onClick(event) {
       const favorites = new Set(snapshot?.favorites || []);
       await api("/v1/favorites/" + id, favorites.has(id) ? "DELETE" : "POST"); await refresh();
     } else if (action === "older" && chatId && chatBefore) {
+      const region = mounted?.querySelector(".vis-cloud-messages");
+      olderScroll = region ? { height: region.scrollHeight, top: region.scrollTop } : null;
       const result = await api("/v1/chats/" + chatId + "/messages?before=" + chatBefore);
       chatMessages = (result.messages || []).concat(chatMessages);
       chatBefore = result.before; draw();
@@ -300,6 +333,7 @@ async function onChange(event) {
 function mount() {
   const next = document.querySelector("#vis-social-root");
   if (!next || next === mounted) return;
+  captureChatDraft();
   mounted = next;
   next.addEventListener("submit", onSubmit);
   next.addEventListener("click", onClick);
