@@ -9,7 +9,8 @@ class D1Database {
     this.sqlite.exec('PRAGMA foreign_keys=ON;');
     for (const path of [
       '../services/social/migrations/0001_social_core.sql',
-      '../services/social/migrations/0002_device_auth.sql'
+      '../services/social/migrations/0002_device_auth.sql',
+      '../services/social/migrations/0003_roles_projects.sql'
     ]) this.sqlite.exec(readFileSync(new URL(path, import.meta.url), 'utf8'));
   }
   prepare(sql) {
@@ -82,7 +83,7 @@ async function account(username) {
 }
 let response = await call('/health');
 assert.equal(response.status, 200, JSON.stringify(response));
-assert.equal(response.data.schema, 2);
+assert.equal(response.data.schema, 3);
 assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
@@ -145,8 +146,54 @@ assert.equal((await call('/v1/state',undefined,bob.token)).data.pending_messages
 assert.equal((await call('/v1/messages/ack',{ids:[pendingID]},bob.token)).status,200);
 assert.equal((await call('/v1/state',undefined,bob.token)).data.pending_messages.length,0);
 assert.equal((await call('/v1/keys',{public_key:alice.encryptionPublic},bob.token)).status,409);
-assert.equal((await call('/v1/auth/logout',{},bob.token)).status,200);
-assert.equal((await call('/v1/state',undefined,bob.token)).status,401);
+// Server-owned roles. The first online signup MUST remain a normal user.
+assert.equal((await call('/v1/account',undefined,alice.token)).data.account.role,'user');
+assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'virgoland',title:'Virgoland',visibility:'published'
+},alice.token)).status,403,'local identity cannot claim administrator authority');
+assert.equal((await call('/v1/admin/accounts/role',{
+  username:'bob',role:'super_admin'
+},alice.token)).status,403);
+
+// Simulate the separate, protected GitHub/D1 operator provision.
+// No public API endpoint provides this promotion.
+DB.sqlite.prepare("UPDATE social_users SET role='super_admin' WHERE username='alice'").run();
+assert.equal((await call('/v1/account',undefined,alice.token)).data.account.role,'super_admin');
+assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'virgoland',title:'Virgoland',summary:'Project catalog',visibility:'published'
+},alice.token)).status,200);
+let projects=await call('/v1/projects',undefined,bob.token);
+assert.equal(projects.data.projects[0].title,'Virgoland');
+assert.equal(projects.data.projects[0].subscribed,false);
+assert.equal((await call('/v1/projects/subscribe',{
+  project_id:'virgoland'
+},bob.token)).status,200);
+projects=await call('/v1/projects',undefined,bob.token);
+assert.equal(projects.data.projects[0].subscribed,true);
+assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'virgoland',title:'Stolen',visibility:'published'
+},bob.token)).status,403);
+assert.equal((await call('/v1/admin/projects/staff',{
+  project_id:'virgoland',username:'bob',staff_role:'editor'
+},alice.token)).status,200);
+assert.equal((await call('/v1/admin/accounts/role',{
+  username:'bob',role:'super_admin'
+},alice.token)).status,400,'super_admin elevation must not be exposed by HTTP');
+assert.equal((await call('/v1/admin/accounts/role',{
+  username:'bob',role:'moderator'
+},alice.token)).status,200);
+assert.equal((await call('/v1/account',undefined,bob.token)).data.account.role,'moderator');
+assert.equal((await call('/v1/admin/accounts/disable',{
+  username:'alice',disabled:true
+},alice.token)).status,403,'cannot disable self');
+assert.equal((await call('/v1/admin/accounts/disable',{
+  username:'bob',disabled:true
+},alice.token)).status,200);
+assert.equal((await call('/v1/state',undefined,bob.token)).status,401,
+ 'revoked sessions should not survive disable');
+assert.equal(DB.sqlite.prepare("SELECT count(*) AS n FROM admin_audit").get().n>=4,true);
+assert.equal((await call('/v1/auth/logout',{},alice.token)).status,200);
+assert.equal((await call('/v1/state',undefined,alice.token)).status,401);
 
 DB.sqlite.exec("UPDATE auth_sessions SET expires_at=1");
 DB.sqlite.exec("UPDATE auth_challenges SET expires_at=1");
