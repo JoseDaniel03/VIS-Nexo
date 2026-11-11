@@ -546,8 +546,8 @@ async function onSubmit(event) {
       if (active) { active.unread = log.unread; active.latest_local = log.latest; }
       chatDrafts.set(chatId, "");
       const field = form.querySelector('input[name="body"]'); if (field) field.value = "";
-      // Other recipients must be online: the relay intentionally has no offline queue.
-      if (sent.delivered_to < 1) showError("Nadie estaba conectado para recibir este mensaje.");
+      // Only sockets accepted the relay. The recipient may still fail to store it.
+      if (sent.relayed_to < 1) showError("No se pudo retransmitir el mensaje a ningún jugador conectado.");
     }
   });
 }
