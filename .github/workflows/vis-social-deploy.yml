@@ -50,7 +50,7 @@ jobs:
         run: |
           base="${VIS_SOCIAL_HEALTH_URL:-https://vis-social.defreitascarranza-845.workers.dev}"
           curl --fail --silent --show-error --retry 5 --retry-delay 3 "${base%/}/health" > /tmp/vis-social-health.json
-          node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/vis-social-health.json','utf8'));if(d.service!=='vis-social'||d.status!=='ready'||d.schema!==4)process.exit(1); console.log('VIS Social production health: ready, schema 4')"
+          node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/vis-social-health.json','utf8'));if(d.service!=='vis-social'||d.status!=='ready'||d.schema!==5)process.exit(1); console.log('VIS Social production health: ready, schema 5')"
 
       - name: Exercise two independent clients over live Cloudflare D1
         env:
