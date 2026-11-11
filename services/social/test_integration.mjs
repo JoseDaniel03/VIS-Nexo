@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 
 const port = 17879;
 const host = "http://127.0.0.1:" + port;
-const child = spawn("npx", [
-  "--no-install", "wrangler", "dev", "--config", "wrangler.test.toml",
+const child = spawn(process.execPath, [
+  "./node_modules/wrangler/bin/wrangler.js", "dev", "--config", "wrangler.test.toml",
   "--local", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", ".wrangler-test"
 ], { cwd: new URL(".", import.meta.url).pathname,
      env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
@@ -19,7 +19,7 @@ async function call(path, method = "GET", data, token, expected = 200) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
   const response = await fetch(host + path, {
-    method, headers, body: data === undefined ? undefined : JSON.stringify(data)
+    method, headers, body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.timeout(20000)
   });
   const result = await response.json();
   assert.equal(response.status, expected, JSON.stringify({ method, path, result }));
@@ -90,4 +90,5 @@ try {
   child.kill("SIGTERM");
   await sleep(350);
   if (child.exitCode === null) child.kill("SIGKILL");
+  child.stdout.destroy(); child.stderr.destroy();
 }
