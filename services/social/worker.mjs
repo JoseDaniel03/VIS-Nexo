@@ -15,9 +15,13 @@ export function normalizeUsername(value) {
 }
 // Bound a transmitted message to fit a complete local 2 KiB chat record.
 export const MAX_CHAT_MESSAGE_BYTES = 1536;
+export const MAX_CHAT_JSON_TEXT_BYTES = 1750; // Reserve space for ID, sender and timestamp in 2 KiB log.
 export function validMessage(value) {
-  return typeof value === "string" && value.trim().length > 0 &&
-    [...value].length <= 1500 && enc.encode(value.trim()).byteLength <= MAX_CHAT_MESSAGE_BYTES;
+  if (typeof value !== "string") return false;
+  const body = value.trim();
+  return body.length > 0 && [...body].length <= 1500 &&
+    enc.encode(body).byteLength <= MAX_CHAT_MESSAGE_BYTES &&
+    enc.encode(JSON.stringify(body)).byteLength <= MAX_CHAT_JSON_TEXT_BYTES;
 }
 export function validFriendNickname(value) {
   if (typeof value !== "string") return false;
@@ -464,7 +468,7 @@ async function relayToOnline(env, accountId, payload) {
 async function sendMessage(request, env, me, chatId) {
   await rate(env.DB, "messages:" + me.id, 300, 3600000);
   const chat = await chatAccess(env.DB, me, chatId, true), input = await json(request);
-  if (!validMessage(input.body)) fail(400, "Mensaje inválido: máximo 1536 bytes UTF-8");
+  if (!validMessage(input.body)) fail(400, "Mensaje demasiado largo para el log local de 2 KB");
   const id = crypto.randomUUID(), time = ISO(), content = input.body.trim();
   const members = await env.DB.prepare("SELECT account_id FROM humile_chat_members WHERE chat_id=? AND account_id<>?")
     .bind(chatId, me.id).all();
