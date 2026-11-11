@@ -75,7 +75,7 @@ async function deliver(from,to,phrase){
 }
 const health=await request("/health");
 assert.equal(health.status,"ready");
-assert.equal(health.schema,2);
+assert.equal(health.schema,3);
 const a=await identity(names[0]), b=await identity(names[1]);
 await request("/v1/friends/request",{username:b.username},a.token,201);
 const incoming=await request("/v1/state",undefined,b.token);
