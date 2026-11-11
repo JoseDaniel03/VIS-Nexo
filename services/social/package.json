@@ -1,0 +1,14 @@
+{
+  "name": "vis-social-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check worker.mjs && node --test test_social.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply vis-social --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
