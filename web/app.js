@@ -15,7 +15,7 @@ const T = window.__TAURI__;
 const native = !!T?.core?.invoke;
 const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],mode:native?'local':'preview'});
 let db = empty();
-let page = 'home', selectedId = '', authMode='login', authBusy=false, showPassword=false;
+let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
 let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null, stateEditorOpen=false;
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
@@ -212,9 +212,9 @@ const social = createSocialRemote(command, (snapshot, messages) => {
   socialError = error || '';
   if (db.user) render();
 });
-async function connectSocial() {
+async function connectSocial(reuseCloudSession=false) {
   if (!native || !db.user || isGuest()) return;
-  try { await social.start(db.user.username); }
+  try { await social.start(db.user.username,reuseCloudSession); }
   catch (error) { message('VIS Social sin conexión: ' + String(error), true); }
 }
 async function apply(name,args={},success=''){
@@ -235,24 +235,25 @@ function loginView(){
       <div class="auth-brand">${logo(true)}<span>${brandLabel()}</span></div>
       <div class="auth-intro"><span class="kicker">ACCESO A TU CUENTA</span><h1>${guest?'Entrá sin cuenta':reg?'Creá tu cuenta':'Iniciá sesión'}</h1><p>${guest?'Elegí un nick temporal para iniciar instancias ya instaladas.':reg?'Registrate para empezar a gestionar tus proyectos.':'Ingresá a tu biblioteca, proyectos y comunidad.'}</p></div>
       <div class="auth-switch" role="tablist" aria-label="Método de acceso">
-        <button class="auth-choice ${guest?'inactive':'active'}" data-action="auth-local" type="button" aria-selected="${!guest}">${I('user',17)}<span>Cuenta local</span></button>
+        <button class="auth-choice ${!guest&&authProvider==='cloud'?'active':'inactive'}" data-action="auth-online" type="button" aria-selected="${!guest&&authProvider==='cloud'}">${I('cloud',17)}<span>Cuenta VIS</span></button>
+        <button class="auth-choice ${!guest&&authProvider==='local'?'active':'inactive'}" data-action="auth-local" type="button" aria-selected="${!guest&&authProvider==='local'}">${I('user',17)}<span>Cuenta local</span></button>
         <button class="auth-choice inactive" type="button" disabled aria-label="Microsoft OAuth no conectado">${msMark()}<span>Microsoft</span></button>
         <button class="auth-choice ${guest?'active':'inactive'}" data-action="auth-offline" type="button" aria-selected="${guest}">${I('game',17)}<span>Offline</span></button>
       </div>
       ${!guest&&db.recent_accounts?.length?`<div class="recent-logins"><span class="field-label">ACCESO RÁPIDO · ÚLTIMAS 3 CUENTAS</span><div class="recent-account-list">${db.recent_accounts.slice(0,3).map(r=>`<button type="button" data-action="recent-account" data-id="${attr(r.username)}" class="recent-account">${I('user',16)}<span>${esc(r.username)}</span><small>${esc(r.provider==='microsoft'?'Microsoft':'Local')}</small></button>`).join('')}</div><small>Elegir una cuenta no omite su contraseña.</small></div>`:''}
       <form id="auth-form" class="auth-form" autocomplete="on">
-        <label class="field-label" for="auth-name">${guest?'Nick offline':'Usuario'}</label>
-        <div class="auth-input">${I('user',18)}<input required minlength="3" maxlength="${guest?16:24}" id="auth-name" name="${guest?'nickname':'username'}" autocomplete="${guest?'off':'username'}" placeholder="${guest?'Nick para Minecraft':'Nombre de usuario'}" spellcheck="false" /></div>
+        <label class="field-label" for="auth-name">${guest?'Nick offline':authProvider==='cloud'&&!reg?'ID o nombre de usuario':'Usuario'}</label>
+        <div class="auth-input">${I('user',18)}<input required minlength="3" maxlength="${guest?16:24}" id="auth-name" name="${guest?'nickname':'username'}" autocomplete="${guest?'off':'username'}" placeholder="${guest?'Nick para Minecraft':authProvider==='cloud'&&!reg?'ID VIS o nombre de usuario':'Nombre de usuario'}" spellcheck="false" /></div>
         ${guest?'':`<div class="field-header"><label class="field-label" for="auth-password">Contraseña</label></div>
-        <div class="auth-input">${I('lock',18)}<input required minlength="4" maxlength="128" type="${showPassword?'text':'password'}" id="auth-password" name="password" autocomplete="${reg?'new-password':'current-password'}" placeholder="${reg?'Creá una contraseña':'Ingresá tu contraseña'}"/><button class="eye-button" type="button" data-action="toggle-password" aria-label="Mostrar u ocultar contraseña">${I(showPassword?'eyeoff':'eye',19)}</button></div>
+        <div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" id="auth-password" name="password" autocomplete="${reg?'new-password':'current-password'}" placeholder="${reg?'Creá una contraseña':'Ingresá tu contraseña'}"/><button class="eye-button" type="button" data-action="toggle-password" aria-label="Mostrar u ocultar contraseña">${I(showPassword?'eyeoff':'eye',19)}</button></div>
         `}
-        ${reg?`<label class="field-label" for="auth-repeat">Confirmar contraseña</label><div class="auth-input">${I('lock',18)}<input required minlength="4" maxlength="128" type="${showPassword?'text':'password'}" name="confirm" id="auth-repeat" autocomplete="new-password" placeholder="Repetí tu contraseña" /></div>`:''}
+        ${reg?`<label class="field-label" for="auth-repeat">Confirmar contraseña</label><div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" name="confirm" id="auth-repeat" autocomplete="new-password" placeholder="Repetí tu contraseña" /></div>`:''}
         <button class="primary-btn auth-submit" type="submit" ${authBusy?'disabled':''}>${authBusy?I('timer',20):I('arrow',20)}<span>${authBusy?'Validando...':guest?'Continuar sin cuenta':reg?'Crear cuenta':'Entrar al launcher'}</span></button>
       </form>
       ${guest?`<button class="auth-footer" data-action="auth-local" type="button">Volver al inicio de sesión</button>`:`<button class="auth-footer" data-action="switch-auth" type="button">${reg?'¿Ya tenés cuenta?':'¿Todavía no tenés cuenta?'} <strong>${reg?'Iniciá sesión':'Registrate'}</strong></button>`}
       ${!native?`<p class="auth-preview">Vista previa en navegador · Los datos de prueba no se guardan.</p>`:''}
     </section>
-    <div class="auth-corner" aria-hidden="true">${I('shield',18)} <span>ACCESO LOCAL SEGURO</span></div>
+    <div class="auth-corner" aria-hidden="true">${I('shield',18)} <span>${guest?'ACCESO TEMPORAL':authProvider==='cloud'?'CUENTA VIS EN LA NUBE':'ACCESO LOCAL SEGURO'}</span></div>
   </main>`;
 }
 function header(){
@@ -828,9 +829,18 @@ root.addEventListener('submit',async event=>{
   const username=String(formData.get('username')||''),password=String(formData.get('password')||'');
   authBusy=true;
   try {
-   db=authMode==='offline'?await command('login_offline',{nickname:String(formData.get('nickname')||'')}):await command(authMode==='register'?'register':'login',authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
+   const cloud=authMode!=='offline'&&authProvider==='cloud'&&native;
+   if(cloud){
+     if(authMode==='register')db=await command('social_cloud_register',{
+       username,password,confirm:String(formData.get('confirm')||'')});
+     else db=await command('social_cloud_login',{identifier:username,password});
+   } else {
+     db=authMode==='offline'?await command('login_offline',{nickname:String(formData.get('nickname')||'')}):
+       await command(authMode==='register'?'register':'login',
+         authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
+   }
    page='home';await refreshAssets();render();message(`Sesión iniciada · ${db.user?.username}`);
-   if(native&&db.mode!=='offline')void connectSocial();
+   if(native&&db.mode!=='offline')void connectSocial(cloud);
   }catch(e){message(String(e),true)}finally{authBusy=false;}
   return;
  }
@@ -879,8 +889,9 @@ root.addEventListener('click',async event=>{
  if(['create-project','edit-project','edit-avatar','open-instance','edit-instance','delete-instance','delete-project'].includes(act))lastDialogTrigger=button;
  if(act==='modal-backdrop'){if(event.target===button)closeDialog();return;}
  if(act==='auth-offline'){authMode='offline';showPassword=false;render();return;}
- if(act==='auth-local'){authMode='login';showPassword=false;render();return;}
- if(act==='recent-account'){authMode='login';render();const name=root.querySelector('#auth-name');if(name){name.value=id;root.querySelector('#auth-password')?.focus();}return;}
+ if(act==='auth-online'){authProvider='cloud';authMode='login';showPassword=false;render();return;}
+ if(act==='auth-local'){authProvider='local';authMode='login';showPassword=false;render();return;}
+ if(act==='recent-account'){authMode='login';authProvider=(db.recent_accounts?.find(a=>a.username===id)?.provider==='vis-social')?'cloud':'local';render();const name=root.querySelector('#auth-name');if(name){name.value=id;root.querySelector('#auth-password')?.focus();}return;}
  if(act==='switch-auth'){cancelPendingSectionChange();authMode=authMode==='login'?'register':'login';showPassword=false;render();return;}
  if(act==='toggle-password'){const input=document.querySelector('#auth-password'),repeat=document.querySelector('#auth-repeat');if(input){showPassword=!showPassword;input.type=showPassword?'text':'password';if(repeat)repeat.type=input.type;button.innerHTML=I(showPassword?'eyeoff':'eye',19);}return;}
  if(act==='close-modal'){closeDialog();return;}
