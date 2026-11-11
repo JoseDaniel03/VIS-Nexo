@@ -7,6 +7,41 @@ let loading = false, error = "", socket = null, mounted = null, reconnect = null
 let poll = null, chatBefore = null, connected = false;
 const chatDrafts = new Map();
 let renderedChatId = "", olderScroll = null;
+let statusDraft = null;
+const runningGames = new Map(); // pid => { engine, project }; never supplied by user input.
+let activityHeartbeat = null;
+let activityGeneration = 0;
+const gameName = engine => engine === "rust" ? "Minecraft Rust Edition" : "Minecraft Java";
+function currentGame() {
+  const games = Array.from(runningGames.values());
+  return games.length ? games[games.length - 1] : null;
+}
+async function publishGameActivity() {
+  if (!token || !endpointReady() || snapshot?.me?.share_game === false) return;
+  const epoch = ++activityGeneration;
+  const playing = currentGame();
+  try {
+    const result = await api("/v1/activity", "POST", playing || { engine: null });
+    if (epoch === activityGeneration && snapshot?.me) {
+      snapshot.me.activity = result.activity;
+      draw();
+    }
+  } catch (err) { if (epoch === activityGeneration && token) console.warn("[VIS Humile] Estado del juego:", String(err)); }
+}
+export function socialGameStarted({ pid, engine, project = "" }) {
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !["java", "rust"].includes(engine)) return;
+  runningGames.set(pid, { engine, project: String(project).slice(0, 64) });
+  void publishGameActivity();
+}
+export function socialGameStopped(pid) {
+  if (!runningGames.delete(Number(pid))) return;
+  void publishGameActivity();
+}
+function captureCustomDraft() {
+  const input = mounted?.querySelector("[data-cloud-custom-status]");
+  if (input && document.activeElement === input) statusDraft = input.value;
+}
+
 function captureChatDraft() {
   if (!renderedChatId || !mounted?.isConnected) return;
   const input = mounted.querySelector('form[data-cloud-form="message"] input[name="body"]');
@@ -32,14 +67,22 @@ function stopSocket() {
   if (reconnect) clearTimeout(reconnect);
   reconnect = null;
 }
-function stopPolling() { if (poll) clearInterval(poll); poll = null; }
-export function suspendSocialCloud() { stopSocket(); stopPolling(); }
+function stopPolling() {
+  if (poll) clearInterval(poll);
+  if (activityHeartbeat) clearInterval(activityHeartbeat);
+  poll = null; activityHeartbeat = null;
+}
+export function suspendSocialCloud() {
+  // Switching back to local mode must not leave a visible online game status.
+  if (token && endpointReady()) void api("/v1/activity", "POST", { engine: null }).catch(() => {});
+  stopSocket(); stopPolling();
+}
 export function resumeSocialCloud() { if (token && endpointReady() && !socket) startLive(); }
 export function syncSocialOwner(name, guest = false) {
   const next = guest ? "" : String(name || "").toLowerCase();
   if (localOwner === next) return;
   localOwner = next; token = ""; account = null; snapshot = null; chatId = ""; chatMessages = [];
-  chatDrafts.clear(); renderedChatId = ""; olderScroll = null;
+  chatDrafts.clear(); renderedChatId = ""; olderScroll = null; statusDraft = null;
   stopSocket(); stopPolling();
 }
 export function socialOnlinePanel(visible) {
@@ -71,7 +114,7 @@ async function api(path, method = "GET", body = undefined, needsAuth = true) {
 }
 function signOut(drawAfter = true) {
   token = ""; account = null; snapshot = null; chatId = ""; chatMessages = []; chatBefore = null;
-  chatDrafts.clear(); renderedChatId = ""; olderScroll = null;
+  chatDrafts.clear(); renderedChatId = ""; olderScroll = null; statusDraft = null;
   stopSocket(); stopPolling(); if (drawAfter) draw();
 }
 // Never let an old response overwrite a different account or active conversation.
@@ -133,7 +176,11 @@ async function connect() {
 function startLive() {
   stopPolling();
   poll = setInterval(() => { if (token && mounted?.isConnected) void refresh(); }, 45000);
+  activityHeartbeat = setInterval(() => {
+    if (token && currentGame()) void publishGameActivity();
+  }, 75000);
   void connect();
+  if (currentGame()) void publishGameActivity();
 }
 function banner(title, detail) {
   return '<div class="vis-cloud-intro"><b>' + esc(title) + '</b><small>' + esc(detail) + '</small></div>';
@@ -155,6 +202,10 @@ function accountForm() {
 }
 const presenceNames = { online: "Conectado", away: "Ausente", busy: "Ocupado", invisible: "Invisible", offline: "Desconectado" };
 const stateLabel = friend => friend?.online ? (presenceNames[friend.presence] || "Conectado") : "Desconectado";
+function gameLabel(activity) {
+  if (!activity || !["rust", "java"].includes(activity.engine)) return "";
+  return gameName(activity.engine) + (activity.project ? " · " + activity.project : "");
+}
 function friendList() {
   const favorites = new Set(snapshot?.favorites || []);
   const friends = [...(snapshot?.friends || [])].sort((a,b) =>
@@ -167,7 +218,9 @@ function friendList() {
   for (const friend of friends) {
     markup += '<div class="vis-social-row"><span class="vis-presence-dot ' + (friend.online ? "is-online" : "") + '"></span>' +
       '<button data-cloud="chat-friend" data-name="' + key(friend.username) + '">' + esc(friend.username) +
-      '<small>' + stateLabel(friend) + '</small></button>' +
+      '<small>' + esc(stateLabel(friend)) + '</small>' +
+      (friend.online && friend.custom_status ? '<small class="vis-cloud-custom">' + esc(friend.custom_status) + '</small>' : '') +
+      (friend.online && friend.activity ? '<small class="vis-cloud-playing">' + esc('Jugando ' + gameLabel(friend.activity)) + '</small>' : '') + '</button>' +
       '<button class="vis-cloud-mini" data-cloud="favorite" data-id="' + key(friend.other_id) +
       '" aria-label="' + (favorites.has(friend.other_id) ? 'Quitar favorito' : 'Marcar favorito') +
       '" title="' + (favorites.has(friend.other_id) ? 'Quitar favorito' : 'Marcar favorito') + '">' +
@@ -235,15 +288,24 @@ function draw() {
     markup += '<div class="vis-cloud-identity"><span>● ' + esc(account.username) + '</span>' +
       '<small>' + (connected ? "Tiempo real activo" : "Reconectando…") + '</small>' +
       '<button data-cloud="logout">Salir</button></div>' +
-      '<label class="vis-cloud-presence-label">Estado visible para tus amigos' +
+      '<label class="vis-cloud-presence-label">Tu estado' +
       '<select data-cloud-presence aria-label="Estado de presencia">' +
       ['online','away','busy','invisible'].map(value =>
         '<option value="' + value + '"' + ((snapshot?.me?.presence || 'online') === value ? ' selected' : '') +
-        '>' + presenceNames[value] + '</option>').join('') + '</select></label>';
+        '>' + presenceNames[value] + '</option>').join('') + '</select></label>' +
+      '<form data-cloud-form="custom-status" class="vis-cloud-custom-form">' +
+      '<label>Estado personalizado (máximo 80 caracteres)<input data-cloud-custom-status name="custom" maxlength="80" ' +
+      'placeholder="Ej. Construyendo Virgoland…" value="' +
+      esc(statusDraft ?? snapshot?.me?.custom_status ?? '') + '"></label><button>Guardar estado</button></form>' +
+      '<label class="vis-cloud-share-game"><input type="checkbox" data-cloud-share-game ' +
+      (snapshot?.me?.share_game !== false ? 'checked' : '') + '> Mostrar el juego a mis amigos</label>' +
+      (snapshot?.me?.activity && snapshot?.me?.share_game !== false ?
+        '<p class="vis-cloud-self-game">' + esc('Jugando ' + gameLabel(snapshot.me.activity)) + '</p>' : '');
     markup += loading && !snapshot ? '<p class="vis-social-note">Cargando…</p>' : friendList() + chatList();
     if (chatId) markup += thread();
   }
   captureChatDraft();
+  captureCustomDraft();
   const previousRegion = host.querySelector(".vis-cloud-messages");
   const sameThread = !!chatId && renderedChatId === chatId;
   const wasAtBottom = !previousRegion || previousRegion.scrollHeight - previousRegion.scrollTop - previousRegion.clientHeight < 36;
@@ -285,6 +347,10 @@ async function onSubmit(event) {
       const result = await api("/v1/auth/" + mode, "POST", { username, password }, false);
       token = result.token; account = result.account; snapshot = null;
       await refresh(); startLive();
+    } else if (action === "custom-status") {
+      const result = await api("/v1/presence", "POST", { custom_status: String(data.get("custom") || "") });
+      statusDraft = null;
+      if (snapshot?.me) snapshot.me.custom_status = result.custom_status;
     } else if (action === "friend") {
       await api("/v1/friends/requests", "POST", { username: String(data.get("username") || "") }); await refresh();
     } else if (action === "group") {
@@ -344,11 +410,18 @@ async function onClick(event) {
 }
 async function onChange(event) {
   const select = event.target.closest("[data-cloud-presence]");
-  if (!select) return;
-  const visibility = select.value;
+  const share = event.target.closest("[data-cloud-share-game]");
+  if (!select && !share) return;
+  const payload = select ? { visibility: select.value } : { share_game: share.checked };
   await perform(async () => {
-    const result = await api("/v1/presence", "POST", { visibility });
-    if (snapshot?.me) snapshot.me.presence = result.visibility;
+    const result = await api("/v1/presence", "POST", payload);
+    if (snapshot?.me) {
+      snapshot.me.presence = result.visibility;
+      snapshot.me.custom_status = result.custom_status;
+      snapshot.me.share_game = result.share_game;
+      if (!result.share_game) snapshot.me.activity = null;
+      else if (share && currentGame()) await publishGameActivity();
+    }
   });
 }
 function mount() {
