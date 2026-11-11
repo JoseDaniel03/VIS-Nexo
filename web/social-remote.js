@@ -87,7 +87,7 @@ export function validatePinnedPeerKey(pinned, incoming) {
 export function createSocialRemote(command, onUpdate, onStatus) {
   let state = null, keys = null, privateDb = null, currentUser = '';
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
-  let lastFingerprint = '';
+  let lastFingerprint = '', chatActive=false;
   const connected = () => !!(state && privateDb && keys);
   const status = (value, error = '') => onStatus?.(value, error);
   const rpc = (path, method = 'GET', body = null) => command('social_request',
@@ -158,7 +158,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     }
   }
   async function sync() {
-    if (!connected() || busy) return;
+    if (!connected() || busy || document.hidden) return;
     busy = true;
     try {
       if (Date.now() - lastHeartbeat > 45000) {
@@ -213,7 +213,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       lastHeartbeat = 0;
       notify(true);
       await sync();
-      interval = setInterval(() => { void sync(); }, 6500);
+      interval = setInterval(() => { void sync(); }, chatActive ? 2600 : 8500);
       document.addEventListener('visibilitychange', onVisibility);
       return true;
     } catch (error) {
@@ -223,6 +223,13 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     }
   }
   function onVisibility() { if (!document.hidden) void sync(); }
+  function setChatActive(open) {
+    chatActive=!!open;
+    if(interval){clearInterval(interval);interval=setInterval(()=>{
+      void sync();
+    },chatActive?2600:8500);}
+    if(chatActive)void sync();
+  }
   async function stop() {
     if (interval) { clearInterval(interval); interval = null; }
     document.removeEventListener('visibilitychange', onVisibility);
@@ -302,6 +309,6 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     return rpc('/v1/admin/accounts/disable','POST',{username,disabled});
   }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
-    setPresence, sendMessage, subscribeProject, manageProject, grantStaff,
+    setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
     setAccountRole, setAccountDisabled, state: () => state };
 }
