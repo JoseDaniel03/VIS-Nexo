@@ -62,10 +62,11 @@ jobs:
         run: |
           npm run validate
           npm run check:release
-      - name: Portable payload regression tests (both platforms)
-        run: |
-          python tools/test_windows_portable.py
-          python tools/test_linux_portable.py
+      - name: Windows portable payload regression tests
+        run: python tools/test_windows_portable.py
+      - name: Linux portable payload and executable-permission tests
+        if: runner.os == 'Linux'
+        run: python tools/test_linux_portable.py
       - name: Cargo check and Rust unit tests
         run: |
           cargo check -p vslauncher-tauri --all-targets --locked
