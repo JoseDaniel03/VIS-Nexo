@@ -25,6 +25,56 @@ CACHE = ROOT / '.vis-build-cache' / 'horizon'
 BINARIES = ('horizon-client', 'horizon-prepare')
 EXPORTER_SOURCES = Path('mods/horizon/src/test/java/dev/horizonlab/parity')
 
+# VIS launches horizon-client directly, but hides the game's branded boot window
+# until the real menu renderer is ready. The upstream code/credits stay intact.
+# The transformation is fail-closed and pinned to audited upstream source.
+VIS_DIRECT_PATCH = 'vis-nexo-direct-game-window-v1'
+VIS_LOADING = Path('crates/horizon-client/src/game/loading_screen.rs')
+
+
+def apply_vis_direct_launch(checkout: Path) -> None:
+    source = checkout / VIS_LOADING
+    if not source.is_file():
+        raise RuntimeError(f'No se encuentra el archivo de arranque del cliente Rust: {VIS_LOADING}')
+    code = source.read_text(encoding='utf-8')
+    replacements = (
+        (
+            'Window::default_attributes().with_title("Horizon")',
+            'Window::default_attributes().with_title(if std::env::var_os("VIS_NEXO_DIRECT_START").is_some() { "Minecraft Rust Edition" } else { "Horizon" })',
+        ),
+        (
+            '.with_visible(!self.options.as_ref().is_some_and(|o| o.offscreen)),',
+            '.with_visible(!self.options.as_ref().is_some_and(|o| o.offscreen) && std::env::var_os("VIS_NEXO_DIRECT_START").is_none()),',
+        ),
+        (
+            'Step::Ready(game) => *self = App::Ready(game),',
+            '''Step::Ready(game) => {
+                // The load took place inside VIS Nexo. Open the game window
+                // only when the renderer and menu are ready, not at the
+                // Horizon-branded boot screen.
+                if std::env::var_os("VIS_NEXO_DIRECT_START").is_some() {
+                    if let Some(window) = game.host.window.as_ref() {
+                        window.set_visible(true);
+                    }
+                }
+                *self = App::Ready(game)
+            },''',
+        ),
+    )
+    changed = False
+    for before, after in replacements:
+        if before in code:
+            if code.count(before) != 1:
+                raise RuntimeError(f'El parche de arranque encontró más de un origen: {before}')
+            code = code.replace(before, after)
+            changed = True
+        elif after not in code:
+            raise RuntimeError(f'El cliente Rust cambió su código de arranque: {before}')
+    if changed:
+        source.write_text(code, encoding='utf-8')
+    print('[VIS Rust Edition] Inicio directo listo: sin ventana de carga Horizon', flush=True)
+
+
 
 def command(args: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
     shown = ' '.join(map(str, args))
@@ -76,6 +126,7 @@ def is_valid(output: Path, commit: str) -> bool:
     try:
         record = json.loads(manifest.read_text(encoding='utf-8'))
         return (record.get('source_commit') == commit
+                and record.get('vis_direct_patch') == VIS_DIRECT_PATCH
                 and record.get('platform') == platform.system().lower()
                 and record.get('arch') == platform.machine().lower()
                 and all(digest(output / name) == expected
@@ -99,6 +150,7 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     if not update and is_valid(output, sha):
         print(f'[VIS Horizon Source] Build cacheado y verificado: {sha[:12]}')
         return
+    apply_vis_direct_launch(checkout)
     env = dict(os.environ)
     target_dir = CACHE / 'target'
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -125,6 +177,7 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
         hashes = {path.relative_to(stage).as_posix(): digest(path) for path in stage.rglob('*') if path.is_file()}
         metadata = {
             'format': 1, 'source_repo': REPOSITORY, 'source_commit': sha,
+            'vis_direct_patch': VIS_DIRECT_PATCH,
             'source_ref': ref or 'main', 'platform': platform.system().lower(),
             'arch': platform.machine().lower(), 'sha256': hashes,
             'minecraft_assets_included': False,
