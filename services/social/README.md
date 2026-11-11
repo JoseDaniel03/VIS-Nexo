@@ -30,6 +30,14 @@ Using Wrangler in the services/social directory:
    Its /health endpoint should return status ok.
 
 **Cloud resources and account binding have NOT been deployed by this branch.**
+Once you know the public Worker URL, set the GitHub Actions repository variable
+`VIS_SOCIAL_URL` to that HTTPS `*.workers.dev` address. Future Windows and Linux
+launchers then open the online panel without asking every player to paste the
+Worker address. Old builds and local development keep manual configuration.
+
+The Worker also runs one daily cron at 04:00 UTC to delete expired authentication
+sessions, expired WebSocket tickets and spent request-limit counters. This job
+does not remove conversation content. 
 The old PostgreSQL drafts in services/ceibo and services/humile are not D1 migrations.
 Do not run them against D1. VIS Universe R2 remains untouched.
 
