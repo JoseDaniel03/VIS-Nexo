@@ -50,3 +50,16 @@
 .vis-cloud-pane .vis-cloud-presence-label select:focus-visible{outline:2px solid #a88cff;outline-offset:2px;}
 .vis-cloud-pane .vis-social-row .vis-cloud-mini[data-cloud="favorite"]{font-size:17px;color:#ead29e;padding:4px 7px}
 .vis-cloud-pane .vis-social-row button[data-cloud="favorite"]:hover{color:#fff0ac}
+
+/* Humile user-defined status, game activity, and optional broadcasting */
+.vis-cloud-pane .vis-cloud-custom-form{display:flex;gap:7px;align-items:end;flex-wrap:wrap;margin:7px 0 10px}
+.vis-cloud-pane .vis-cloud-custom-form label{flex:1 1 150px;min-width:0;display:grid;gap:5px;color:#bcb0d2;font-size:11px}
+.vis-cloud-pane .vis-cloud-custom-form input{min-width:0;width:100%;box-sizing:border-box;padding:9px;border-radius:9px;background:#211832;border:1px solid #54426e;color:#f7f1ff}
+.vis-cloud-pane .vis-cloud-custom-form button{border:1px solid #8265ad;border-radius:9px;background:#654398;color:#fff;padding:9px 11px;cursor:pointer}
+.vis-cloud-pane .vis-cloud-share-game{display:flex;gap:9px;align-items:center;margin:9px 0;color:#c7bcda;font-size:11px;line-height:1.4}
+.vis-cloud-pane .vis-cloud-share-game input{accent-color:#9e83e3}
+.vis-cloud-pane .vis-cloud-self-game,.vis-cloud-pane .vis-cloud-playing{color:#73d2ae;font-size:11px;line-height:1.4}
+.vis-cloud-pane .vis-cloud-self-game{margin:0 0 12px}
+.vis-cloud-pane .vis-cloud-custom{color:#d8c8f2;font-style:italic;line-height:1.4;max-width:100%;overflow-wrap:anywhere}
+.vis-cloud-pane .vis-social-row button small{display:block;text-align:left;overflow-wrap:anywhere;line-height:1.45}
+.vis-cloud-pane .vis-cloud-custom-form :focus-visible,.vis-cloud-pane .vis-cloud-share-game :focus-visible{outline:2px solid #b69df9;outline-offset:2px}
