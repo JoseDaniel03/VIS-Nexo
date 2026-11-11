@@ -20,6 +20,7 @@ let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFi
 let socialMode=(()=>{try{return localStorage.getItem('vis-social-mode')==='cloud'?'cloud':'local';}catch{return 'local';}})();
 function setSocialMode(mode){socialMode=mode==='cloud'?'cloud':'local';if(socialMode==='cloud')resumeSocialCloud();else suspendSocialCloud();try{localStorage.setItem('vis-social-mode',socialMode);}catch{}render();}
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
+let stagedInstanceIcon=undefined; // undefined = unchanged, null = default icon, path = import on Save.
 let designerMode = false;
 // The display mode is a local UI preference; it does not change account permissions.
 const PERSONAL_PROJECT_ID = '__personal__';
@@ -597,7 +598,7 @@ function instanceDialog(){const a=dialog?.data||{};const p=db.projects.find(p=>p
  </details><p class="form-notice">Instalar descarga y prepara los recursos oficiales automáticamente. Jugar abre Minecraft en Rust en modo local. Microsoft y los servidores con autenticación oficial todavía no están integrados.</p></section>
  <label>Carpeta del juego<div class="folder-row"><input id="instance-folder-path" name="game_dir" required value="${attr(a.game_dir||'')}" placeholder="Elegí la carpeta de esta instancia"/><button type="button" data-action="pick-folder" title="Elegir carpeta">${I('folder',20)}</button></div></label><label>Instalación existente para reutilizar (opcional)<div class="folder-row"><input id="instance-reuse-path" name="reuse_source" value="${attr(a.reuse_source||'')}" placeholder="Detección automática si está vacío"/><button type="button" data-action="pick-reuse-folder" title="Elegir carpeta de origen sin modificarla">${I('folder',20)}</button></div><small class="muted">VIS examina carpetas conocidas de Minecraft y otras instancias. Esta ruta adicional solo se lee; nunca se sobrescribe.</small></label>
  <label>Nick dentro de Minecraft (máximo 16 caracteres)<div class="vis-nickname-field"><input name="player_name" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" value="${attr(isGuest()?db.user?.username:(a.player_name||suggestedMinecraftNick()))}" ${isGuest()?'readonly':''} placeholder="Tu nombre en el juego"/>${!isGuest()?`<button type="button" class="outline-btn" data-action="use-profile-nick" title="Usar tu nombre de VIS en el juego">Usar mi nombre VIS</button>`:''}</div><small>Para Java y Horizon offline; con Microsoft se mantiene el nombre oficial de la sesión.</small></label>
- ${a.name?`<div class="vis-instance-icon-controls"><span class="vis-instance-icon-preview">${instanceIcon(a,42)}</span><div><strong>Icono de la instancia</strong><small>PNG, JPG o WebP · máximo 3 MB</small></div><button type="button" class="outline-btn" data-action="import-instance-icon" data-id="${attr(a.name)}" data-project="${attr(a.project_id)}">Cambiar</button>${a.icon_path?`<button type="button" class="subtle-btn" data-action="clear-instance-icon" data-id="${attr(a.name)}" data-project="${attr(a.project_id)}">Quitar</button>`:''}</div>`:''}<input type="hidden" name="java_path" value="${attr(a.java_path||'')}"/><p class="muted">VIS instala un Java privado dentro de la instancia.</p>
+ <div class="vis-instance-icon-controls"><span class="vis-instance-icon-preview">${instanceIcon(a,42)}</span><div><strong>Icono de la instancia</strong><small id="vis-stage-icon-label">${stagedInstanceIcon===null?'Se usará el icono predeterminado':stagedInstanceIcon?'Imagen lista para guardar':a.icon_path?'Imagen personalizada':'PNG, JPG o WebP · máximo 3 MB'}</small></div><button type="button" class="outline-btn" data-action="stage-instance-icon">Elegir icono</button><button type="button" class="subtle-btn" data-action="clear-staged-instance-icon">Quitar</button></div><input type="hidden" name="java_path" value="${attr(a.java_path||'')}"/><p class="muted">VIS instala un Java privado dentro de la instancia.</p>
  <p class="form-notice">${I('users',16)} ${isGuest()?'Este nickname offline conserva su propio perfil de instancias. No tiene contraseña; otras personas con acceso al equipo pueden reutilizarlo.':'Los archivos instalados pueden ser visibles para otros perfiles VIS de esta computadora. Las cuentas Microsoft y partidas no se comparten automáticamente.'}</p>
  <label class="toggle-line large"><span><b>Pantalla completa</b><small>Se aplica al iniciar Minecraft Java.</small></span><input type="checkbox" name="fullscreen" ${a.fullscreen?'checked':''}/></label><p class="form-notice">${I('info',16)} VIS Smart Install busca copias locales verificadas (otras instancias y launchers conocidos), y solo descarga de Mojang/Fabric lo que falta. Minecraft, Java, el motor Rust, los recursos y los registros se guardan dentro de la carpeta de la instancia. Si falta Java, usamos Temurin verificado con SHA-256. Las cuentas locales permiten jugar sin autenticación oficial; para servidores online premium será necesaria una cuenta Microsoft.</p></form>
  <footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="outline-btn" data-action="submit-instance">${I('check',17)} Guardar</button><button class="primary-btn" data-action="submit-install-instance">${I('play',17)} ${a.installed?'Guardar y jugar':'Crear, instalar y jugar'}</button></footer></div></div>`;
@@ -712,6 +713,16 @@ function navigate(to,id='') {
    contextMenu=null;render();
    root.querySelector('#main-scroll')?.scrollTo(0,0);
  },{reducedMotion:prefs.reducedMotion});
+}
+async function selectStagedInstanceIcon(clear=false) {
+  if(clear){stagedInstanceIcon=null;document.getElementById('vis-stage-icon-label')?.replaceChildren(document.createTextNode('Se usará el icono predeterminado'));return;}
+  if(!native||!T?.dialog?.open)return message('Importar iconos requiere el launcher de escritorio.',true);
+  try{
+    const path=await T.dialog.open({multiple:false,directory:false,title:'Seleccionar icono Minecraft',filters:[{name:'Imágenes PNG, JPG o WebP',extensions:['png','jpg','jpeg','webp']}]});
+    if(!path)return;
+    stagedInstanceIcon=path;
+    document.getElementById('vis-stage-icon-label')?.replaceChildren(document.createTextNode('Imagen seleccionada · se aplicará al guardar'));
+  }catch(e){message(String(e),true)}
 }
 async function changeInstanceIcon(projectId,name,clear=false) {
   if(!native||!T?.dialog?.open)return message('Los iconos personalizados requieren VIS Nexo de escritorio.',true);
@@ -858,7 +869,14 @@ async function saveInstanceForm(installAndPlay=false){
  const data=new FormData(f);
  const instance={name:String(data.get('name')||'').trim(),engine:String(data.get('engine')||'java'),share_offline:data.has('share_offline'),horizon_build_dir:String(data.get('horizon_build_dir')||''),horizon_minecraft_dir:String(data.get('horizon_minecraft_dir')||''),horizon_server_jar:String(data.get('horizon_server_jar')||''),loader:String(data.get('loader')||'vanilla'),loader_version:String(data.get('loader_version')||''),java_path:String(data.get('java_path')||''),player_name:String(data.get('player_name')||''),project_id:String(data.get('project_id')||''),version:String(data.get('version')||''),game_dir:String(data.get('game_dir')||''),reuse_source:String(data.get('reuse_source')||''),ram_mb:Number(data.get('ram_mb')||4096),fullscreen:data.has('fullscreen'),installed:false};
  if(instance.engine==='horizon'){instance.loader='horizon';instance.loader_version='';instance.version='26.3';instance.share_offline=false;}
- const ok=await apply('save_instance',{instance},'Instancia guardada');if(ok){dialog=null;render();if(installAndPlay){await performInstall(instance.project_id,instance.name);const actual=db.instances.find(x=>x.project_id===instance.project_id&&x.name===instance.name);if(actual?.installed){await performLaunch(instance.project_id,instance.name);}}}
+ const selectedIcon=stagedInstanceIcon;
+ const ok=await apply('save_instance',{instance},'Instancia guardada');if(ok){
+   if(selectedIcon!==undefined){
+     try{db=await command('set_instance_icon',{projectId:instance.project_id,name:instance.name,path:selectedIcon});await refreshAssets();}
+     catch(e){message('Instancia guardada, pero no se pudo cambiar el icono: '+String(e),true);}
+   }
+   stagedInstanceIcon=undefined;
+   dialog=null;render();if(installAndPlay){await performInstall(instance.project_id,instance.name);const actual=db.instances.find(x=>x.project_id===instance.project_id&&x.name===instance.name);if(actual?.installed){await performLaunch(instance.project_id,instance.name);}}}
 }
 root.addEventListener('click',async event=>{
  if(!(event.target instanceof Element))return;
@@ -878,7 +896,9 @@ root.addEventListener('click',async event=>{
  else if(act==='mode-user')setLibraryMode('user');
  else if(act==='import-worlds-instance')await importWorldsInstance();
  else if(act==='export-worlds-instance')await exportWorldsInstance(projectId,id);
- else if(act==='new-personal-instance'){dialog={type:'instance',data:{project_id:PERSONAL_PROJECT_ID,ram_mb:4096,loader:'vanilla'}};render();void loadMinecraftVersions();}
+ else if(act==='new-personal-instance'){stagedInstanceIcon=undefined;dialog={type:'instance',data:{project_id:PERSONAL_PROJECT_ID,ram_mb:4096,loader:'vanilla'}};render();void loadMinecraftVersions();}
+ else if(act==='stage-instance-icon'){await selectStagedInstanceIcon();return;}
+ else if(act==='clear-staged-instance-icon'){await selectStagedInstanceIcon(true);return;}
  else if(act==='use-profile-nick'){const input=document.querySelector('#instance-form input[name="player_name"]');const nick=suggestedMinecraftNick();if(!nick)return message('Tu usuario VIS no es un nick Minecraft válido de 3 a 16 caracteres. Escribí uno manualmente.',true);if(input){input.value=nick;input.focus();}return;}
  else if(act==='import-instance-icon'){await changeInstanceIcon(projectId,id);return;}
  else if(act==='clear-instance-icon'){await changeInstanceIcon(projectId,id,true);return;}
@@ -971,8 +991,8 @@ root.addEventListener('click',async event=>{
    if(!T?.dialog?.open)return message('Elegí una carpeta desde VIS Nexo instalado.',true);
    try{const folder=await T.dialog.open({directory:true,multiple:false,title:'Elegir carpeta para esta instancia'});if(folder){const el=document.getElementById('vis-project-install-folder');if(el)el.value=folder;}}catch(e){message(String(e),true)}
  }
- else if(act==='open-instance'){const target=id||(libraryMode==='user'||!db.projects.length?PERSONAL_PROJECT_ID:db.projects[0].id);if(target!==PERSONAL_PROJECT_ID){dialog={type:'project-install',projectId:target};render();return;}dialog={type:'instance',data:{project_id:id||(libraryMode==='user'||!db.projects.length?PERSONAL_PROJECT_ID:db.projects[0].id),ram_mb:4096,loader:'vanilla'}};render();void loadMinecraftVersions();}
- else if(act==='edit-instance'){if(!isAdmin()&&projectId!==PERSONAL_PROJECT_ID){dialog={type:'project-install',projectId};render();return;}const instance=db.instances.find(i=>i.name===id&&i.project_id===projectId);if(instance){dialog={type:'instance',data:clone(instance)};render();void loadMinecraftVersions();if(instance.loader==='fabric')void loadFabricLoaders(instance.version);}}
+ else if(act==='open-instance'){const target=id||(libraryMode==='user'||!db.projects.length?PERSONAL_PROJECT_ID:db.projects[0].id);if(target!==PERSONAL_PROJECT_ID){dialog={type:'project-install',projectId:target};render();return;}stagedInstanceIcon=undefined;dialog={type:'instance',data:{project_id:id||(libraryMode==='user'||!db.projects.length?PERSONAL_PROJECT_ID:db.projects[0].id),ram_mb:4096,loader:'vanilla'}};render();void loadMinecraftVersions();}
+ else if(act==='edit-instance'){if(!isAdmin()&&projectId!==PERSONAL_PROJECT_ID){dialog={type:'project-install',projectId};render();return;}const instance=db.instances.find(i=>i.name===id&&i.project_id===projectId);if(instance){stagedInstanceIcon=undefined;dialog={type:'instance',data:clone(instance)};render();void loadMinecraftVersions();if(instance.loader==='fabric')void loadFabricLoaders(instance.version);}}
  else if(act==='duplicate-instance'){
    const original=db.instances.find(i=>i.project_id===projectId&&i.name===id&&!i.source_owner);
    if(!original)return;
