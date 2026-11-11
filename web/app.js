@@ -16,7 +16,7 @@ const native = !!T?.core?.invoke;
 const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],mode:native?'local':'preview'});
 let db = empty();
 let page = 'home', selectedId = '', authMode='login', authBusy=false, showPassword=false;
-let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null;
+let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null, stateEditorOpen=false;
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
 // The display mode is a local UI preference; it does not change account permissions.
@@ -293,9 +293,9 @@ function socialPanel(){
  return `<aside class="social-pane ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
  <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
  <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
- <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span></div>
- <label class="social-small-title" for="social-presence">TU ESTADO</label><div class="presence-picker"><button type="button" class="icon-btn" data-action="social-custom-status" title="Editar estado personalizado" aria-label="Editar estado personalizado">${I('edit',14)}</button>${I('circle',16)}<select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select>${I('chevrondown',14)}</div>
- <div class="social-group-head"><span>${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'}</span><span>${projectFriends.length}</span></div>
+ <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
+
+ <div class="social-group-head"><span class="social-contacts-label">${I('users',15)} ${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'} ${db.incoming_requests?.length?`<span class="contact-notification" title="Solicitudes de amistad pendientes">${db.incoming_requests.length}</span>`:''} </span><span>${projectFriends.length}</span></div>
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
  ${socialTab==='projects'&&!projectId?`<p class="social-empty">Abrí un proyecto para ver contactos que también lo siguen.</p>`:''}
@@ -310,8 +310,16 @@ function socialPanel(){
  </div>
  <div class="social-bottom"><form id="friend-form" class="friend-add-row"><input name="username" placeholder="Agregar por usuario" aria-label="Usuario de amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
  <span class="local-hint" title="${attr(socialError)}">${I('shield',13)} ${socialMode==='connected'?'VIS Social · Mensajes cifrados':socialMode==='connecting'?'Conectando VIS Social…':socialMode==='degraded'?'VIS Social · Reconectando…':socialMode==='security_warning'?'ALERTA: verificar clave del contacto':'Modo local · VIS Social desconectado'}</span>${native&&socialMode!=='connected'?`<button type="button" class="icon-btn" data-action="social-retry" title="Reintentar VIS Social" aria-label="Reintentar conexión">${I('cloud',14)}</button>`:''}</div>
- ${chatWith?chatDrawer():''}
+ ${chatWith?chatDock():''}
  </aside>`;
+}
+function chatDock(){
+ const me=db.user?.username;
+ const latest=new Map();
+ for(const msg of db.messages||[]){const peer=msg.from===me?msg.to:msg.from;if(peer&&peer!==me)latest.set(peer,msg);}
+ if(chatWith&&!latest.has(chatWith)) latest.set(chatWith,null);
+ const contacts=[...latest.entries()].sort((a,b)=>Date.parse(b[1]?.created||0)-Date.parse(a[1]?.created||0));
+ return `<div class="chat-floating" role="dialog" aria-label="Conversaciones de VIS Portals"><nav class="chat-recent" aria-label="Chats recientes"><div class="chat-recent-heading">${I('users',16)} RECientes</div>${contacts.slice(0,35).map(([user,m])=>`<button type="button" data-action="open-chat" data-id="${attr(user)}" class="chat-recent-item ${user===chatWith?'active':''}"><b>${esc(db.friends.find(f=>f.username===user)?.alias||user)}</b><small>${esc(m?.body||'Iniciar conversación')}</small></button>`).join('')}</nav>${chatDrawer()}</div>`;
 }
 function chatDrawer(){
  const msgs=db.messages.filter(m=>(m.from===db.user?.username&&m.to===chatWith)||(m.to===db.user?.username&&m.from===chatWith));
@@ -952,6 +960,7 @@ root.addEventListener('click',async event=>{
    message('Permiso actualizado en el servidor');
   }catch(e){message(String(e),true);}
  }
+ else if(act==='social-edit-status'){stateEditorOpen=!stateEditorOpen;render();}
  else if(act==='social-retry'){if(!social.connected())void connectSocial();}
  else if(act==='social-custom-status'){
   if(!social.connected()){message('Conectá VIS Social para usar estados personalizados.',true);return;}
