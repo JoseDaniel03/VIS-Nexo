@@ -60,13 +60,24 @@ pub const SOURCE_BUILD_ID:&str="vis:source";
 static BUNDLED_SOURCE:OnceLock<PathBuf>=OnceLock::new();
 
 pub fn initialize_bundled_source(app:&AppHandle){
+    // Lightweight VIS Nexo does not need Horizon files to start, use Java,
+    // manage accounts, or browse projects. A Rust game runtime may be added
+    // on first use and is verified when it is actually executed.
+    let from_user=crate::rust_runtime::installed_path(app);
     let from_bundle=app.path().resource_dir().ok().map(|p|p.join("horizon"));
-    // In tauri dev, Tauri may expose its resource directory under target/debug;
-    // beforeDevCommand builds into this directory in the source tree.
     let from_development=Path::new(env!("CARGO_MANIFEST_DIR")).join("resources").join("horizon");
-    let resolved=from_bundle.filter(|p|source_build_complete(p))
+    let resolved=from_user.filter(|p|source_build_complete(p))
+        .or_else(||from_bundle.filter(|p|source_build_complete(p)))
         .or_else(||if cfg!(debug_assertions)&&source_build_complete(&from_development){Some(from_development)}else{None});
     if let Some(folder)=resolved{let _=BUNDLED_SOURCE.set(folder);}
+}
+pub fn activate_source(path:&Path)->Result<(),String>{
+    verify_source_build(path)?;
+    if let Some(existing)=BUNDLED_SOURCE.get(){
+        if existing==path{return Ok(())}
+        return Err("Ya hay otro motor Rust Edition activo. Reiniciá VIS para cambiar de versión.".into())
+    }
+    BUNDLED_SOURCE.set(path.to_path_buf()).map_err(|_|"No se pudo activar Rust Edition".to_owned())
 }
 
 fn source_build_complete(folder:&Path)->bool{
@@ -77,7 +88,7 @@ fn source_build_complete(folder:&Path)->bool{
 }
 
 pub fn bundled_source_path()->Result<String,String>{
-    let folder=BUNDLED_SOURCE.get().ok_or("No se incluyó Horizon desde el repositorio. Compilá VIS con npm run build o npm run tauri dev")?;
+    let folder=BUNDLED_SOURCE.get().ok_or("Rust Edition aún no está instalado. Descargá el motor del juego desde VIS Nexo antes de jugar.")?;
     verify_source_build(folder)?;
     Ok(folder.to_string_lossy().to_string())
 }
@@ -112,7 +123,7 @@ fn hash_file_sha256(path:&Path)->Result<String,String>{
 
 fn build_folder(ins:&Instance)->Result<PathBuf,String>{
     if ins.horizon_build_dir.is_empty() || ins.horizon_build_dir==SOURCE_BUILD_ID {
-        let path=BUNDLED_SOURCE.get().ok_or("El juego Horizon no está compilado dentro de VIS Nexo. Volvé a generar el launcher con Horizon Source")?;
+        let path=BUNDLED_SOURCE.get().ok_or("Rust Edition requiere descargar su motor una sola vez desde VIS Nexo.")?;
         verify_source_build(path)?;
         return Ok(path.clone());
     }
