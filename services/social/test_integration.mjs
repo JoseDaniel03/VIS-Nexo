@@ -159,7 +159,8 @@ async function main() {
   assert.equal(delivered.id, sent.id);
   assert.equal(delivered.sender_id, alice.account.id);
   assert.equal(sent.storage, "device-only");
-  assert.equal(sent.delivered_to, 1);
+  assert.equal(sent.delivery, "websocket-relay");
+  assert.equal(sent.relayed_to, 1);
   const msgs = await call("/v1/chats/" + direct.id + "/messages", "GET", undefined, bob.token);
   assert.deepEqual(msgs.messages, [], "Remote chat history must remain empty");
   assert.equal(msgs.storage, "device-only");
