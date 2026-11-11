@@ -124,16 +124,25 @@ function accountForm() {
     '<button name="mode" value="register" class="secondary">Crear cuenta online</button></div></form>' +
     '<button class="vis-cloud-link" data-cloud="reset-endpoint">Cambiar Worker</button>';
 }
-const stateLabel = online => online ? "Conectado" : "Desconectado";
+const presenceNames = { online: "Conectado", away: "Ausente", busy: "Ocupado", invisible: "Invisible", offline: "Desconectado" };
+const stateLabel = friend => friend?.online ? (presenceNames[friend.presence] || "Conectado") : "Desconectado";
 function friendList() {
-  const friends = snapshot?.friends || [], incoming = snapshot?.incoming || [], outgoing = snapshot?.outgoing || [];
+  const favorites = new Set(snapshot?.favorites || []);
+  const friends = [...(snapshot?.friends || [])].sort((a,b) =>
+    Number(favorites.has(b.other_id)) - Number(favorites.has(a.other_id)) ||
+    a.username.localeCompare(b.username));
+  const incoming = snapshot?.incoming || [], outgoing = snapshot?.outgoing || [];
   let markup = '<section class="vis-social-block"><h4>Amigos <small>' + friends.length + '</small></h4>';
   markup += '<form data-cloud-form="friend" class="vis-cloud-inline"><input name="username" maxlength="24" placeholder="Agregar por usuario" required>' +
     '<button aria-label="Enviar solicitud">+</button></form>';
   for (const friend of friends) {
     markup += '<div class="vis-social-row"><span class="vis-presence-dot ' + (friend.online ? "is-online" : "") + '"></span>' +
       '<button data-cloud="chat-friend" data-name="' + key(friend.username) + '">' + esc(friend.username) +
-      '<small>' + stateLabel(friend.online) + '</small></button>' +
+      '<small>' + stateLabel(friend) + '</small></button>' +
+      '<button class="vis-cloud-mini" data-cloud="favorite" data-id="' + key(friend.other_id) +
+      '" aria-label="' + (favorites.has(friend.other_id) ? 'Quitar favorito' : 'Marcar favorito') +
+      '" title="' + (favorites.has(friend.other_id) ? 'Quitar favorito' : 'Marcar favorito') + '">' +
+      (favorites.has(friend.other_id) ? '★' : '☆') + '</button>' +
       '<button class="vis-cloud-mini" data-cloud="remove-friend" data-id="' + key(friend.other_id) + '" title="Eliminar amigo">×</button>' +
       '<button class="vis-cloud-mini" data-cloud="block" data-id="' + key(friend.other_id) + '" title="Bloquear">⊘</button></div>';
   }
@@ -195,7 +204,12 @@ function draw() {
   else {
     markup += '<div class="vis-cloud-identity"><span>● ' + esc(account.username) + '</span>' +
       '<small>' + (connected ? "Tiempo real activo" : "Reconectando…") + '</small>' +
-      '<button data-cloud="logout">Salir</button></div>';
+      '<button data-cloud="logout">Salir</button></div>' +
+      '<label class="vis-cloud-presence-label">Estado visible para tus amigos' +
+      '<select data-cloud-presence aria-label="Estado de presencia">' +
+      ['online','away','busy','invisible'].map(value =>
+        '<option value="' + value + '"' + ((snapshot?.me?.presence || 'online') === value ? ' selected' : '') +
+        '>' + presenceNames[value] + '</option>').join('') + '</select></label>';
     markup += loading && !snapshot ? '<p class="vis-social-note">Cargando…</p>' : friendList() + chatList();
     if (chatId) markup += thread();
   }
@@ -264,11 +278,23 @@ async function onClick(event) {
       if (action === "block" && !confirm("¿Bloquear a este usuario?")) return;
       const path = action === "remove-friend" ? "/v1/friends/" + id : "/v1/blocks/" + id;
       await api(path, action === "block" ? "POST" : "DELETE"); await refresh();
+    } else if (action === "favorite") {
+      const favorites = new Set(snapshot?.favorites || []);
+      await api("/v1/favorites/" + id, favorites.has(id) ? "DELETE" : "POST"); await refresh();
     } else if (action === "older" && chatId && chatBefore) {
       const result = await api("/v1/chats/" + chatId + "/messages?before=" + chatBefore);
       chatMessages = (result.messages || []).concat(chatMessages);
       chatBefore = result.before; draw();
     }
+  });
+}
+async function onChange(event) {
+  const select = event.target.closest("[data-cloud-presence]");
+  if (!select) return;
+  const visibility = select.value;
+  await perform(async () => {
+    const result = await api("/v1/presence", "POST", { visibility });
+    if (snapshot?.me) snapshot.me.presence = result.visibility;
   });
 }
 function mount() {
@@ -277,6 +303,7 @@ function mount() {
   mounted = next;
   next.addEventListener("submit", onSubmit);
   next.addEventListener("click", onClick);
+  next.addEventListener("change", onChange);
   draw();
 }
 const observer = new MutationObserver(mount);
