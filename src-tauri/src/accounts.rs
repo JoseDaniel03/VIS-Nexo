@@ -61,6 +61,7 @@ pub struct Instance {
     #[serde(default)] pub loader_version: String,
     #[serde(default)] pub java_path: String,
     #[serde(default)] pub player_name: String,
+    #[serde(default)] pub icon_path: String,
     #[serde(default)] pub source_owner: String,
     #[serde(default)] pub reuse_source: String,
     #[serde(default)] pub share_offline: bool,
@@ -89,7 +90,7 @@ fn default_engine()->String{"java".into()}
 impl Default for Instance {
     fn default() -> Self {
         Self { name: String::new(), project_id: String::new(), version: String::new(),
-            game_dir: String::new(), ram_mb: 4096, fullscreen: false, installed: false, loader: default_loader(), loader_version: String::new(), java_path: String::new(), player_name: String::new(), source_owner: String::new(), reuse_source: String::new(), share_offline: false, engine: default_engine(), horizon_build_dir: String::new(), horizon_minecraft_dir: String::new(), horizon_server_jar: String::new() }
+            game_dir: String::new(), ram_mb: 4096, fullscreen: false, installed: false, loader: default_loader(), loader_version: String::new(), java_path: String::new(), player_name: String::new(), icon_path: String::new(), source_owner: String::new(), reuse_source: String::new(), share_offline: false, engine: default_engine(), horizon_build_dir: String::new(), horizon_minecraft_dir: String::new(), horizon_server_jar: String::new() }
     }
 }
 
