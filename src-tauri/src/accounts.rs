@@ -179,6 +179,10 @@ impl LocalStore {
     pub fn login(&self, name: &str, password: &str) -> Result<String, String> {
         if let Some(error)=&self.load_error {return Err(error.clone());}
         let normalized = name.trim().to_ascii_lowercase();
+        if !(3..=24).contains(&normalized.len())
+            || !normalized.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            return Err("Usuario o contraseña incorrectos.".into());
+        }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_secs();
         let throttle_path = self.root.join("login-throttle.json");
@@ -197,6 +201,13 @@ impl LocalStore {
                 Argon2::default().verify_password(password.as_bytes(), &hash).is_ok()
             )).unwrap_or(false);
         if !verified {
+            // Bound disk usage even if someone supplies many invented usernames.
+            if throttle.attempts.len() >= 512 && !throttle.attempts.contains_key(&normalized) {
+                if let Some(oldest) = throttle.attempts.iter()
+                    .min_by_key(|(_,v)| v.last_failed).map(|(k,_)|k.clone()) {
+                    throttle.attempts.remove(&oldest);
+                }
+            }
             let failed=throttle.attempts.entry(normalized).or_default();
             failed.count=failed.count.saturating_add(1);
             failed.last_failed=now;
