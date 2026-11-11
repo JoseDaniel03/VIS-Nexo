@@ -1,4 +1,5 @@
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
+import { createSocialRemote } from './social-remote.js';
 /* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
    VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
    VIS Nexo 2.17 — Universe / Worlds / Horizon Rust Edition + compartir instancias offline.
@@ -190,9 +191,41 @@ async function refreshAssets(){
   const missing=[...paths].filter(p=>!assetCache[p]);
   await Promise.all(missing.map(async p=>{try{assetCache[p]=await command('preview_asset',{path:p})}catch{}}));
 }
+let socialMode = 'disconnected', socialError = '', socialOverlay = null;
+function mergeSocialView() {
+  if (!socialOverlay || !db.user || socialOverlay.username !== db.user.username) return;
+  db.friends = socialOverlay.friends;
+  db.incoming_requests = socialOverlay.incoming_requests;
+  db.outgoing_requests = socialOverlay.outgoing_requests;
+  db.messages = socialOverlay.messages;
+}
+const social = createSocialRemote(command, (snapshot, messages) => {
+  if (!db.user || snapshot.username !== db.user.username) return;
+  socialOverlay = { username:snapshot.username, friends:snapshot.friends||[],
+    incoming_requests:snapshot.incoming_requests||[], outgoing_requests:snapshot.outgoing_requests||[],
+    messages:messages||[] };
+  mergeSocialView();
+  render();
+}, (mode, error) => {
+  if (socialMode === mode && socialError === (error||'')) return;
+  socialMode = mode;
+  socialError = error || '';
+  if (db.user) render();
+});
+async function connectSocial() {
+  if (!native || !db.user || isGuest()) return;
+  try { await social.start(db.user.username); }
+  catch (error) { message('VIS Social sin conexión: ' + String(error), true); }
+}
 async function apply(name,args={},success=''){
-  try {db=await command(name,args);await refreshAssets();render();if(success)message(success);return true}
-  catch(e){message(String(e),true);return false}
+  try {
+    db=await command(name,args);
+    mergeSocialView();
+    await refreshAssets();
+    render();
+    if(success)message(success);
+    return true;
+  } catch(e) { message(String(e),true);return false; }
 }
 function brandLabel(){return esc(db.branding?.name||'VIS Nexo');}
 function loginView(){
@@ -260,12 +293,12 @@ function socialPanel(){
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
  ${socialTab==='projects'&&page!=='project'?`<p class="social-empty">Abrí un proyecto para ver sus contactos.</p>`:''}
- ${friends.filter(f=>f.username.toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}">${avatarVisual('',f.username,34)}<span class="friend-meta"><b>${esc(f.username)}</b><small>${names[f.presence]||'Desconectado'}</small></span><span class="dot offline"></span></button>`).join('')}
+ ${friends.filter(f=>(f.username+' '+(f.alias||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${avatarVisual('',f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span><span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
  ${friends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
  <div class="social-bottom"><form id="friend-form" class="friend-add-row"><input name="username" placeholder="Agregar por usuario" aria-label="Usuario de amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
- <span class="local-hint">${I('shield',13)} Amigos locales · Conexión global pendiente</span></div>
+ <span class="local-hint" title="${attr(socialError)}">${I('shield',13)} ${socialMode==='connected'?'VIS Social · Mensajes cifrados':socialMode==='connecting'?'Conectando VIS Social…':socialMode==='degraded'?'VIS Social · Reconectando…':'Modo local · VIS Social desconectado'}</span></div>
  ${chatWith?chatDrawer():''}
  </aside>`;
 }
@@ -739,7 +772,14 @@ function syncHorizonEditor(){
 }
 root.addEventListener('change',async event=>{
  const el=event.target;
- if(el?.id==='social-presence')await apply('update_presence',{presence:el.value});
+ if(el?.id==='social-presence'){
+  const presence=el.value;
+  await apply('update_presence',{presence});
+  if(social.connected()){
+    try{await social.setPresence(presence);}
+    catch(e){message(String(e),true);}
+  }
+ }
  else if(el?.id==='reduced-motion'){prefs.reducedMotion=el.checked;render();animateSetting(root,{reducedMotion:prefs.reducedMotion});}
  else if(el?.id==='mc-active-instance'){const [projectId,...parts]=el.value.split('|');mcSelected={projectId,name:parts.join('|')};modResults=[];installedFiles=[];render();void refreshInstalledFiles();}
  else if(el?.id==='mc-mod-kind'){modKind=el.value;modResults=[];render();}
@@ -766,13 +806,28 @@ root.addEventListener('submit',async event=>{
   try {
    db=authMode==='offline'?await command('login_offline',{nickname:String(formData.get('nickname')||'')}):await command(authMode==='register'?'register':'login',authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
    page='home';await refreshAssets();render();message(`Sesión iniciada · ${db.user?.username}`);
+   if(native&&db.mode!=='offline')void connectSocial();
   }catch(e){message(String(e),true)}finally{authBusy=false;}
   return;
  }
  if(form.id==='modrinth-search-form'){await performModSearch(formData);return;}
  if(form.id==='quick-publish-form'){await saveQuickPublish(form);return;}
- if(form.id==='friend-form'){const username=String(formData.get('username')||'');if(username)await apply('request_friend',{username},'Solicitud enviada');return;}
- if(form.id==='message-form'){const body=String(formData.get('body')||'');if(body&&chatWith)await apply('send_message',{to:chatWith,body});return;}
+ if(form.id==='friend-form'){
+  const username=String(formData.get('username')||'');
+  if(!username)return;
+  if(!social.connected()){await apply('request_friend',{username},'Solicitud local enviada');return;}
+  try {await social.friendRequest(username);message('Solicitud enviada a '+username);}
+  catch(e){message(String(e),true);}
+  return;
+ }
+ if(form.id==='message-form'){
+  const body=String(formData.get('body')||'');
+  if(!body||!chatWith)return;
+  if(!social.connected()){await apply('send_message',{to:chatWith,body});return;}
+  try {await social.sendMessage(chatWith,body);}
+  catch(e){message(String(e),true);}
+  return;
+ }
  if(form.id==='cloud-catalog-form'){try{await command('configure_cloud_catalog',{url:String(formData.get('url')||'').trim()});message('Catálogo configurado');await refreshCloudCatalog();}catch(e){message(String(e),true);}return;}
  if(form.id==='universe-publish-form'){
   if(!isAdmin()||!native)return;
@@ -832,8 +887,12 @@ root.addEventListener('click',async event=>{
  else if(act==='open-chat'){chatWith=id;chatWindowSize=100;render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';render();},{reducedMotion:prefs.reducedMotion});}
- else if(act==='accept-friend'){await apply('accept_friend',{username:id},'Solicitud aceptada');}
- else if(act==='logout'){cancelPendingSectionChange();db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
+ else if(act==='accept-friend'){
+  if(!social.connected())await apply('accept_friend',{username:id},'Solicitud local aceptada');
+  else try{await social.acceptFriend(id);message('Solicitud aceptada');}
+  catch(e){message(String(e),true);}
+ }
+ else if(act==='logout'){cancelPendingSectionChange();await social.stop();socialOverlay=null;db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
  else if(act==='create-project'){startProject();void loadMinecraftVersions();}
  else if(act==='quick-publish'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind||'news'};render();}
  else if(act==='edit-publication'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind,index:Number(button.dataset.index)};render();}
