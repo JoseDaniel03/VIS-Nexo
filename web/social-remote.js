@@ -95,6 +95,21 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         expired.push(item.key);
       } else fresh.push(item);
     }
+    // Retain at most 2 KiB UTF-8 per conversation, counting message metadata.
+    // Keep newest messages first, evict older records automatically.
+    fresh.sort((a, b) => Date.parse(b.created) - Date.parse(a.created));
+    const usedByPeer = new Map(), kept = [];
+    for (const item of fresh) {
+      const peer = item.from === currentUser ? item.to : item.from;
+      const size = encoder.encode(JSON.stringify({
+        id: item.id, from: item.from, to: item.to, body: item.body, created: item.created
+      })).length;
+      const used = usedByPeer.get(peer) || 0;
+      if (size <= 2048 && used + size <= 2048) {
+        kept.push(item);
+        usedByPeer.set(peer, used + size);
+      } else expired.push(item.key);
+    }
     for (const key of expired) {
       await new Promise((resolve, reject) => {
         const req = privateDb.transaction('messages', 'readwrite')
@@ -103,8 +118,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         req.onerror = () => reject(req.error);
       });
     }
-    fresh.sort((a, b) => Date.parse(a.created) - Date.parse(b.created));
-    return fresh.slice(-5000).map(({ from, to, body, created, id }) =>
+    kept.reverse();
+    return kept.map(({ from, to, body, created, id }) =>
       ({ from, to, body, created, id }));
   }
   async function saveMessage(item) {
