@@ -28,7 +28,7 @@ jobs:
         include:
           - os: ubuntu-24.04
             name: linux
-            bundles: deb,appimage
+            bundles: appimage
           - os: windows-2022
             name: windows
             bundles: nsis
@@ -75,5 +75,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vis-nexo-${{ matrix.name }}
-          path: target/release/bundle/**
+          path: ${{ matrix.name == 'linux' && 'target/release/bundle/appimage/**' || 'target/release/bundle/nsis/**' }}
           if-no-files-found: error
