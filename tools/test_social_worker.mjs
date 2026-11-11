@@ -39,7 +39,7 @@ class D1Database {
   }
 }
 const DB = new D1Database();
-const env = { DB };
+const env = { DB, DEBUG_ERRORS:true };
 const origin = 'https://vis-social.example';
 const to64 = bytes => Buffer.from(bytes).toString('base64');
 async function call(path, body, token) {
