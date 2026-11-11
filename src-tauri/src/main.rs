@@ -1134,3 +1134,41 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
 }
+
+#[cfg(test)]
+mod project_content_manifest_tests {
+    use super::*;
+
+    #[test]
+    fn vanilla_allows_packs_but_not_fabric_mods() {
+        let mut p=GameProject::default();
+        p.engine="java".into();
+        p.loader="vanilla".into();
+        p.required_resourcepacks.push("faithful".into());
+        assert!(valid_content_manifest(&p));
+        p.required_mods.push("sodium".into());
+        assert!(!valid_content_manifest(&p));
+        p.loader="fabric".into();
+        assert!(valid_content_manifest(&p));
+    }
+
+    #[test]
+    fn remote_content_is_bounded_and_compatible() {
+        let mut p=GameProject::default();
+        p.engine="java".into();
+        p.loader="fabric".into();
+        p.required_mods=vec!["sodium".into(),"fabric-api".into()];
+        assert!(valid_content_manifest(&p));
+        p.required_mods.push("SODIUM".into());
+        assert!(!valid_content_manifest(&p));
+        p.required_mods.pop();
+        p.required_shaders.push("../unsafe".into());
+        assert!(!valid_content_manifest(&p));
+        p.required_shaders.clear();
+        p.engine="horizon".into();
+        p.loader="horizon".into();
+        assert!(!valid_content_manifest(&p));
+        p.required_mods.clear();
+        assert!(valid_content_manifest(&p));
+    }
+}
