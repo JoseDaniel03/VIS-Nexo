@@ -192,6 +192,28 @@ async function refreshAssets(){
   await Promise.all(missing.map(async p=>{try{assetCache[p]=await command('preview_asset',{path:p})}catch{}}));
 }
 let socialMode = 'disconnected', socialError = '', socialOverlay = null;
+const socialAvatars=new Map(), avatarLoads=new Set();
+function socialAvatarHtml(username,size=34,owned=false) {
+ const entry=socialAvatars.get(username);
+ if(entry?.url)return `<span class="avatar" style="width:${size}px;height:${size}px"><img alt="" src="${attr(entry.url)}"/></span>`;
+ return owned?avatarVisual(db.user?.avatar,username,size,true):avatarVisual('',username,size);
+}
+function refreshSocialAvatars(snapshot) {
+ const entries=[{username:snapshot.username,avatar_version:snapshot.avatar_version},...(snapshot.friends||[])];
+ for(const person of entries){
+  const version=Number(person.avatar_version||0),username=person.username;
+  if(!username||!version||socialAvatars.get(username)?.version===version)continue;
+  const key=username+':'+version;
+  if(avatarLoads.has(key))continue;
+  avatarLoads.add(key);
+  void social.getAvatar(username).then(result=>{
+   if(result.avatar&&(!result.avatar.startsWith('data:image/webp;base64,')||result.avatar.length>40000))return;
+   socialAvatars.set(username,{version,url:result.avatar||''});
+   if(db.user?.username===snapshot.username)render();
+  }).catch(()=>{}).finally(()=>avatarLoads.delete(key));
+ }
+}
+
 function mergeSocialView() {
   if (!socialOverlay || !db.user || socialOverlay.username !== db.user.username) return;
   db.friends = socialOverlay.friends;
@@ -205,6 +227,7 @@ const social = createSocialRemote(command, (snapshot, messages) => {
     incoming_requests:snapshot.incoming_requests||[], outgoing_requests:snapshot.outgoing_requests||[],
     messages:messages||[] };
   mergeSocialView();
+  refreshSocialAvatars(snapshot);
   render();
 }, (mode, error) => {
   if (socialMode === mode && socialError === (error||'')) return;
@@ -212,6 +235,51 @@ const social = createSocialRemote(command, (snapshot, messages) => {
   socialError = error || '';
   if (db.user) render();
 });
+async function enableSocialCloudPassword(){
+ if(!social.connected()){message('Conectá VIS Social para vincular la cuenta.',true);return;}
+ const password=window.prompt('Nueva contraseña online (mínimo 10 caracteres, no uses el PIN local):');
+ if(password===null)return;
+ const confirm=window.prompt('Repetí la nueva contraseña online:');
+ if(confirm===null)return;
+ try{const reply=await command('social_enable_cloud_password',{password,confirm});
+   message('Cuenta vinculada. Tu ID pública: '+reply.public_id);
+   await social.sync();
+ }catch(error){message(String(error),true);}
+}
+async function selectAndUploadSocialAvatar(){
+ if(!social.connected()){message('Conectá VIS Social para subir tu imagen.',true);return;}
+ const chooser=document.createElement('input');chooser.type='file';
+ chooser.accept='image/png,image/jpeg,image/webp';chooser.hidden=true;
+ chooser.addEventListener('change',async()=>{
+  const file=chooser.files?.[0];if(!file)return;
+  if(file.size>8*1024*1024){message('La imagen de origen supera 8 MB.',true);return;}
+  let url='';
+  try{
+   url=URL.createObjectURL(file);
+   const img=new Image();img.src=url;
+   await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(Error('Imagen no válida'));});
+   const canvas=document.createElement('canvas');canvas.width=128;canvas.height=128;
+   const ctx=canvas.getContext('2d');if(!ctx)throw Error('Canvas no disponible');
+   const crop=Math.min(img.naturalWidth,img.naturalHeight);
+   if(!crop)throw Error('Imagen vacía');
+   ctx.drawImage(img,(img.naturalWidth-crop)/2,(img.naturalHeight-crop)/2,crop,crop,0,0,128,128);
+   let data='';
+   for(const quality of [0.80,0.65,0.48,0.30]){
+    data=canvas.toDataURL('image/webp',quality);
+    if(data.startsWith('data:image/webp;base64,')&&data.length<32800)break;
+   }
+   if(!data.startsWith('data:image/webp;base64,')||data.length>=32800)
+     throw Error('No se pudo comprimir la imagen en WebP a 24 KB');
+   await social.uploadAvatar(data);
+   socialAvatars.delete(db.user?.username);
+   const avatar=await social.getAvatar(db.user.username);
+   socialAvatars.set(db.user.username,{version:avatar.avatar_version,url:avatar.avatar||''});
+   render();message('Foto de perfil sincronizada en VIS Social.');
+  }catch(error){message(String(error),true);}
+  finally{if(url)URL.revokeObjectURL(url);}
+ },{once:true});
+ chooser.click();
+}
 async function connectSocial(reuseCloudSession=false) {
   if (!native || !db.user || isGuest()) return;
   try { await social.start(db.user.username,reuseCloudSession); }
@@ -268,7 +336,7 @@ function avatarVisual(avatar,username,size=36,owned=false){
  const content=avatar&&preview(avatar)?`<img alt="" src="${preview(avatar)}"/>`:preset?`<span class="avatar-glyph">${I(preset==='orbit'?'circle':preset==='eclipse'?'moon':preset==='pulse'?'rocket':preset==='nebula'?'star':'layers',Math.round(size*.48))}</span>`:esc(username?.[0]?.toUpperCase()||'V');
  return `<span class="avatar avatar-style-${valid}" style="width:${size}px;height:${size}px">${content}${owned&&db.user?.avatar_layer&&preview(db.user.avatar_layer)?`<img class="avatar-layer-overlay" src="${preview(db.user.avatar_layer)}" alt=""/>`:''}</span>`;
 }
-function userAvatar(size=36){return avatarVisual(db.user?.avatar,db.user?.username,size,true)}
+function userAvatar(size=36){return socialAvatarHtml(db.user?.username,size,true)}
 function sidebar(){
  const personal = libraryMode==='user';
  const items = personal
@@ -294,18 +362,18 @@ function socialPanel(){
  return `<aside class="social-pane ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
  <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
  <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
- <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
+ <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')} ${social.state()?.public_id?`· ID: ${esc(social.state().public_id)}`:''}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
 
  <div class="social-group-head"><span class="social-contacts-label">${I('users',15)} ${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'} ${db.incoming_requests?.length?`<span class="contact-notification" title="Solicitudes de amistad pendientes">${db.incoming_requests.length}</span>`:''} </span><span>${projectFriends.length}</span></div>
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
  ${socialTab==='projects'&&!projectId?`<p class="social-empty">Abrí un proyecto para ver contactos que también lo siguen.</p>`:''}
- ${projectFriends.filter(f=>(f.username+' '+(f.alias||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${avatarVisual('',f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span><span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
+ ${projectFriends.filter(f=>(f.username+' '+(f.alias||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${socialAvatarHtml(f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span><span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
  ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button><button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}
- <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>
+ <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>${social.connected()&&!social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-enable-cloud">Vincular contraseña online</button>`:''}
  `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
@@ -922,6 +990,8 @@ root.addEventListener('click',async event=>{
  else if(act==='open-chat'){chatWith=id;chatWindowSize=100;render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';render();},{reducedMotion:prefs.reducedMotion});}
+ else if(act==='social-upload-avatar'){void selectAndUploadSocialAvatar();}
+ else if(act==='social-enable-cloud'){void enableSocialCloudPassword();}
  else if(act==='social-public-identity'){
   if(!native){message('La identidad se muestra desde VIS Nexo nativo.',true);return;}
   try{
