@@ -115,7 +115,8 @@ fn verify_files(root:&Path,info:&Descriptor)->Result<(),String>{
         &fs::read(root.join("vis-horizon-source.json")).map_err(|e|e.to_string())?)
         .map_err(|e|e.to_string())?;
     if source["source_repo"].as_str()!=Some(OFFICIAL)||
-        source["source_commit"].as_str()!=Some(info.source_commit.as_str()){
+        source["source_commit"].as_str()!=Some(info.source_commit.as_str())||
+        source["vis_direct_patch"].as_str()!=Some("vis-nexo-direct-game-window-v1"){
         return Err("Origen o commit del juego no coincide con la versión firmada".into());
     }
     Ok(())
