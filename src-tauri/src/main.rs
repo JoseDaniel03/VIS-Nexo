@@ -59,6 +59,10 @@ struct RecentIdentity { username: String, provider: String }
 #[serde(default)]
 struct RecentList { accounts: Vec<RecentIdentity> }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct UniverseCache { source: String, projects: Vec<GameProject> }
+
 
 struct Backend {
     storage: LocalStore,
@@ -67,6 +71,7 @@ struct Backend {
     branding: Branding,
     branding_path: PathBuf,
     project_execution: BTreeMap<String,bool>,
+    remote_projects: Vec<GameProject>,
     execution_path: PathBuf,
     data_root: PathBuf,
     active_user: Option<String>,
@@ -122,12 +127,24 @@ fn init_backend(app: &tauri::AppHandle) -> Result<Backend, String> {
     };
     let mut branding: Branding = load_json(&branding_path)?;
     if branding.name.trim().is_empty() || ["VSLauncher", "Virgoland", "Vierola"].iter().any(|legacy| branding.name.eq_ignore_ascii_case(legacy)) { branding.name = "VIS Nexo".into(); }
+    let saved_remote:UniverseCache=load_json(&data_root.join("vis-universe-cache.json"))?;
+    let remote_projects=if cloud::catalog_url(&data_root).as_deref()==Some(saved_remote.source.as_str()) {
+        saved_remote.projects
+    }else{Vec::new()};
     Ok(Backend { storage, catalog, catalog_path, branding, branding_path,
-        project_execution, execution_path, data_root, active_user: None,
+        project_execution, remote_projects, execution_path, data_root, active_user: None,
         guest_name: None, recent_accounts: recent_accounts.accounts,
         recent_path, presence: "online".into() })
 }
 impl Backend {
+    fn project(&self,id:&str)->Option<&GameProject>{
+        let admin=self.active_user.as_deref()
+            .and_then(|u|self.storage.get(u)).is_some_and(|a|a.role==Role::Admin);
+        if admin { self.catalog.projects.iter().find(|p|p.id==id)
+            .or_else(||self.remote_projects.iter().find(|p|p.id==id)) }
+        else { self.remote_projects.iter().find(|p|p.id==id)
+            .or_else(||self.catalog.projects.iter().find(|p|p.id==id)) }
+    }
     fn add_recent(&mut self, username: &str, provider: &str) -> Result<(), String> {
         self.recent_accounts.retain(|entry| entry.username != username || entry.provider != provider);
         self.recent_accounts.insert(0, RecentIdentity {username: username.to_owned(), provider: provider.to_owned()});
@@ -149,7 +166,7 @@ impl Backend {
             for mut instance in self.storage.prefs(&account.username).instances {
                 if instance.engine != "java" && for_user.is_none() {continue}
                 let allowed = instance.project_id == PERSONAL_PROJECT_ID ||
-                    self.catalog.projects.iter().any(|p|p.id==instance.project_id);
+                    self.project(&instance.project_id).is_some();
                 if !allowed {continue}
                 if let Ok(dir)=minecraft::instance_dir(&self.data_root,&account.username,&instance) {
                     if minecraft::installed(&dir,&instance) {
@@ -216,7 +233,14 @@ impl Backend {
                 own.append(&mut other);
                 own
             };
-        Snapshot { user, projects: self.catalog.projects.clone(), instances,
+        let mut projects=self.catalog.projects.clone();
+        let admin=user.as_ref().is_some_and(|u|u.role==Role::Admin);
+        for published in &self.remote_projects {
+            if let Some(existing)=projects.iter_mut().find(|p|p.id==published.id){
+                if !admin {*existing=published.clone();}
+            } else {projects.push(published.clone());}
+        }
+        Snapshot { user, projects, instances,
             friends, incoming_requests, outgoing_requests, messages,
             branding: self.branding.clone(), project_execution: self.project_execution.clone(),
             recent_accounts: self.recent_accounts.clone(), mode: if is_guest {"offline"} else {"local"} }
@@ -427,7 +451,7 @@ fn ensure_project_instance(state:State<'_,Mutex<Backend>>,project_id:String,game
     if game_dir.trim().is_empty(){return Err("Elegí una carpeta para esta instancia".into());}
     let s=locked(&state)?;
     let username=s.username()?.to_owned();
-    let project=s.catalog.projects.iter().find(|p|p.id==project_id).ok_or("Proyecto inexistente")?;
+    let project=s.project(&project_id).ok_or("Proyecto inexistente")?;
     if !project.installable || s.project_execution.get(&project_id)==Some(&false){
         return Err("VIS Studios todavía no habilitó este proyecto".into());
     }
@@ -708,7 +732,7 @@ fn checked_instance(s:&Backend,project_id:&str,name:&str,require_enabled:bool)->
     // Personal profiles belong to the authenticated local account and are not
     // governed by publication flags of administrator-owned Virgoland projects.
     if project_id != PERSONAL_PROJECT_ID {
-        let project=s.catalog.projects.iter().find(|p|p.id==project_id).ok_or("Proyecto inexistente")?;
+        let project=s.project(project_id).ok_or("Proyecto inexistente")?;
         if require_enabled && (!project.installable || s.project_execution.get(project_id)==Some(&false)) {
             return Err("El administrador deshabilitó la ejecución de este proyecto".into());
         }
@@ -979,6 +1003,25 @@ async fn install_app_update(app:tauri::AppHandle,confirmed:bool)->Result<(),Stri
     updates::install(&app).await
 }
 #[tauri::command]
+async fn sync_universe(state:State<'_,Mutex<Backend>>)->Result<Snapshot,String>{
+    let root={locked(&state)?.data_root.clone()};
+    let catalog=tauri::async_runtime::spawn_blocking({let root=root.clone();move||cloud::fetch(&root)})
+        .await.map_err(|e|e.to_string())??;
+    let projects=catalog.projects.into_iter().filter_map(|p|p.project).collect::<Vec<_>>();
+    let cache=UniverseCache{source:catalog.source,projects:projects.clone()};
+    atomic_json(&root.join("vis-universe-cache.json"),&cache)?;
+    let mut s=locked(&state)?;
+    s.remote_projects=projects;
+    Ok(s.snapshot())
+}
+#[tauri::command]
+async fn publish_universe(state:State<'_,Mutex<Backend>>,token:String)->Result<Snapshot,String>{
+    let (root,projects)={let s=locked(&state)?;s.admin()?;(s.data_root.clone(),s.catalog.projects.clone())};
+    tauri::async_runtime::spawn_blocking(move||cloud::publish(&root,&projects,&token))
+        .await.map_err(|e|e.to_string())??;
+    Ok(locked(&state)?.snapshot())
+}
+#[tauri::command]
 async fn fetch_cloud_catalog(state:State<'_,Mutex<Backend>>)->Result<cloud::CloudCatalog,String>{
     let root={locked(&state)?.data_root.clone()};
     tauri::async_runtime::spawn_blocking(move||cloud::fetch(&root)).await.map_err(|e|e.to_string())?
@@ -1017,7 +1060,7 @@ fn main() {
             set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
-            fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog
+            fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");

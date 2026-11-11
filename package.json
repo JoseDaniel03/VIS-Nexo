@@ -1,7 +1,7 @@
 {
   "name": "vis-nexo",
   "private": true,
-  "version": "2.18.0",
+  "version": "2.19.0",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
@@ -13,7 +13,7 @@
     "verify:bridge": "python3 tools/verify_bridge.py",
     "check:performance": "python3 tools/check_vis210.py",
     "test:ui:vis210": "python3 tools/test_vis210.py",
-    "check:release": "python3 tools/check_vis211.py && python3 tools/check_vis212.py && python3 tools/check_vis213.py && python3 tools/check_vis214.py && python3 tools/check_vis215.py && python3 tools/check_vis216.py && python3 tools/check_vis217.py && python3 tools/check_vis218.py && python3 tools/test_horizon_from_source.py",
+    "check:release": "python3 tools/check_vis211.py && python3 tools/check_vis212.py && python3 tools/check_vis213.py && python3 tools/check_vis214.py && python3 tools/check_vis215.py && python3 tools/check_vis216.py && python3 tools/check_vis217.py && python3 tools/check_vis218.py && python3 tools/test_horizon_from_source.py && node tools/test_universe_worker.mjs",
     "test:ui:vis211": "python3 tools/test_vis211.py",
     "test:ui:vis212": "python3 tools/test_vis212.py",
     "test:ceibo:local": "python3 tools/test_vis_admin_local.py",
@@ -26,7 +26,8 @@
     "horizon:update": "node tools/prepare_horizon.mjs build --update",
     "horizon:verify": "node tools/prepare_horizon.mjs verify",
     "test:horizon:source": "python3 tools/test_horizon_from_source.py",
-    "test:ui:vis218": "python3 tools/test_vis218.py"
+    "test:ui:vis218": "python3 tools/test_vis218.py",
+    "test:universe": "node tools/test_universe_worker.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
