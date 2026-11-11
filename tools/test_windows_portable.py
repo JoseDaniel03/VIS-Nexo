@@ -76,11 +76,16 @@ class WindowsPortableTests(unittest.TestCase):
 
 
     def test_slim_launcher_contains_no_rust_game_runtime(self):
+        (self.horizon.parent / "vis-rust-runtime.json").write_text(json.dumps({
+            "format":1, "source_repo":"https://github.com/horizon-rust/horizon.git",
+            "source_commit":"a"*40, "download_url":"", "archive_sha256":"b"*64
+        }))
         directory, archive = portable.package(self.release, self.horizon, slim=True)
         self.assertFalse((directory / "horizon").exists())
         with zipfile.ZipFile(archive) as zipped:
             files = zipped.namelist()
             self.assertIn("VIS Nexo.exe", files)
+            self.assertIn("vis-rust-runtime.json", files)
             self.assertFalse(any(name.startswith("horizon/") for name in files))
 
     def test_rejects_tampered_horizon_executable(self):
