@@ -21,7 +21,7 @@ jobs:
             bundles: appimage,deb
           - platform: windows
             runner: windows-2022
-            bundles: nsis
+            bundles: portable
     env:
       PYTHONUTF8: "1"
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -60,6 +60,8 @@ jobs:
         run: |
           npm run validate
           npm run check:release
+      - name: Test Windows portable payload generation
+        run: python tools/test_windows_portable.py
       - name: Verify Rust backend and tests
         run: |
           cargo check -p vslauncher-tauri --all-targets --locked
@@ -72,16 +74,31 @@ jobs:
         run: npm run horizon:source
       - name: Verify bundled game's source manifest
         run: npm run horizon:verify
-      - name: Build, sign and attach release artifacts
+      - name: Build and attach signed Linux release artifacts
+        if: runner.os == 'Linux'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: VIS Nexo ${{ github.ref_name }}
-          releaseBody: 'Instaladores Linux/Windows y actualización firmada. Se conservan perfiles y mundos existentes.'
+          releaseBody: 'Linux AppImage/deb y Windows ZIP portable sin instalador. Descomprimí en Windows y abrí VIS Nexo.exe. Los perfiles y mundos se conservan; la edición portable se actualiza reemplazando la carpeta.'
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
           args: --bundles ${{ matrix.bundles }}
+      - name: Build Windows portable (no setup, no NSIS)
+        if: runner.os == 'Windows'
+        run: npm run build -- --no-bundle --config src-tauri/tauri.unsigned.json
+      - name: Package Windows with Horizon verified source
+        if: runner.os == 'Windows'
+        run: python tools/package_windows_portable.py
+      - name: Publish Windows portable ZIP on GitHub Releases
+        if: runner.os == 'Windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: VIS Nexo ${{ github.ref_name }}
+          files: target/release/portable/VIS-Nexo-Windows-x64-Portable.zip
+          fail_on_unmatched_files: true
+          overwrite_files: true
