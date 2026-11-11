@@ -69,6 +69,14 @@ async function main() {
   await call("/v1/chats/" + direct.id + "/read", "POST", {}, bob.token);
   assert.equal((await call("/v1/social", "GET", undefined, bob.token)).chats[0].unread, 0);
 
+  const group = await call("/v1/chats/groups", "POST",
+    { title: "Amigos VIS", members: ["bobby"] }, alice.token, 201);
+  assert.equal((await call("/v1/chats/" + group.id + "/messages", "GET", undefined, bob.token)).messages.length, 0);
+  await call("/v1/chats/" + group.id + "/leave", "POST", {}, bob.token);
+  await call("/v1/chats/" + group.id + "/messages", "GET", undefined, bob.token, 404);
+  await call("/v1/chats/" + group.id + "/leave", "POST", {}, alice.token);
+  await call("/v1/chats/" + group.id + "/messages", "GET", undefined, alice.token, 404);
+
   await call("/v1/chats/" + direct.id + "/messages", "GET", undefined, charlie.token, 404);
   await call("/v1/chats/" + direct.id + "/messages", "POST", { body: "Forbidden" }, charlie.token, 404);
   await call("/v1/chats/groups", "POST", { title: "No friends", members: ["charlie"] }, alice.token, 403);
