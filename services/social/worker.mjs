@@ -707,6 +707,7 @@ export default {
     } catch (error) {
       if (error instanceof HttpFailure) return reply({ error: error.message }, error.status);
       console.error("VIS Social request failed", path, error instanceof Error ? error.name : "error");
+      if (env?.DEBUG_ERRORS === true) console.error("VIS Social local test detail",error);
       return reply({ error: "Service unavailable" }, 503);
     }
   },
