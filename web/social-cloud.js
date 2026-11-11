@@ -74,13 +74,19 @@ function signOut(drawAfter = true) {
   chatDrafts.clear(); renderedChatId = ""; olderScroll = null;
   stopSocket(); stopPolling(); if (drawAfter) draw();
 }
+// Never let an old response overwrite a different account or active conversation.
 async function refresh() {
-  if (!token) return;
+  if (!token || !account) return;
+  const requestToken = token, requestAccount = account.id, opening = chatId;
+  const stillCurrent = () => token === requestToken && account?.id === requestAccount;
   try {
     const data = await api("/v1/social");
-    snapshot = data; error = "";
-    if (chatId) {
-      const messages = await api("/v1/chats/" + encodeURIComponent(chatId) + "/messages");
+    if (!stillCurrent()) return;
+    snapshot = data;
+    error = "";
+    if (opening && chatId === opening) {
+      const messages = await api("/v1/chats/" + encodeURIComponent(opening) + "/messages");
+      if (!stillCurrent() || chatId !== opening) return;
       const recent = messages.messages || [];
       if (chatMessages.length) {
         const found = new Map(chatMessages.concat(recent).map(msg => [msg.id, msg]));
@@ -89,12 +95,15 @@ async function refresh() {
         chatMessages = recent;
         chatBefore = messages.before;
       }
-      await api("/v1/chats/" + encodeURIComponent(chatId) + "/read", "POST", {});
-      const active = data.chats?.find(c => c.id === chatId);
+      await api("/v1/chats/" + encodeURIComponent(opening) + "/read", "POST", {});
+      if (!stillCurrent() || chatId !== opening) return;
+      const active = data.chats?.find(c => c.id === opening);
       if (active) active.unread = 0;
     }
     draw();
-  } catch (err) { showError(err.message); }
+  } catch (err) {
+    if (stillCurrent()) showError(err.message);
+  }
 }
 async function connect() {
   stopSocket();
