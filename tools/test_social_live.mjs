@@ -77,6 +77,27 @@ const health=await request("/health");
 assert.equal(health.status,"ready");
 assert.equal(health.schema,3);
 const a=await identity(names[0]), b=await identity(names[1]);
+const accountA=await request("/v1/account",undefined,a.token);
+const accountB=await request("/v1/account",undefined,b.token);
+assert.equal(accountA.account.role,"user","No account may self-bootstrap as admin");
+assert.equal(accountB.account.role,"user");
+const publicProjects=await request("/v1/projects",undefined,a.token);
+assert(Array.isArray(publicProjects.projects));
+await request("/v1/admin/projects/upsert",{
+  id:"vis-sec-probe",title:"Unauthorized",visibility:"published"
+},a.token,403);
+await request("/v1/admin/accounts/role",{
+  username:b.username,role:"super_admin"
+},a.token,403);
+await request("/v1/projects/subscribe",{
+  project_id:"does-not-exist-security-probe"
+},a.token,404);
+const browserOrigin=await fetch(base+"/v1/state",{
+  headers:{Origin:"https://untrusted.example",Authorization:"Bearer "+a.token},
+  signal:AbortSignal.timeout(15000)
+});
+assert.equal(browserOrigin.status,403,"Browser-origin requests must be denied");
+
 await request("/v1/friends/request",{username:b.username},a.token,201);
 const incoming=await request("/v1/state",undefined,b.token);
 assert(incoming.incoming_requests.includes(a.username),"Recipient must see friend request");
