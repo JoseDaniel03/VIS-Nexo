@@ -74,6 +74,15 @@ class WindowsPortableTests(unittest.TestCase):
             self.assertIn("SIN INSTALADOR\n1.", info.replace("\r\n", "\n"))
             self.assertNotIn("accounts.json", z.namelist())
 
+
+    def test_slim_launcher_contains_no_rust_game_runtime(self):
+        directory, archive = portable.package(self.release, self.horizon, slim=True)
+        self.assertFalse((directory / "horizon").exists())
+        with zipfile.ZipFile(archive) as zipped:
+            files = zipped.namelist()
+            self.assertIn("VIS Nexo.exe", files)
+            self.assertFalse(any(name.startswith("horizon/") for name in files))
+
     def test_rejects_tampered_horizon_executable(self):
         (self.horizon / "horizon-client.exe").write_bytes(b"modified game")
         with self.assertRaisesRegex(RuntimeError, "cambió"):
