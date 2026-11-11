@@ -15,6 +15,28 @@ for (const stream of [child.stdout, child.stderr]) {
   stream.on("data", data => { output = (output + data.toString()).slice(-14000); });
 }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const openSockets = [];
+function nextSocketEvent(socket, desired) {
+  return new Promise((resolve,reject) => {
+    const timeout = setTimeout(() => { cleanup(); reject(new Error("WebSocket event not received: " + desired)); }, 15000);
+    const message = event => {
+      let value;
+      try { value = JSON.parse(event.data); } catch { return; }
+      if (value?.type !== desired) return;
+      cleanup(); resolve(value);
+    };
+    const failed = () => { cleanup(); reject(new Error("WebSocket closed before " + desired)); };
+    function cleanup() {
+      clearTimeout(timeout);
+      socket.removeEventListener("message",message);
+      socket.removeEventListener("close",failed);
+      socket.removeEventListener("error",failed);
+    }
+    socket.addEventListener("message",message);
+    socket.addEventListener("close",failed);
+    socket.addEventListener("error",failed);
+  });
+}
 async function call(path, method = "GET", data, token, expected = 200) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
@@ -59,10 +81,24 @@ async function main() {
   await call("/v1/presence", "POST", { visibility: "invisible" }, bob.token);
   assert.equal((await call("/v1/social", "GET", undefined, bob.token)).me.presence, "invisible");
 
+  const wsTicket = await call("/v1/rt/ticket", "POST", {}, bob.token);
+  assert.match(wsTicket.ticket, /^[a-f0-9]{64}$/);
+  const socket = new WebSocket(host.replace(/^http:/, "ws:") + "/v1/rt?ticket=" + wsTicket.ticket);
+  openSockets.push(socket);
+  await nextSocketEvent(socket, "ready");
+  const hidden = await call("/v1/social", "GET", undefined, alice.token);
+  assert.equal(hidden.friends[0].online, false, "Invisible presence must not expose a connected peer");
+  await call("/v1/presence", "POST", { visibility: "online" }, bob.token);
+  const publicStatus = await call("/v1/social", "GET", undefined, alice.token);
+  assert.equal(publicStatus.friends[0].online, true, "Connected visible peer should appear online");
+
   const direct = await call("/v1/chats/direct", "POST", { username: "bobby" }, alice.token);
   const same = await call("/v1/chats/direct", "POST", { username: "alice" }, bob.token);
   assert.equal(direct.id, same.id, "Direct chats must be unique per user pair");
+  const notified = nextSocketEvent(socket, "chat:message");
   await call("/v1/chats/" + direct.id + "/messages", "POST", { body: "Hola, Bob" }, alice.token, 201);
+  const delivered = await notified;
+  assert.equal(delivered.chat_id, direct.id, "WebSocket notification must reference the committed chat");
   const msgs = await call("/v1/chats/" + direct.id + "/messages", "GET", undefined, bob.token);
   assert.equal(msgs.messages[0].body, "Hola, Bob");
   assert.equal((await call("/v1/social", "GET", undefined, bob.token)).chats[0].unread, 1);
@@ -95,6 +131,7 @@ try {
   console.error("Worker logs:\n" + output);
   process.exitCode = 1;
 } finally {
+  for (const socket of openSockets) { try { socket.close(); } catch {} }
   child.kill("SIGTERM");
   await sleep(350);
   if (child.exitCode === null) child.kill("SIGKILL");
