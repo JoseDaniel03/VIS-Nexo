@@ -1,4 +1,6 @@
-// VIS Social: cloud panel for the existing launcher sidebar. No local nickname is trusted by the API.
+// VIS Social: Cloudflare relays live messages; content lives in small device-only logs.
+import { loadLocalChat, appendLocalChat, markLocalChatRead, eraseLocalChat, purgeLocalChats,
+  LOCAL_CHAT_LIMIT_BYTES, LOCAL_CHAT_RETENTION_MS } from "./humile-local-log.js";
 const endpointKey = "vis-social-worker-url";
 let endpoint = "";
 try { endpoint = localStorage.getItem(endpointKey) || ""; } catch {}
@@ -69,6 +71,50 @@ const safeEndpoint = value => {
 };
 const showError = value => { error = String(value || "Error"); draw(); };
 const endpointReady = () => !!safeEndpoint(endpoint);
+
+function logOf(id) {
+  if (!account || !endpointReady()) return { messages: [], unread: 0, bytes: 0, latest: 0 };
+  return loadLocalChat(localStorage, endpoint, account.id, id);
+}
+function activateChat(id) {
+  chatId = id; chatBefore = null;
+  const log = markLocalChatRead(localStorage, endpoint, account.id, id);
+  chatMessages = log.messages;
+  const active = snapshot?.chats?.find(c => c.id === id);
+  if (active) active.unread = 0;
+}
+function localInboxSnapshot(data) {
+  if (!account) return;
+  purgeLocalChats(localStorage, endpoint, account.id);
+  for (const chat of data.chats || []) {
+    const log = logOf(chat.id);
+    chat.unread = log.unread;
+    chat.latest_local = log.latest;
+  }
+}
+async function receiveLiveChat(payload) {
+  if (!cloudActive || !account || !token || !payload || typeof payload !== "object") return;
+  if (!/^[a-f0-9-]{36}$/i.test(payload.chat_id || "") ||
+      !/^[a-f0-9-]{36}$/i.test(payload.id || "") ||
+      typeof payload.body !== "string" || typeof payload.sender !== "string") return;
+  const requestToken = token, recipientId = account.id;
+  if (!snapshot?.chats?.some(c => c.id === payload.chat_id)) await refresh();
+  if (token !== requestToken || account?.id !== recipientId ||
+      !snapshot?.chats?.some(c => c.id === payload.chat_id)) return;
+  try {
+    const log = appendLocalChat(localStorage, endpoint, recipientId, payload.chat_id, payload);
+    const active = snapshot.chats.find(c => c.id === payload.chat_id);
+    if (active) {
+      active.unread = log.unread;
+      active.latest_local = log.latest;
+    }
+    if (chatId === payload.chat_id) activateChat(chatId);
+    draw();
+  } catch (err) {
+    showError("No se pudo guardar el mensaje en este equipo: " + String(err.message || err));
+  }
+}
+
 function stopSocket() {
   if (socketPing) clearInterval(socketPing);
   socketPing = null;
@@ -143,21 +189,9 @@ async function refresh() {
     if (!stillCurrent()) return;
     snapshot = data;
     error = "";
-    if (opening && chatId === opening) {
-      const messages = await api("/v1/chats/" + encodeURIComponent(opening) + "/messages");
-      if (!stillCurrent() || chatId !== opening) return;
-      const recent = messages.messages || [];
-      if (chatMessages.length) {
-        const found = new Map(chatMessages.concat(recent).map(msg => [msg.id, msg]));
-        chatMessages = [...found.values()].sort((a,b) => a.seq - b.seq).slice(-250);
-      } else {
-        chatMessages = recent;
-        chatBefore = messages.before;
-      }
-      await api("/v1/chats/" + encodeURIComponent(opening) + "/read", "POST", {});
-      if (!stillCurrent() || chatId !== opening) return;
-      const active = data.chats?.find(c => c.id === opening);
-      if (active) active.unread = 0;
+    localInboxSnapshot(data);
+    if (opening && chatId === opening && data.chats?.some(c => c.id === opening)) {
+      activateChat(opening);
     }
     draw();
   } catch (err) {
@@ -189,7 +223,8 @@ async function connect() {
       if (event.data === "pong") return;
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === "ready" || payload.type === "social:update" || payload.type === "chat:message") void refresh();
+        if (payload.type === "chat:message") void receiveLiveChat(payload);
+        else if (payload.type === "ready" || payload.type === "social:update") void refresh();
       } catch {}
     };
     socket.onclose = () => {
@@ -273,6 +308,7 @@ function menuMarkup() {
     title = chat.kind === "group" ? chat.title : (displayFriend(friendByUsername(chat.peer_username)) || chat.peer_username || "Conversación");
     options += contextButton("Abrir conversación", "open-chat", chat.id);
     options += contextButton("Marcar como leído", "mark-chat-read", chat.id);
+    options += contextButton("Borrar historial en este equipo", "erase-chat-local", chat.id);
     if (chat.kind === "group") {
       options += '<div class="vis-cloud-menu-divider" role="separator"></div>' +
         contextButton("Salir del grupo", "leave-group-menu", chat.id);
@@ -347,7 +383,9 @@ function friendList() {
 }
 function chatList() {
   let markup = '<section class="vis-social-block"><h4>Conversaciones</h4>';
-  for (const chat of snapshot?.chats || []) {
+  const conversations = [...(snapshot?.chats || [])].sort((a, b) =>
+    (b.latest_local || Date.parse(b.created_at) || 0) - (a.latest_local || Date.parse(a.created_at) || 0));
+  for (const chat of conversations) {
     const friend = chat.kind === "direct" ? friendByUsername(chat.peer_username) : null;
     const label = chat.kind === "group" ? chat.title : (displayFriend(friend) || chat.peer_username || "Chat privado");
     markup += '<div class="vis-cloud-chat-row" data-cloud-context="chat" data-id="' + key(chat.id) + '">' +
@@ -371,15 +409,16 @@ function thread() {
     esc(chat?.kind === "group" ? chat.title : (displayFriend(friendByUsername(chat?.peer_username)) || chat?.peer_username || "Conversación")) +
     '</b>' + (chat?.kind === "group" ? '<button class="vis-cloud-mini" data-cloud="leave-group" title="Salir del grupo">Salir del grupo</button>' : '') +
     '<button data-cloud="close-chat" aria-label="Cerrar conversación">×</button></div>' +
+    '<p class="vis-cloud-local-hint">Historial local · 30 días · máximo 2 KB por chat · sin sincronización entre equipos</p>' +
     '<div class="vis-cloud-messages">';
-  if (chatBefore) markup += '<button data-cloud="older">Ver mensajes anteriores</button>';
+  // The current device contains all retained history. No remote page is queried.
   if (!chatMessages.length) markup += '<p class="vis-social-note">Todavía no hay mensajes.</p>';
   for (const msg of chatMessages) markup += '<div class="vis-cloud-bubble ' +
     (msg.sender_id === account?.id ? "mine" : "") + '"><b>' +
     esc(displayFriend(friendById(msg.sender_id)) || msg.sender) +
     '</b><span>' + esc(msg.body) + '</span><small>' + esc(new Date(msg.created_at).toLocaleString("es-AR")) + '</small></div>';
   markup += '</div><form data-cloud-form="message" class="vis-cloud-inline">' +
-    '<input name="body" maxlength="2000" placeholder="Escribí un mensaje..." required>' +
+    '<input name="body" maxlength="1500" placeholder="Mensaje breve (máx. 1536 bytes)" required>' +
     '<button aria-label="Enviar mensaje">➤</button></form></section>';
   return markup;
 }
@@ -468,6 +507,7 @@ async function onSubmit(event) {
       const mode = submitter?.value === "register" ? "register" : "login";
       const result = await api("/v1/auth/" + mode, "POST", { username, password }, false);
       token = result.token; account = result.account; snapshot = null;
+      purgeLocalChats(localStorage, endpoint, account.id);
       await refresh(); startLive();
     } else if (action === "custom-status") {
       const result = await api("/v1/presence", "POST", { custom_status: String(data.get("custom") || "") });
@@ -488,10 +528,16 @@ async function onSubmit(event) {
       chatId = created.id; await refresh();
     } else if (action === "message") {
       if (!chatId) return;
-      await api("/v1/chats/" + encodeURIComponent(chatId) + "/messages", "POST", { body: String(data.get("body") || "") });
+      const sent = await api("/v1/chats/" + encodeURIComponent(chatId) + "/messages", "POST",
+        { body: String(data.get("body") || "") });
+      const log = appendLocalChat(localStorage, endpoint, account.id, chatId, sent);
+      chatMessages = log.messages;
+      const active = snapshot?.chats?.find(c => c.id === chatId);
+      if (active) { active.unread = log.unread; active.latest_local = log.latest; }
       chatDrafts.set(chatId, "");
       const field = form.querySelector('input[name="body"]'); if (field) field.value = "";
-      await refresh();
+      // Other recipients must be online: the relay intentionally has no offline queue.
+      if (sent.delivered_to < 1) showError("Nadie estaba conectado para recibir este mensaje.");
     }
   });
 }
@@ -530,9 +576,20 @@ async function onClick(event) {
   }
   if (action === "mark-chat-read") {
     await perform(async () => {
-      await api("/v1/chats/" + id + "/read", "POST", {});
-      await refresh();
+      const local = markLocalChatRead(localStorage, endpoint, account.id, id);
+      const chat = snapshot?.chats?.find(c => c.id === id);
+      if (chat) chat.unread = 0;
+      if (chatId === id) chatMessages = local.messages;
     });
+    return;
+  }
+  if (action === "erase-chat-local") {
+    if (!confirm("¿Borrar los mensajes de esta conversación guardados en este equipo?")) return;
+    eraseLocalChat(localStorage, endpoint, account.id, id);
+    const chat = snapshot?.chats?.find(c => c.id === id);
+    if (chat) { chat.unread = 0; chat.latest_local = 0; }
+    if (chatId === id) chatMessages = [];
+    draw();
     return;
   }
   if (action === "leave-group-menu") {
@@ -561,8 +618,8 @@ async function onClick(event) {
   await perform(async () => {
     if (action === "chat-friend") {
       const result = await api("/v1/chats/direct", "POST", { username: button.dataset.name });
-      chatId = result.id; chatMessages = []; chatBefore = null; await refresh();
-    } else if (action === "open-chat") { chatId = id; chatMessages = []; chatBefore = null; await refresh(); }
+      activateChat(result.id); await refresh();
+    } else if (action === "open-chat") { activateChat(id); await refresh(); }
     else if (["accept", "reject", "cancel"].includes(action)) {
       await api("/v1/friends/answer", "POST", { id, action }); await refresh();
     } else if (["block", "unblock", "remove-friend"].includes(action)) {
@@ -573,12 +630,6 @@ async function onClick(event) {
     } else if (action === "favorite") {
       const favorites = new Set(snapshot?.favorites || []);
       await api("/v1/favorites/" + id, favorites.has(id) ? "DELETE" : "POST"); await refresh();
-    } else if (action === "older" && chatId && chatBefore) {
-      const region = mounted?.querySelector(".vis-cloud-messages");
-      olderScroll = region ? { height: region.scrollHeight, top: region.scrollTop } : null;
-      const result = await api("/v1/chats/" + chatId + "/messages?before=" + chatBefore);
-      chatMessages = (result.messages || []).concat(chatMessages);
-      chatBefore = result.before; draw();
     }
   });
 }
