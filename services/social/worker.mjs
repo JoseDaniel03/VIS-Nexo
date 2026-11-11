@@ -185,6 +185,7 @@ async function socialSnapshot(request, env, me) {
   });
 }
 async function requestFriend(request, env, me) {
+  await rate(env.DB, "friend:" + me.id, 40, 3600000);
   const other = await targetByName(env.DB, (await json(request)).username);
   if (other.id === me.id) fail(400, "No podés agregarte a vos mismo");
   if (await blocked(env.DB, me.id, other.id)) fail(403, "Solicitud no permitida");
@@ -258,6 +259,7 @@ async function createDirect(request, env, me) {
   return response(request, env, { id: chat.id });
 }
 async function createGroup(request, env, me) {
+  await rate(env.DB, "groups:" + me.id, 10, 3600000);
   const body = await json(request);
   const title = String(body.title || "").trim();
   if (!title || title.length > 80 || !Array.isArray(body.members) || body.members.length < 1 || body.members.length > 9)
@@ -305,6 +307,7 @@ async function messages(request, env, me, chatId) {
   return response(request, env, { messages: result.results.reverse(), before: result.results.length === 50 ? result.results[0].seq : null });
 }
 async function sendMessage(request, env, me, chatId) {
+  await rate(env.DB, "messages:" + me.id, 300, 3600000);
   const chat = await chatAccess(env.DB, me, chatId, true), body = await json(request);
   if (!validMessage(body.body)) fail(400, "El mensaje debe tener 1 a 2000 caracteres");
   const text = body.body.trim(), id = crypto.randomUUID(), time = ISO(), db = env.DB;
