@@ -1,0 +1,69 @@
+name: VIS Social — deploy Cloudflare (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Confirmar despliegue de VIS Social a Cloudflare"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vis-social-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: vis-social-production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      VIS_SOCIAL_D1_ID: ${{ vars.VIS_SOCIAL_D1_ID }}
+    defaults:
+      run:
+        working-directory: services/social
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Cloudflare configuration and D1 binding
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          for key in ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"):
+              if not os.environ.get(key):
+                  raise SystemExit(f"Falta el secreto de GitHub: {key}")
+          database_id = os.environ.get("VIS_SOCIAL_D1_ID", "")
+          if not re.fullmatch(r"[a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}", database_id):
+              raise SystemExit("Falta la variable VIS_SOCIAL_D1_ID o no es UUID.")
+          config = Path("wrangler.toml")
+          original = config.read_text(encoding="utf-8")
+          placeholder = "REPLACE_WITH_D1_DATABASE_ID"
+          if original.count(placeholder) != 1:
+              raise SystemExit("No encuentro un único placeholder D1 en wrangler.toml.")
+          config.write_text(original.replace(placeholder, database_id), encoding="utf-8")
+          PY
+      - name: Install Wrangler
+        run: npm install --no-package-lock --ignore-scripts
+      - name: Validate Worker and migrations locally
+        run: |
+          node --check worker.mjs
+          python3 test_schema.py
+          npx --no-install wrangler d1 migrations apply vis-social --local
+      - name: Apply production D1 migrations (Cloudflare backup enabled)
+        run: npx --no-install wrangler d1 migrations apply vis-social --remote
+      - name: Publish Social Worker and Durable Object
+        run: npx --no-install wrangler deploy
+      - name: Deployment reminder
+        run: |
+          echo "VIS Social deployed. Verify the /health endpoint and login with two test users."
+          echo "No VIS Universe configuration was changed."
