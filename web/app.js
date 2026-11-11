@@ -1,4 +1,4 @@
-import { socialOnlinePanel, syncSocialOwner } from './social-cloud.js';
+import { socialOnlinePanel, syncSocialOwner, suspendSocialCloud, resumeSocialCloud } from './social-cloud.js';
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 /* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
    VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
@@ -18,7 +18,7 @@ let db = empty();
 let page = 'home', selectedId = '', authMode='login', authBusy=false, showPassword=false;
 let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null;
 let socialMode=(()=>{try{return localStorage.getItem('vis-social-mode')==='cloud'?'cloud':'local';}catch{return 'local';}})();
-function setSocialMode(mode){socialMode=mode==='cloud'?'cloud':'local';try{localStorage.setItem('vis-social-mode',socialMode);}catch{}render();}
+function setSocialMode(mode){socialMode=mode==='cloud'?'cloud':'local';if(socialMode==='cloud')resumeSocialCloud();else suspendSocialCloud();try{localStorage.setItem('vis-social-mode',socialMode);}catch{}render();}
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
 // The display mode is a local UI preference; it does not change account permissions.
