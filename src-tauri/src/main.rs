@@ -516,6 +516,8 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
         if previous.engine!=instance.engine && previous.installed {
             return Err("No podés cambiar el motor de una instancia ya instalada. Creá otra instancia para proteger sus mundos.".into());
         }
+    } else {
+        instance.icon_path.clear(); // New instances cannot inject arbitrary asset paths.
     }
     if instance.game_dir.trim().is_empty() && !prefs.instances.iter().any(|i|i.project_id==instance.project_id&&i.name==instance.name){
         return Err("Elegí una carpeta para instalar todos los archivos de la instancia".into());
@@ -1286,6 +1288,19 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
+}
+
+#[cfg(test)]
+mod vis_player_identity_tests {
+    use super::*;
+    #[test]
+    fn minecraft_usernames_respect_java_rules() {
+        assert!(valid_game_nickname("Pepito"));
+        assert!(valid_game_nickname("nick_2612"));
+        assert!(!valid_game_nickname("ab"));
+        assert!(!valid_game_nickname("nickname_with_too_many_chars"));
+        assert!(!valid_game_nickname("name with spaces"));
+    }
 }
 
 #[cfg(test)]
