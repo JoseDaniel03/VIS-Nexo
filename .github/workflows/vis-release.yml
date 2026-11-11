@@ -29,6 +29,7 @@ jobs:
       VIS_UPDATER_PUBKEY: ${{ vars.VIS_UPDATER_PUBKEY }}
       VIS_UPDATE_MANIFEST_URL: ${{ vars.VIS_UPDATE_MANIFEST_URL }}
       VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
+      VIS_SOCIAL_URL: ${{ vars.VIS_SOCIAL_URL }}
       # For identical signed Linux/Windows builds set a full upstream Git SHA.
       VIS_HORIZON_REF: ${{ vars.VIS_HORIZON_COMMIT }}
     steps:
