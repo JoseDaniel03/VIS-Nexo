@@ -231,7 +231,7 @@ assert.equal((await call('/v1/admin/projects/upsert',{
   id:'cloud-super',title:'No permissions',visibility:'published'
 },cloudLogin.data.token)).status,403);
 
-assert.equal((await call('/v1/avatar/get',{username:'bob'},cloudLogin.data.token)).status,403,
+assert.equal((await call('/v1/avatar/get',{username:'alice'},cloudLogin.data.token)).status,403,
  'only friends may retrieve protected avatars');
 
 const stored=DB.sqlite.prepare("SELECT password_hash,password_salt FROM social_users WHERE username='clouduser'").get();
