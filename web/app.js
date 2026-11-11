@@ -1,3 +1,4 @@
+import { socialOnlinePanel, syncSocialOwner } from './social-cloud.js';
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 /* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
    VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
@@ -271,33 +272,7 @@ function sidebar(){
  <div class="side-projects">${items}</div>
  <div class="side-footer"><button class="side-round" data-action="go-minecraft" title="${isGuest()?'Instancias instaladas':'Minecraft y mods'}" aria-label="Minecraft y mods">${I('game',21)}</button><button class="side-round" data-action="go-instances" title="Instancias">${I('layers',21)}</button><button class="side-avatar" data-action="go-profile" title="Mi perfil">${userAvatar(43)}<i class="presence-pin"></i></button></div></nav>`;
 }
-function socialPanel(){
- const related = socialTab==='projects' && page==='project';
- const friends = db.friends; // Global friendships persist; project context is a view, not a second friend list.
- return `<aside class="social-pane ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
- <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
- <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
- <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span></div>
- <label class="social-small-title" for="social-presence">TU ESTADO</label><div class="presence-picker">${I('circle',16)}<select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select>${I('chevrondown',14)}</div>
- <div class="social-group-head"><span>${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'}</span><span>${friends.length}</span></div>
- <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
- <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
- ${socialTab==='projects'&&page!=='project'?`<p class="social-empty">Abrí un proyecto para ver sus contactos.</p>`:''}
- ${friends.filter(f=>f.username.toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}">${avatarVisual('',f.username,34)}<span class="friend-meta"><b>${esc(f.username)}</b><small>${names[f.presence]||'Desconectado'}</small></span><span class="dot offline"></span></button>`).join('')}
- ${friends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
- ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
- </div>
- <div class="social-bottom"><form id="friend-form" class="friend-add-row"><input name="username" placeholder="Agregar por usuario" aria-label="Usuario de amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
- <span class="local-hint">${I('shield',13)} Amigos locales · Conexión global pendiente</span></div>
- ${chatWith?chatDrawer():''}
- </aside>`;
-}
-function chatDrawer(){
- const msgs=db.messages.filter(m=>(m.from===db.user?.username&&m.to===chatWith)||(m.to===db.user?.username&&m.from===chatWith));
- // Bounded DOM rendering: O(min(messages, window)), older messages stay in data.
- const visible=msgs.slice(-chatWindowSize);
- return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b><button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="2000" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
-}
+function socialPanel(){ return socialOnlinePanel(socialVisible); }
 function emptyHome(){return `<div class="empty-projects"><div class="empty-orbit">${I('layers',38)}</div><h3>Todavía no hay proyectos</h3><p>${isAdmin()?'Creá el primer proyecto y personalizá su identidad visual desde el administrador.':'Los proyectos aparecerán acá cuando se publiquen en el catálogo.'}</p>${isAdmin()?`<button class="outline-btn" data-action="create-project">${I('plus',17)} Crear proyecto</button>`:''}</div>`;}
 function modeSelector(){
  return `<nav class="library-mode-switch" aria-label="Seleccionar modo del launcher">
@@ -644,6 +619,7 @@ function viewSnapshot(){
  };
 }
 function render(){
+ syncSocialOwner(db.user?.username || '', isGuest());
  const old=previousView;
  const next=viewSnapshot();
  const currentMain=root.querySelector('#main-scroll');
