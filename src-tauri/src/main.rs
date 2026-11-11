@@ -480,6 +480,25 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
     if let Some(guest)=s.guest_name.as_deref(){instance.player_name=guest.to_owned();}
     instance.share_offline = s.guest_name.is_none() && instance.engine == "java" && instance.game_dir.trim().is_empty();
     let dir=minecraft::instance_dir(&s.data_root,&username,&instance)?;
+    if s.guest_name.is_some() {
+        // A guest must never install at a filesystem root or into a different
+        // registered VIS player's game directory.
+        if !dir.is_absolute() ||
+           dir.parent().is_none_or(|p|p.parent().is_none()) {
+            return Err("Elegí una subcarpeta exclusiva para tu instancia offline".into());
+        }
+        let target=fs::canonicalize(&dir).unwrap_or_else(|_|dir.clone());
+        for account in &s.storage.data.accounts {
+            for previous in s.storage.prefs(&account.username).instances {
+                if let Ok(existing)=minecraft::instance_dir(&s.data_root,&account.username,&previous) {
+                    let existing=fs::canonicalize(&existing).unwrap_or(existing);
+                    if target.starts_with(&existing) || existing.starts_with(&target) {
+                        return Err("Esta carpeta se superpone con una instancia de otra cuenta VIS".into());
+                    }
+                }
+            }
+        }
+    }
     instance.installed=minecraft::installed(&dir,&instance);
     let mut prefs = s.storage.prefs(&username);
     if let Some(previous)=prefs.instances.iter().find(|i|i.project_id==instance.project_id&&i.name==instance.name) {
@@ -495,7 +514,10 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
     for previous in &prefs.instances {
         if previous.name != instance.name || previous.project_id != instance.project_id {
             let existing_dir=minecraft::instance_dir(&s.data_root,&username,previous)?;
-            if existing_dir==dir {return Err("Otra instancia ya usa esa carpeta. Elegí un nombre o ruta diferente.".into());}
+            if existing_dir==dir ||
+               (s.guest_name.is_some()&&(existing_dir.starts_with(&dir)||dir.starts_with(&existing_dir))) {
+                return Err("Otra instancia ya usa esta carpeta o una subcarpeta. Elegí una ruta independiente.".into());
+            }
         }
     }
     if let Some(i) = prefs.instances.iter().position(|p| p.name == instance.name && p.project_id == instance.project_id) {
@@ -551,6 +573,15 @@ fn ensure_project_instance(state:State<'_,Mutex<Backend>>,project_id:String,game
     ins.share_offline=ins.engine=="java" && ins.game_dir.is_empty();
     let dir=minecraft::instance_dir(&s.data_root,&username,&ins)?;
     let canonical_dir=fs::canonicalize(&dir).unwrap_or_else(|_|dir.clone());
+    for previous in &prefs.instances {
+        if previous.project_id==project_id&&previous.name==ins.name {continue;}
+        if let Ok(existing)=minecraft::instance_dir(&s.data_root,&username,previous){
+            let existing=fs::canonicalize(&existing).unwrap_or(existing);
+            if canonical_dir.starts_with(&existing)||existing.starts_with(&canonical_dir){
+                return Err("La carpeta se superpone con otra de tus instancias VIS".into());
+            }
+        }
+    }
     for account in &s.storage.data.accounts {
         for previous in s.storage.prefs(&account.username).instances {
             if account.username==username && previous.project_id==project_id && previous.name==ins.name{continue;}
