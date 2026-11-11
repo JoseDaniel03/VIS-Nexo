@@ -97,7 +97,7 @@ assert.deepEqual(response.data.incoming_requests, ['alice']);
 assert.equal((await call('/v1/friends/accept', {username: 'alice'}, alice.token)).status, 404);
 assert.equal((await call('/v1/friends/accept', {username: 'alice'}, bob.token)).status, 200);
 
-const avatarBytes=Buffer.alloc(32);
+const avatarBytes=Buffer.alloc(64);
 avatarBytes.write('RIFF',0,'ascii');
 avatarBytes.writeUInt32LE(avatarBytes.length-8,4);
 avatarBytes.write('WEBP',8,'ascii');
