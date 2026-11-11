@@ -438,6 +438,8 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
         let log=File::create(&log_path).map_err(|e|e.to_string())?;
         let mut cmd=Command::new(executable(&folder,"horizon-client"));
         crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
+        // Only our VIS-built client hides its boot until the game menu is ready.
+        cmd.env("VIS_NEXO_DIRECT_START", "1");
         cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
             .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir);
         if !ins.player_name.is_empty(){cmd.arg("--name").arg(&ins.player_name);}
@@ -486,6 +488,8 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     let log=File::create(&log_path).map_err(|e|e.to_string())?;
     let mut cmd=Command::new(executable(&folder,"horizon-client"));
     crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
+    // Only our VIS-built client hides its boot until the game menu is ready.
+    cmd.env("VIS_NEXO_DIRECT_START", "1");
     cmd.current_dir(&folder).arg("--resources").arg(resources(dir))
         .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir).arg("--session-stdin");
     if ins.fullscreen{cmd.arg("--fullscreen");}
