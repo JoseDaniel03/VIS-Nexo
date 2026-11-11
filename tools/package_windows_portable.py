@@ -36,7 +36,7 @@ def validate_pe(path: Path) -> None:
         if pe_offset < 64 or pe_offset > 1024 * 1024:
             raise RuntimeError("Cabecera PE incorrecta")
         reader.seek(pe_offset)
-        if reader.read(4) != b"PE\\x00\\x00":
+        if reader.read(4) != b"PE\x00\x00":
             raise RuntimeError("Firma PE inválida")
     if path.stat().st_size < 128:
         raise RuntimeError("Ejecutable demasiado pequeño")
@@ -93,19 +93,19 @@ def package(release_dir: Path, horizon_dir: Path) -> tuple[Path, Path]:
         dest = app_dir / Path(relative)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, dest)
-    (app_dir / ".vis-portable").write_text("VIS Nexo portable v1\\n", encoding="utf-8")
+    (app_dir / ".vis-portable").write_text("VIS Nexo portable v1\n", encoding="utf-8")
     (app_dir / "LEEME - VIS Nexo Portable.txt").write_text(
-        "VIS NEXO PARA WINDOWS - SIN INSTALADOR\\n"
-        "1. Descomprimí el ZIP entero en una carpeta propia.\\n"
-        "2. Abrí VIS Nexo.exe con doble clic. No abras los archivos Horizon.\\n"
-        "3. Conservá juntos VIS Nexo.exe y la carpeta horizon/.\\n"
-        "4. Windows 10/11 x64 necesita Microsoft Edge WebView2 Runtime.\\n"
-        "5. Las cuentas, mundos e instalaciones Minecraft se guardan en los\\n"
-        "   directorios de usuario VIS; no dentro de este ZIP.\\n"
-        "6. Para actualizar esta edición, cerrá VIS y reemplazá la carpeta\\n"
-        "   por la siguiente edición portable. No uses el actualizador NSIS.\\n"
-        "7. Windows puede advertir sobre ejecutables sin firma de código.\\n"
-        "   Descargá solo desde las versiones oficiales de VIS Nexo.\\n",
+        "VIS NEXO PARA WINDOWS - SIN INSTALADOR\n"
+        "1. Descomprimí el ZIP entero en una carpeta propia.\n"
+        "2. Abrí VIS Nexo.exe con doble clic. No abras los archivos Horizon.\n"
+        "3. Conservá juntos VIS Nexo.exe y la carpeta horizon/.\n"
+        "4. Windows 10/11 x64 necesita Microsoft Edge WebView2 Runtime.\n"
+        "5. Las cuentas, mundos e instalaciones Minecraft se guardan en los\n"
+        "   directorios de usuario VIS; no dentro de este ZIP.\n"
+        "6. Para actualizar esta edición, cerrá VIS y reemplazá la carpeta\n"
+        "   por la siguiente edición portable. No uses el actualizador NSIS.\n"
+        "7. Windows puede advertir sobre ejecutables sin firma de código.\n"
+        "   Descargá solo desde las versiones oficiales de VIS Nexo.\n",
         encoding="utf-8",
     )
     archive = portable / "VIS-Nexo-Windows-x64-Portable.zip"
