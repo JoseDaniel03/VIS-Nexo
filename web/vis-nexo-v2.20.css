@@ -1,0 +1,16 @@
+/* VIS Nexo instance identity upgrades: don't distort pixel-art or imported icons. */
+.vis-instance-custom-icon{display:block;max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;}
+.instance-visual .vis-instance-custom-icon{width:44px;height:44px;object-fit:cover;}
+.side-project .vis-instance-custom-icon{width:28px;height:28px;object-fit:cover;}
+.vis-instance-nickname{display:block;margin:8px 0 2px;color:#c6b8e2;}
+.vis-instance-nickname strong{color:#f2e9ff;}
+.vis-nickname-field{display:flex;gap:9px;align-items:center;}
+.vis-nickname-field input{flex:1;min-width:0;}
+.vis-nickname-field button{flex:0 0 auto;max-width:160px;white-space:normal;line-height:1.25;}
+.vis-instance-icon-controls{display:flex;flex-wrap:wrap;gap:9px;align-items:center;padding:12px;border:1px solid #51416d;border-radius:12px;background:rgba(40,26,67,.5);}
+.vis-instance-icon-controls>div{display:grid;gap:4px;flex:1;}
+.vis-instance-icon-controls strong{color:#eee6ff;font-size:13px;}
+.vis-instance-icon-controls small{color:#afa2cc;font-size:11px;}
+.vis-instance-icon-preview{display:flex;align-items:center;justify-content:center;width:50px;height:50px;flex:0 0 50px;border:1px solid #584675;background:#1b142e;border-radius:10px;}
+.vis-instance-icon-preview .vis-instance-custom-icon{width:42px;height:42px;object-fit:cover;}
+@media(max-width:640px){.vis-nickname-field{flex-direction:column;align-items:stretch}.vis-nickname-field button{max-width:none}}
