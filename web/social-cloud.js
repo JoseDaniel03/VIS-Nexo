@@ -8,6 +8,7 @@ let poll = null, chatBefore = null, connected = false;
 const chatDrafts = new Map();
 let renderedChatId = "", olderScroll = null;
 let statusDraft = null;
+let cloudActive = false;
 const runningGames = new Map(); // pid => { engine, project }; never supplied by user input.
 let activityHeartbeat = null;
 let activityGeneration = 0;
@@ -17,7 +18,7 @@ function currentGame() {
   return games.length ? games[games.length - 1] : null;
 }
 async function publishGameActivity() {
-  if (!token || !endpointReady() || snapshot?.me?.share_game === false) return;
+  if (!cloudActive || !token || !endpointReady() || snapshot?.me?.share_game === false) return;
   const epoch = ++activityGeneration;
   const playing = currentGame();
   try {
@@ -74,13 +75,16 @@ function stopPolling() {
 }
 export function suspendSocialCloud() {
   // Switching back to local mode must not leave a visible online game status.
-  if (token && endpointReady()) void api("/v1/activity", "POST", { engine: null }).catch(() => {});
+  if (token && endpointReady() && cloudActive) void api("/v1/activity", "POST", { engine: null }).catch(() => {});
+  cloudActive = false;
   stopSocket(); stopPolling();
 }
 export function resumeSocialCloud() { if (token && endpointReady() && !socket) startLive(); }
 export function syncSocialOwner(name, guest = false) {
   const next = guest ? "" : String(name || "").toLowerCase();
   if (localOwner === next) return;
+  if (cloudActive && token && endpointReady()) void api("/v1/activity", "POST", { engine: null }).catch(() => {});
+  cloudActive = false; activityGeneration++; runningGames.clear();
   localOwner = next; token = ""; account = null; snapshot = null; chatId = ""; chatMessages = [];
   chatDrafts.clear(); renderedChatId = ""; olderScroll = null; statusDraft = null;
   stopSocket(); stopPolling();
@@ -113,6 +117,7 @@ async function api(path, method = "GET", body = undefined, needsAuth = true) {
   return result;
 }
 function signOut(drawAfter = true) {
+  cloudActive = false; activityGeneration++;
   token = ""; account = null; snapshot = null; chatId = ""; chatMessages = []; chatBefore = null;
   chatDrafts.clear(); renderedChatId = ""; olderScroll = null; statusDraft = null;
   stopSocket(); stopPolling(); if (drawAfter) draw();
@@ -160,7 +165,7 @@ async function connect() {
       if (event.data === "pong") return;
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === "social:update" || payload.type === "chat:message") void refresh();
+        if (payload.type === "ready" || payload.type === "social:update" || payload.type === "chat:message") void refresh();
       } catch {}
     };
     socket.onclose = () => {
@@ -174,6 +179,7 @@ async function connect() {
   }
 }
 function startLive() {
+  cloudActive = true;
   stopPolling();
   poll = setInterval(() => { if (token && mounted?.isConnected) void refresh(); }, 45000);
   activityHeartbeat = setInterval(() => {
@@ -424,6 +430,10 @@ async function onChange(event) {
     }
   });
 }
+function onInput(event) {
+  const field = event.target.closest("[data-cloud-custom-status]");
+  if (field) statusDraft = field.value;
+}
 function mount() {
   const next = document.querySelector("#vis-social-root");
   if (!next || next === mounted) return;
@@ -432,6 +442,7 @@ function mount() {
   next.addEventListener("submit", onSubmit);
   next.addEventListener("click", onClick);
   next.addEventListener("change", onChange);
+  next.addEventListener("input", onInput);
   draw();
 }
 // A production build supplies the public Worker URL at compile time.
