@@ -25,7 +25,8 @@ function store(db, name, type, value, key) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(name, type);
     const table = tx.objectStore(name);
-    const req = value === undefined ? table.get(key) : table.put(value, key);
+    const req = value === undefined ? table.get(key) :
+      name === 'messages' ? table.put(value) : table.put(value, key);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || Error('Error de almacenamiento'));
   });
@@ -192,7 +193,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     state = null; keys = null; currentUser = ''; messages = []; lastFingerprint = '';
     lastHeartbeat = 0;
     if (privateDb) { privateDb.close(); privateDb = null; }
-    if (wasConnected) void command('social_disconnect').catch(() => {});
+    if (wasConnected) await command('social_disconnect').catch(() => {});
     status('disconnected');
   }
   async function friendRequest(username) {
