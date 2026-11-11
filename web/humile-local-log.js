@@ -4,6 +4,7 @@
 export const LOCAL_CHAT_LIMIT_BYTES = 2048;
 export const LOCAL_CHAT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const LOCAL_MESSAGE_LIMIT_BYTES = 1536;
+export const LOCAL_JSON_TEXT_LIMIT_BYTES = 1750;
 const PREFIX = "vis-humile-local-v1:";
 const encoder = new TextEncoder();
 const bytes = value => encoder.encode(value).length;
@@ -26,6 +27,7 @@ function toRow(message) {
   const body = String(message.body || "");
   if (!/^[0-9a-f-]{36}$/i.test(id) || !/^[0-9a-f-]{36}$/i.test(senderId) ||
       !Number.isFinite(time) || !body.trim() || bytes(body) > LOCAL_MESSAGE_LIMIT_BYTES ||
+      bytes(JSON.stringify(body)) > LOCAL_JSON_TEXT_LIMIT_BYTES ||
       !/^[a-z0-9_]{3,24}$/i.test(sender)) {
     throw new Error("El mensaje no cabe en el registro local de VIS Humile");
   }
