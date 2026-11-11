@@ -25,6 +25,7 @@ export type Snapshot = {
   incoming_requests: string[]; outgoing_requests: string[];
   messages: Message[]; branding: Record<string, unknown>;
   project_execution: Record<string, boolean>;
+  paused_projects: string[];
   recent_accounts: {username: string; provider: string}[];
   mode: 'local' | 'offline';
 };
@@ -59,6 +60,8 @@ export type NativeCommandMap = {
   horizon_install_release: {args:{expectedTag:string};result:{tag:string;build_dir:string;archive_sha256:string}};
   launch_horizon: {args: {projectId:string;name:string;sessionFile:string;sourceOwner:string|null};result: LaunchResult};
   ensure_project_instance: {args: {projectId:string;gameDir:string;ramMb:number};result: Snapshot};
+  set_project_active: {args: {projectId:string;enabled:boolean};result: Snapshot};
+  sync_project_content: {args: {projectId:string;name:string};result: string[]};
   configure_shared_ram: {args:{sourceOwner:string;projectId:string;name:string;ramMb:number};result:Snapshot};
   install_minecraft: {args: {projectId: string;name: string}; result: Snapshot};
   launch_minecraft: {args: {projectId: string;name: string;sourceOwner: string|null}; result: LaunchResult};
