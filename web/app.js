@@ -303,7 +303,7 @@ function socialPanel(){
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
- ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}
+ ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button><button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}
  <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>
  `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
@@ -928,6 +928,17 @@ root.addEventListener('click',async event=>{
   const visibility=window.confirm('¿Publicar el proyecto para todos?')?'published':'draft';
   try{await social.manageProject({id:projectId,title,summary:'',visibility});message('Proyecto registrado en VIS Social');}
   catch(e){message(String(e),true);}
+ }
+ else if(act==='social-assign-staff'){
+  if(social.state()?.role!=='super_admin'){message('Solo la supercuenta puede asignar responsables.',true);return;}
+  const projectId=window.prompt('ID del proyecto registrado:');
+  if(!projectId)return;
+  const username=window.prompt('Usuario al que querés asignar permisos:');
+  if(!username)return;
+  const staffRole=window.prompt('Permiso: editor, manager o none (quitar):','editor');
+  if(!staffRole)return;
+  try{await social.grantStaff(projectId,username,staffRole);message('Personal del proyecto actualizado.');}
+  catch(error){message(String(error),true);}
  }
  else if(act==='social-manage-user'){
   if(social.state()?.role!=='super_admin'){message('Solo la supercuenta puede gestionar usuarios.',true);return;}
