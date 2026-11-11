@@ -71,7 +71,7 @@ class WindowsPortableTests(unittest.TestCase):
             self.assertIn("horizon/exporters/VanillaHeightmapOracle.java", z.namelist())
             self.assertIn("WebView2Loader.dll", z.namelist())
             info = z.read("LEEME - VIS Nexo Portable.txt").decode()
-            self.assertIn("SIN INSTALADOR\n1.", info)
+            self.assertIn("SIN INSTALADOR\n1.", info.replace("\r\n", "\n"))
             self.assertNotIn("accounts.json", z.namelist())
 
     def test_rejects_tampered_horizon_executable(self):
