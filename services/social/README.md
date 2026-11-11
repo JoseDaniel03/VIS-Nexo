@@ -11,6 +11,16 @@ does **not** grant cloud identity to local or offline nicknames. Deployment is m
   persisted messages with cursor pagination, unread counters.
 - Durable Object SocialHub: hibernatable WebSockets for user notifications and presence.
   The database is the source of truth for authorizations and history.
+- Presencia: preferencia conectado/ausente/ocupado/invisible; estado personalizado
+  de hasta 80 caracteres; difusión de juego activable o desactivable.
+  El launcher publica automáticamente Minecraft Java o Rust Edition y el nombre
+  opcional del proyecto mediante POST /v1/activity.
+- Seguridad de actividad: solo amigos aceptados, visibles y conectados pueden ver
+  la actividad. Invisible y Desconectado ocultan actividad y texto; bloquear
+  elimina la amistad. El registro del juego caduca en 4 minutos sin heartbeat
+  (cada 75 segundos mientras el proceso está activo).
+- El Worker borra estados de juego vencidos diariamente; la API filtra registros
+  caducados en cada consulta, sin depender de la tarea periódica.
 - VIS desktop: dedicated online UI in the existing social sidebar. Cloud Ceibo identity
   requires separate signup/login until a trusted remote identity bridge exists.
 
@@ -66,6 +76,29 @@ manual para evitar despliegues accidentales.
 Si usás la cuenta gratuita de Workers, verificá que el cálculo PBKDF2 de los
 inicios de sesión no exceda el límite de CPU de la cuenta. No publiques el
 servicio para usuarios hasta comprobar ese punto en Cloudflare.
+
+## Endpoints de estado y actividad
+
+Todos requieren sesión Ceibo mediante el mismo token Bearer de los chats.
+
+- `POST /v1/presence` con `{"visibility":"away"}`, o
+  `{"custom_status":"En la base de Virgoland"}`, o
+  `{"share_game":false}`. Los campos no especificados conservan su valor.
+- `POST /v1/activity` con `{"engine":"java","project":"Virgoland"}`
+  o `{"engine":"rust","project":""}`. El nombre de proyecto puede omitirse.
+- `POST /v1/activity` con `{"engine":null}` elimina el estado de juego.
+- `GET /v1/social` devuelve `me.custom_status`, `me.share_game`,
+  `me.activity` y, para amistades en línea visibles, los mismos datos
+  públicos. El servidor nunca revela actividad de usuarios invisibles.
+
+En el cliente VIS, los usuarios pueden escribir estados personalizados y
+desactivar compartir actividad desde el panel Humile. VIS detecta los PID de
+Minecraft Java/Rust al lanzar y al recibir `minecraft-process-exited`.
+El estado se renueva mientras el juego sigue ejecutándose.
+
+**El estado de juego es presencia auto-reportada por el cliente y no acredita
+que una persona esté jugando en un servidor específico.** Para mostrar un
+servidor público o permitir invitaciones haría falta autorización adicional.
 
 ## Security and limitations
 
