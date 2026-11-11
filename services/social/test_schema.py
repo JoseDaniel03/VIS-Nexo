@@ -38,18 +38,14 @@ class SocialSchemaTests(unittest.TestCase):
                 "INSERT INTO humile_friendships(id,user_a,user_b,requester_id,status,created_at)"
                 " VALUES('f3','anna','ghost','anna','pending','2026-11-11')")
 
-    def test_group_memberships_and_length_guard(self):
+    def test_group_memberships_and_local_only_chat_storage(self):
         self.db.execute("INSERT INTO humile_chats(id,kind,title,created_at) VALUES('chat1','group','Test','2026-11-11')")
         self.db.execute("INSERT INTO humile_chat_members(chat_id,account_id,joined_at) VALUES('chat1','anna','2026-11-11')")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("INSERT INTO humile_chat_members(chat_id,account_id,joined_at) VALUES('chat1','anna','2026-11-11')")
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute("INSERT INTO humile_messages(id,chat_id,sender_id,body,created_at,expires_at)"
-                            " VALUES('m1','chat1','anna',?,'2026-11-11',1800000000000)", ("x" * 2001,))
-        self.db.execute("INSERT INTO humile_messages(id,chat_id,sender_id,body,created_at,expires_at)"
-                        " VALUES('m2','chat1','anna','Hola','2026-11-11',1800000000000)")
-        latest = self.db.execute("SELECT MAX(seq) AS seq FROM humile_messages WHERE chat_id='chat1'").fetchone()
-        self.assertGreater(latest["seq"], 0)
+        self.assertIsNone(self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='humile_messages'").fetchone(),
+            "Cloudflare D1 cannot retain chat bodies after the 0005 migration")
 
     def test_visibility_and_private_contact_favorites(self):
         self.db.execute(
