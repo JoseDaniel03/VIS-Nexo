@@ -75,6 +75,15 @@ async function decrypt(payload, from, to, id, ownPrivate, peerPublic) {
   }, aes, from64(obj.ct));
   return decoder.decode(clear);
 }
+// Trust-on-first-use pinning. Never silently replace the public encryption key
+// recorded for an existing friend. A trusted recovery flow is still required.
+export function validatePinnedPeerKey(pinned, incoming) {
+  if (typeof incoming !== 'string' || incoming.length < 80 || incoming.length > 200)
+    throw Error('Clave pública de contacto inválida');
+  if (pinned != null && pinned !== incoming)
+    throw Error('ALERTA: cambió la clave de cifrado del contacto. No se enviarán ni recibirán mensajes hasta verificar la identidad por otro canal.');
+  return incoming;
+}
 export function createSocialRemote(command, onUpdate, onStatus) {
   let state = null, keys = null, privateDb = null, currentUser = '';
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
@@ -84,6 +93,15 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   const rpc = (path, method = 'GET', body = null) => command('social_request',
     { path, method, body });
 
+  async function verifiedPeerKey(friend) {
+    if (!privateDb || !currentUser || !friend?.username || !friend.public_key)
+      throw Error('Identidad de amigo no disponible');
+    const id='peer-key:'+currentUser+':'+friend.username;
+    const pinned=await store(privateDb,'keys','readonly',undefined,id);
+    const publicKey=validatePinnedPeerKey(pinned,friend.public_key);
+    if (pinned == null) await store(privateDb,'keys','readwrite',publicKey,id);
+    return publicKey;
+  }
   async function localHistory() {
     if (!privateDb || !currentUser) return [];
     const all = await allMessages(privateDb);
@@ -151,25 +169,28 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       }
       const fresh = await rpc('/v1/state');
       const ack = [];
+      let securityError='';
       for (const incoming of fresh.pending_messages || []) {
         const friend = (fresh.friends || []).find(f => f.username === incoming.from);
         if (!friend?.public_key) continue;
         try {
+          const pub=await verifiedPeerKey(friend);
           const text = await decrypt(incoming.payload, incoming.from,
-            currentUser, incoming.client_message_id, keys.pair.privateKey, friend.public_key);
+            currentUser, incoming.client_message_id, keys.pair.privateKey, pub);
           await saveMessage({
             id: incoming.client_message_id, from: incoming.from, to: currentUser,
             body: text, created: new Date(incoming.created_at * 1000).toISOString()
           });
           ack.push(incoming.id);
-        } catch {
-          // No ACK for undecryptable messages; they remain available until expiry.
+        } catch(error) {
+          // No ACK for unverifiable messages. Never replace a pinned key.
+          if(String(error).includes('ALERTA:')) securityError=String(error);
         }
       }
       if (ack.length) await rpc('/v1/messages/ack', 'POST', { ids: ack });
       state = fresh;
       messages = await localHistory();
-      status('connected');
+      status(securityError?'security_warning':'connected',securityError);
       notify();
     } catch (error) {
       status('degraded', String(error));
@@ -243,8 +264,9 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     const friend = (state.friends || []).find(f => f.username === to);
     if (!friend?.public_key) throw Error('Tu amigo aún no configuró su identidad cifrada');
     const id = crypto.randomUUID().replace(/-/g, '');
+    const pub=await verifiedPeerKey(friend);
     const payload = await encrypt(body.trim(), currentUser, to, id,
-      keys.pair.privateKey, friend.public_key);
+      keys.pair.privateKey, pub);
     if (encoder.encode(payload).length > 2048) throw Error('Mensaje cifrado demasiado largo');
     await rpc('/v1/messages/send', 'POST', { to, client_message_id: id, payload });
     await saveMessage({
