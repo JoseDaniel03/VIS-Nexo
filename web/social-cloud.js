@@ -118,7 +118,7 @@ function configForm() {
 function accountForm() {
   return banner("VIS Ceibo", "La cuenta social online requiere contraseña; el nickname offline no autentica en la nube.") +
     '<form data-cloud-form="auth" class="vis-cloud-form">' +
-    '<label>Usuario<input name="username" maxlength="24" minlength="3" autocomplete="username" value="\' + esc(localOwner) + \'" required placeholder="Tu usuario VIS"></label>' +
+    '<label>Usuario<input name="username" maxlength="24" minlength="3" autocomplete="username" value="' + esc(localOwner) + '" required placeholder="Tu usuario VIS"></label>' +
     '<label>Contraseña<input name="password" type="password" autocomplete="current-password" minlength="12" required placeholder="12 caracteres o más"></label>' +
     '<div class="vis-cloud-actions"><button name="mode" value="login">Entrar</button>' +
     '<button name="mode" value="register" class="secondary">Crear cuenta online</button></div></form>' +
