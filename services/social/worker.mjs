@@ -1,4 +1,5 @@
-// VIS Social: Ceibo identities + Humile messaging. D1 is the authority; WebSockets only notify.
+// VIS Ceibo/Humile: D1 holds identities, friendships and chat membership only.
+// Message content is relayed via WebSockets and stored by each VIS Nexo client.
 const enc = new TextEncoder();
 const NOW = () => Date.now();
 const ISO = () => new Date().toISOString();
@@ -12,8 +13,11 @@ export function normalizeUsername(value) {
   const name = String(value || "").trim().toLowerCase();
   return WORD.test(name) ? name : "";
 }
+// Bound a transmitted message to fit a complete local 2 KiB chat record.
+export const MAX_CHAT_MESSAGE_BYTES = 1536;
 export function validMessage(value) {
-  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 2000;
+  return typeof value === "string" && value.trim().length > 0 &&
+    [...value].length <= 1500 && enc.encode(value.trim()).byteLength <= MAX_CHAT_MESSAGE_BYTES;
 }
 export function validFriendNickname(value) {
   if (typeof value !== "string") return false;
@@ -181,13 +185,11 @@ async function socialSnapshot(request, env, me) {
   ).bind(id).all();
   const favorites = await db.prepare("SELECT target_id FROM humile_favorites WHERE actor_id=?").bind(id).all();
   const chats = await db.prepare(
-    "SELECT c.id,c.kind,c.title,c.created_at,m.last_read_seq," +
-    "(SELECT MAX(seq) FROM humile_messages WHERE chat_id=c.id) AS latest_seq," +
-    "(SELECT COUNT(*) FROM humile_messages WHERE chat_id=c.id AND seq>m.last_read_seq AND sender_id<>?) AS unread," +
+    "SELECT c.id,c.kind,c.title,c.created_at,0 AS unread," +
     "(SELECT a.username FROM humile_chat_members cm JOIN ceibo_accounts a ON a.id=cm.account_id WHERE cm.chat_id=c.id AND cm.account_id<>? LIMIT 1) AS peer_username " +
     "FROM humile_chats c JOIN humile_chat_members m ON m.chat_id=c.id " +
-    "WHERE m.account_id=? ORDER BY latest_seq DESC,c.created_at DESC LIMIT 100"
-  ).bind(id, id, id).all();
+    "WHERE m.account_id=? ORDER BY c.created_at DESC LIMIT 100"
+  ).bind(id, id).all();
   const friends = relationships.results.filter(x => x.status === "accepted");
   const myPresence = await db.prepare("SELECT visibility,custom_status,share_game FROM humile_presence WHERE account_id=?")
     .bind(id).first();
@@ -442,35 +444,45 @@ async function chatAccess(db, me, id, writing = false) {
   }
   return chat;
 }
+// No message bodies or history are stored in D1. Messages are relayed only
+// to authenticated, currently connected member sockets.
 async function messages(request, env, me, chatId) {
   await chatAccess(env.DB, me, chatId);
-  const url = new URL(request.url);
-  const before = Number(url.searchParams.get("before") || 0);
-  if (!Number.isSafeInteger(before) || before < 0) fail(400, "Cursor inválido");
-  const result = await env.DB.prepare(
-    "SELECT m.seq,m.id,m.sender_id,a.username AS sender,m.body,m.created_at FROM humile_messages m " +
-    "JOIN ceibo_accounts a ON a.id=m.sender_id WHERE m.chat_id=? AND (?=0 OR m.seq<?) " +
-    "ORDER BY m.seq DESC LIMIT 50"
-  ).bind(chatId, before, before).all();
-  return response(request, env, { messages: result.results.reverse(), before: result.results.length === 50 ? result.results[0].seq : null });
+  return response(request, env, { messages: [], before: null, storage: "device-only" });
+}
+async function relayToOnline(env, accountId, payload) {
+  try {
+    const room = env.HUB.get(env.HUB.idFromName(accountId));
+    const result = await room.fetch("https://internal/publish", {
+      method: "POST", body: JSON.stringify(payload)
+    });
+    if (!result.ok) return 0;
+    const receipt = await result.json();
+    return Number.isSafeInteger(receipt.delivered) ? receipt.delivered : 0;
+  } catch { return 0; }
 }
 async function sendMessage(request, env, me, chatId) {
   await rate(env.DB, "messages:" + me.id, 300, 3600000);
-  const chat = await chatAccess(env.DB, me, chatId, true), body = await json(request);
-  if (!validMessage(body.body)) fail(400, "El mensaje debe tener 1 a 2000 caracteres");
-  const text = body.body.trim(), id = crypto.randomUUID(), time = ISO(), db = env.DB;
-  await db.prepare("INSERT INTO humile_messages(id,chat_id,sender_id,body,created_at,expires_at) VALUES(?,?,?,?,?,?)")
-    .bind(id, chatId, me.id, text, time, NOW() + 365 * 86400000).run();
-  const recipients = await db.prepare("SELECT account_id FROM humile_chat_members WHERE chat_id=? AND account_id<>?")
+  const chat = await chatAccess(env.DB, me, chatId, true), input = await json(request);
+  if (!validMessage(input.body)) fail(400, "Mensaje inválido: máximo 1536 bytes UTF-8");
+  const id = crypto.randomUUID(), time = ISO(), content = input.body.trim();
+  const members = await env.DB.prepare("SELECT account_id FROM humile_chat_members WHERE chat_id=? AND account_id<>?")
     .bind(chatId, me.id).all();
-  await Promise.all(recipients.results.map(x => notify(env, x.account_id, { type: "chat:message", chat_id: chatId })));
-  return response(request, env, { id, chat_id: chat.id, sender: me.username, body: text, created_at: time }, 201);
+  const payload = {
+    type: "chat:message", chat_id: chatId, id, sender_id: me.id,
+    sender: me.username, body: content, created_at: time
+  };
+  const results = await Promise.all(members.results.map(x => relayToOnline(env, x.account_id, payload)));
+  const online = results.filter(x => x > 0).length;
+  if (!online) fail(409, "Sin destinatarios conectados: el chat local no tiene bandeja de mensajes offline");
+  return response(request, env, {
+    id, chat_id: chat.id, sender_id: me.id, sender: me.username,
+    body: content, created_at: time, delivered_to: online, storage: "device-only"
+  }, 201);
 }
 async function markRead(request, env, me, chatId) {
   await chatAccess(env.DB, me, chatId);
-  await env.DB.prepare("UPDATE humile_chat_members SET last_read_seq=COALESCE((SELECT MAX(seq) FROM humile_messages WHERE chat_id=?),0) WHERE chat_id=? AND account_id=?")
-    .bind(chatId, chatId, me.id).run();
-  return response(request, env, { ok: true });
+  return response(request, env, { ok: true, storage: "device-only" });
 }
 async function ticket(request, env, me) {
   const value = randomHex(), hash = await digest(value);
@@ -501,7 +513,7 @@ export class SocialHub {
       for (const socket of this.state.getWebSockets()) {
         try { socket.send(event); } catch { /* Peer disconnected */ }
       }
-      return Response.json({ ok: true });
+      return Response.json({ ok: true, delivered: this.state.getWebSockets().length });
     }
     if (url.pathname === "/join" && request.headers.get("Upgrade") === "websocket") {
       const pair = new WebSocketPair();
