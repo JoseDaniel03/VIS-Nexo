@@ -81,7 +81,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: VIS Nexo ${{ github.ref_name }}
           body: 'Windows ZIP (extraer y abrir VIS Nexo.exe) y Linux TAR.GZ con AppImage (extraer y ejecutar). Ninguno instala VIS Nexo. Los perfiles y mundos permanecen en los directorios de usuario. Actualizar reemplazando los archivos del launcher.'
-          files: target/release/portable-linux/VIS-Nexo-Linux-x86_64-Portable.tar.gz
+          files: |
+            target/release/portable-linux/VIS-Nexo-Linux-x86_64-Portable.tar.gz
+            target/release/bundle/appimage/*.AppImage
           fail_on_unmatched_files: true
           overwrite_files: true
       - name: Build Windows portable (no setup, no NSIS)
