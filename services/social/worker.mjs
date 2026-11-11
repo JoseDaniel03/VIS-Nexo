@@ -98,7 +98,8 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.public_id,u.avatar_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at " +
+    "SELECT u.id,u.username,u.public_id,u.avatar_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
+    "CASE WHEN u.password_hash!=\'\' THEN 1 ELSE 0 END AS cloud_login_enabled " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
   ).bind(tokenHash, now()).first();
@@ -308,7 +309,8 @@ async function currentState(db, user) {
   for (const friend of visible) friend.shared_projects=idsByFriend.get(friend.username)||[];
   return reply({
     projects,
-    username: user.username, public_id: user.public_id, avatar_version:user.avatar_version, presence: user.presence, role: user.role,
+    username: user.username, public_id: user.public_id, avatar_version:user.avatar_version,
+    cloud_login_enabled: !!user.cloud_login_enabled, presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
     public_key: user.encryption_public_key,
     friends: visible,
