@@ -5,7 +5,7 @@ use argon2::{
 };
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, path::{Path, PathBuf}};
+use std::{collections::{BTreeMap, BTreeSet}, fs, path::{Path, PathBuf}};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -84,6 +84,8 @@ pub struct PlayerPrefs {
     pub instances: Vec<Instance>,
     pub selected: BTreeMap<String, usize>,
     pub locale: String,
+    /// Per-account pauses. These don't delete projects, installations, mods or worlds.
+    #[serde(default)] pub disabled_projects: BTreeSet<String>,
     /// RAM overrides for other VIS profiles' installations on this OS user.
     #[serde(default)] pub shared_ram: BTreeMap<String,u32>,
 }
@@ -223,6 +225,20 @@ impl LocalStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn project_pauses_are_profile_local_and_persisted() {
+        let root = std::env::temp_dir().join(format!("vis-paused-projects-{}-{}",
+            std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut store=LocalStore::load(root.clone());
+        store.register("owner","password-123","password-123").unwrap();
+        store.register("player","password-123","password-123").unwrap();
+        let mut prefs=store.prefs("player");
+        prefs.disabled_projects.insert("survival".into());
+        store.save_prefs("player",&prefs).unwrap();
+        assert!(store.prefs("player").disabled_projects.contains("survival"));
+        assert!(!store.prefs("owner").disabled_projects.contains("survival"));
+        let _=fs::remove_dir_all(root);
+    }
     #[test]
     fn accounts_roles_password_and_chat() {
         let root = std::env::temp_dir().join(format!("vslauncher-account-{}-{}",std::process::id(),
