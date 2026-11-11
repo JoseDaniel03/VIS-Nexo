@@ -350,10 +350,10 @@ function isSuper(user) { return user.role === "super_admin"; }
 function requireSuper(user) {
   if (!isSuper(user)) bad(403, "Super administrator permission required");
 }
-async function audit(db, actorId, operation, target) {
-  await db.prepare(
+function auditStatement(db, actorId, operation, target) {
+  return db.prepare(
     "INSERT INTO admin_audit(id,actor_id,operation,target) VALUES (?,?,?,?)"
-  ).bind(crypto.randomUUID(), actorId, operation, target).run();
+  ).bind(crypto.randomUUID(), actorId, operation, target);
 }
 async function accountInfo(db, user) {
   const row = await db.prepare(
@@ -423,13 +423,15 @@ async function adminProjectUpsert(request, db, user) {
       !["draft","published","archived"].includes(visibility)) {
     bad(400,"Invalid project metadata");
   }
-  await db.prepare(
-    "INSERT INTO social_projects(id,title,summary,visibility,created_by,updated_by) " +
-    "VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET " +
-    "title=excluded.title,summary=excluded.summary,visibility=excluded.visibility," +
-    "updated_by=excluded.updated_by,updated_at=unixepoch()"
-  ).bind(id,title,summary,visibility,user.id,user.id).run();
-  await audit(db,user.id,"project.upsert",id);
+  await db.batch([
+    db.prepare(
+      "INSERT INTO social_projects(id,title,summary,visibility,created_by,updated_by) " +
+      "VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET " +
+      "title=excluded.title,summary=excluded.summary,visibility=excluded.visibility," +
+      "updated_by=excluded.updated_by,updated_at=unixepoch()"
+    ).bind(id,title,summary,visibility,user.id,user.id),
+    auditStatement(db,user.id,"project.upsert",id)
+  ]);
   return reply({ok:true,project_id:id,visibility});
 }
 async function adminProjectStaff(request, db, user) {
@@ -445,17 +447,17 @@ async function adminProjectStaff(request, db, user) {
     "SELECT id FROM social_users WHERE username=? AND disabled_at IS NULL"
   ).bind(username).first();
   if (!peer) bad(404,"Account not found");
-  if (staffRole==="none") {
-    await db.prepare("DELETE FROM project_staff WHERE project_id=? AND user_id=?")
-      .bind(id,peer.id).run();
-  } else {
-    await db.prepare(
+  const update=staffRole==="none" ?
+    db.prepare("DELETE FROM project_staff WHERE project_id=? AND user_id=?")
+      .bind(id,peer.id) :
+    db.prepare(
       "INSERT INTO project_staff(project_id,user_id,staff_role,granted_by) VALUES (?,?,?,?) " +
       "ON CONFLICT(project_id,user_id) DO UPDATE SET staff_role=excluded.staff_role," +
       "granted_by=excluded.granted_by,updated_at=unixepoch()"
-    ).bind(id,peer.id,staffRole,user.id).run();
-  }
-  await audit(db,user.id,"project.staff",id+":"+username+":"+staffRole);
+    ).bind(id,peer.id,staffRole,user.id);
+  await db.batch([
+    update,auditStatement(db,user.id,"project.staff",id+":"+username+":"+staffRole)
+  ]);
   return reply({ok:true,project_id:id,username,staff_role:staffRole});
 }
 async function adminAccountRole(request, db, user) {
@@ -471,10 +473,12 @@ async function adminAccountRole(request, db, user) {
   ).bind(username).first();
   if (!target) bad(404,"Active account not found");
   if (target.role==="super_admin") bad(403,"Cannot change super administrator");
-  await db.prepare(
-    "UPDATE social_users SET role=?,updated_at=unixepoch() WHERE id=? AND role!='super_admin'"
-  ).bind(role,target.id).run();
-  await audit(db,user.id,"account.role",username+":"+role);
+  await db.batch([
+    db.prepare(
+      "UPDATE social_users SET role=?,updated_at=unixepoch() WHERE id=? AND role!='super_admin'"
+    ).bind(role,target.id),
+    auditStatement(db,user.id,"account.role",username+":"+role)
+  ]);
   return reply({ok:true,username,role});
 }
 async function adminAccountDisable(request, db, user) {
@@ -489,9 +493,9 @@ async function adminAccountDisable(request, db, user) {
   await db.batch([
     db.prepare("UPDATE social_users SET disabled_at=?,updated_at=unixepoch() WHERE id=? AND role!='super_admin'")
       .bind(disabled?now():null,target.id),
-    db.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(target.id)
+    db.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(target.id),
+    auditStatement(db,user.id,"account.disabled",username+":"+(disabled?"yes":"no"))
   ]);
-  await audit(db,user.id,"account.disabled",username+":"+(disabled?"yes":"no"));
   return reply({ok:true,username,disabled});
 }
 
