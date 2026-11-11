@@ -77,20 +77,22 @@ jobs:
           cargo test --workspace --bins --lib --locked
       - name: Build Minecraft Horizon GAME from official Rust sources
         run: npm run horizon:source
-      - name: Verify bundled game's source manifest
+      - name: Verify official Rust Edition game source
         run: npm run horizon:verify
+      - name: Separate optional Rust Edition engine and embed SHA-256 download manifest
+        run: python tools/package_vis_rust_engine.py
       - name: Build standalone Linux AppImage (no DEB or installer)
         if: runner.os == 'Linux'
         run: npm run build -- --bundles appimage --config src-tauri/tauri.unsigned.json
-      - name: Audit AppImage and package Linux portable folder
+      - name: Package Linux launcher without game binaries
         if: runner.os == 'Linux'
-        run: python tools/package_linux_portable.py
+        run: python tools/package_linux_portable.py --slim
       - name: Build Windows launcher (no installer)
         if: runner.os == 'Windows'
         run: npm run build -- --no-bundle --config src-tauri/tauri.unsigned.json
       - name: Package Windows portable ZIP
         if: runner.os == 'Windows'
-        run: python tools/package_windows_portable.py
+        run: python tools/package_windows_portable.py --slim
       - name: Report Linux download size — goal 50 MB, maximum 150 MB
         if: runner.os == 'Linux'
         run: |
@@ -109,6 +111,12 @@ jobs:
         with:
           name: vis-nexo-linux-appimage
           path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+      - name: Upload optional source-built Rust Edition runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-rust-edition-${{ matrix.name }}-engine
+          path: target/release/rust-engine/*
           if-no-files-found: error
       - name: Report Windows download size — goal 50 MB, maximum 150 MB
         if: runner.os == 'Windows'
