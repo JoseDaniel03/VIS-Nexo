@@ -223,6 +223,11 @@ pub struct GameProject {
     #[serde(default="default_project_engine")] pub engine: String,
     #[serde(default="default_project_loader")] pub loader: String,
     #[serde(default)] pub loader_version: String,
+    /// Modrinth project IDs or slugs for the launcher to install with the game.
+    /// Old documents without these lists remain compatible.
+    #[serde(default)] pub required_mods: Vec<String>,
+    #[serde(default)] pub required_resourcepacks: Vec<String>,
+    #[serde(default)] pub required_shaders: Vec<String>,
     pub banner_path: String,
     pub logo_path: String,
     pub icon_path: String,
@@ -241,7 +246,7 @@ impl Default for GameProject {
     fn default() -> Self {
         Self { id: String::new(), title: String::new(), subtitle: String::new(),
             description: String::new(), versions: Vec::new(), page_scene_id: None,
-            mc_version: String::new(), engine: default_project_engine(), loader: default_project_loader(), loader_version: String::new(), banner_path: String::new(), logo_path: String::new(),
+            mc_version: String::new(), engine: default_project_engine(), loader: default_project_loader(), loader_version: String::new(), required_mods: Vec::new(), required_resourcepacks: Vec::new(), required_shaders: Vec::new(), banner_path: String::new(), logo_path: String::new(),
             icon_path: String::new(), visible_sections: BTreeMap::new(), notes: String::new(), community_url: String::new(),
             installable: true, posts: Vec::new(), calendar: Vec::new() }
     }
@@ -839,5 +844,26 @@ mod motion_schema_tests {
         let mut doc=doc_with_motion();
         doc.scenes[0].elements[0].motion.as_mut().unwrap().duration_ms=250;
         assert!(doc.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod project_content_compat_tests {
+    use super::*;
+    #[test]
+    fn legacy_project_deserializes_without_required_content() {
+        let project: GameProject = serde_json::from_str(r#"{"id":"test","title":"Legacy","mc_version":"1.21.4","installable":true}"#).unwrap();
+        assert!(project.required_mods.is_empty());
+        assert!(project.required_resourcepacks.is_empty());
+        assert!(project.required_shaders.is_empty());
+    }
+    #[test]
+    fn modrinth_lists_survive_catalog_serialization() {
+        let mut project = GameProject::default();
+        project.required_mods = vec!["fabric-api".into(), "sodium".into()];
+        project.required_resourcepacks = vec!["fresh-animations".into()];
+        let restored: GameProject = serde_json::from_value(serde_json::to_value(project).unwrap()).unwrap();
+        assert_eq!(restored.required_mods, vec!["fabric-api", "sodium"]);
+        assert_eq!(restored.required_resourcepacks, vec!["fresh-animations"]);
     }
 }
