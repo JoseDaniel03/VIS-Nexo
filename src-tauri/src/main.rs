@@ -46,6 +46,7 @@ struct Snapshot {
     messages: Vec<LocalMessage>,
     branding: Branding,
     project_execution: BTreeMap<String,bool>,
+    paused_projects: Vec<String>,
     recent_accounts: Vec<RecentIdentity>,
     mode: &'static str,
 }
@@ -240,9 +241,10 @@ impl Backend {
                 if !admin {*existing=published.clone();}
             } else {projects.push(published.clone());}
         }
+        let paused_projects=username.map(|name|self.storage.prefs(name).disabled_projects.into_iter().collect()).unwrap_or_default();
         Snapshot { user, projects, instances,
             friends, incoming_requests, outgoing_requests, messages,
-            branding: self.branding.clone(), project_execution: self.project_execution.clone(),
+            branding: self.branding.clone(), project_execution: self.project_execution.clone(), paused_projects,
             recent_accounts: self.recent_accounts.clone(), mode: if is_guest {"offline"} else {"local"} }
     }
     fn save_catalog(&mut self, next: DesignDocument) -> Result<(), String> {
@@ -330,6 +332,36 @@ fn slug(text: &str) -> String {
     }
     out.trim_matches('-').chars().take(48).collect()
 }
+
+fn valid_content_manifest(project:&GameProject)->bool {
+    let groups=[&project.required_mods,&project.required_resourcepacks,&project.required_shaders];
+    let total:usize=groups.iter().map(|list|list.len()).sum();
+    if total>32 || (project.engine=="horizon" && total>0) ||
+       (project.loader!="fabric" && !project.required_mods.is_empty()) {return false;}
+    let mut seen=std::collections::BTreeSet::new();
+    groups.iter().enumerate().all(|(group,list)|list.iter().all(|id|{
+        !id.is_empty() && id.len()<=80 && id.bytes().all(|c|c.is_ascii_alphanumeric() || c==b'-' || c==b'_') &&
+        seen.insert((group,id.to_ascii_lowercase()))
+    }))
+}
+fn project_content_items(project:&GameProject)->Vec<(String,String)> {
+    let mut items=Vec::new();
+    for (kind,list) in [("mod",&project.required_mods),("resourcepack",&project.required_resourcepacks),("shader",&project.required_shaders)] {
+        for id in list {items.push((id.to_owned(),kind.to_owned()));}
+    }
+    items
+}
+fn install_required_content(root:&Path,user:&str,instance:&Instance,items:&[(String,String)]) -> Result<Vec<String>,String> {
+    if items.is_empty(){return Ok(Vec::new());}
+    if instance.engine!="java"{return Err("El contenido Modrinth es para Minecraft Java.".into());}
+    let mut installed=Vec::new();
+    for (id,kind) in items {
+        let files=minecraft::install_modrinth(root,user,instance,id,kind)
+          .map_err(|e|format!("Contenido requerido {id} ({kind}): {e}. Los archivos ya instalados se conservan."))?;
+        installed.extend(files.into_iter().map(|file|format!("{kind}: {file}")));
+    }
+    Ok(installed)
+}
 #[tauri::command]
 fn save_project(state: State<'_, Mutex<Backend>>, mut project: GameProject) -> Result<Snapshot, String> {
     let mut s = locked(&state)?;
@@ -353,6 +385,7 @@ fn save_project(state: State<'_, Mutex<Backend>>, mut project: GameProject) -> R
         if project.loader=="fabric" && project.loader_version.trim().is_empty(){return Err("Elegí una versión de Fabric Loader para el proyecto".into());}
     }
     if project.installable && project.mc_version.trim().is_empty(){return Err("Seleccioná la versión del juego antes de habilitar el proyecto".into());}
+    if !valid_content_manifest(&project){return Err("Contenido inválido: máximo 32 IDs de Modrinth por proyecto, sin duplicados; mods solo con Fabric y sin contenido Java para Horizon".into());}
     if project.id.is_empty() { project.id = slug(&project.title); }
     if project.id.is_empty() || slug(&project.id) != project.id { return Err("ID de proyecto inválido".into()); }
     let mut next = s.catalog.clone();
@@ -454,6 +487,9 @@ fn ensure_project_instance(state:State<'_,Mutex<Backend>>,project_id:String,game
     let project=s.project(&project_id).ok_or("Proyecto inexistente")?;
     if !project.installable || s.project_execution.get(&project_id)==Some(&false){
         return Err("VIS Studios todavía no habilitó este proyecto".into());
+    }
+    if s.storage.prefs(&username).disabled_projects.contains(&project_id) {
+        return Err("Activá el proyecto en tu biblioteca antes de instalarlo".into());
     }
     if !(1024..=32768).contains(&ram_mb){return Err("Elegí entre 1 y 32 GB de RAM".into());}
     if game_dir.trim().is_empty(){return Err("Elegí una carpeta donde instalar este proyecto".into());}
@@ -736,6 +772,9 @@ fn checked_instance(s:&Backend,project_id:&str,name:&str,require_enabled:bool)->
         if require_enabled && (!project.installable || s.project_execution.get(project_id)==Some(&false)) {
             return Err("El administrador deshabilitó la ejecución de este proyecto".into());
         }
+        if require_enabled && s.storage.prefs(&username).disabled_projects.contains(project_id) {
+            return Err("Activá el proyecto en tu biblioteca para poder jugar".into());
+        }
     }
     let instance=s.storage.prefs(&username).instances.into_iter()
         .find(|i|i.project_id==project_id&&i.name==name).ok_or("Instancia inexistente")?;
@@ -747,6 +786,18 @@ fn set_project_execution(state:State<'_,Mutex<Backend>>,project_id:String,enable
     if !s.catalog.projects.iter().any(|p|p.id==project_id){return Err("Proyecto inexistente".into())}
     s.project_execution.insert(project_id,enabled);
     atomic_json(&s.execution_path,&s.project_execution)?;
+    Ok(s.snapshot())
+}
+
+#[tauri::command]
+fn set_project_active(state:State<'_,Mutex<Backend>>,project_id:String,enabled:bool)->Result<Snapshot,String>{
+    let s=locked(&state)?;
+    let username=s.username()?.to_owned();
+    if project_id==PERSONAL_PROJECT_ID || s.project(&project_id).is_none(){return Err("Proyecto inexistente".into());}
+    let mut prefs=s.storage.prefs(&username);
+    if enabled{prefs.disabled_projects.remove(&project_id);}
+    else{prefs.disabled_projects.insert(project_id);}
+    s.storage.save_prefs(&username,&prefs)?;
     Ok(s.snapshot())
 }
 #[tauri::command]
@@ -814,7 +865,7 @@ async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,proj
 }
 #[tauri::command]
 async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Snapshot,String>{
-    let (username,instance,data_root,other_instances)={
+    let (username,instance,data_root,other_instances,required_content)={
         let s=locked(&state)?;
         let (u,i)=checked_instance(&s,&project_id,&name,true)?;
         let other=s.storage.prefs(&u).instances.into_iter()
@@ -823,7 +874,9 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
             .collect::<Vec<_>>();
         let mut other=other;
         if !i.reuse_source.trim().is_empty(){other.push(PathBuf::from(&i.reuse_source));}
-        (u,i,s.data_root.clone(),other)
+        let content=if project_id==PERSONAL_PROJECT_ID{Vec::new()}
+            else{s.project(&project_id).map(project_content_items).unwrap_or_default()};
+        (u,i,s.data_root.clone(),other,content)
     };
     let cloned_app=app.clone();let chosen=instance.clone();let user=username.clone();
     let prepared=tauri::async_runtime::spawn_blocking(move||->Result<Instance,String>{
@@ -849,6 +902,7 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
         } else {
             chosen.java_path.clear();
             minecraft::install(&cloned_app,&data_root,&user,&chosen,&other_instances)?;
+            install_required_content(&data_root,&user,&chosen,&required_content)?;
         }
         Ok(chosen)
     }).await.map_err(|e|e.to_string())??;
@@ -941,6 +995,21 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
         .await.map_err(|e|e.to_string())??;
     if let Some(window)=app.get_webview_window("main"){let _=window.minimize();}
     Ok(result)
+}
+#[tauri::command]
+async fn sync_project_content(state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Vec<String>,String>{
+    let (username,instance,root,items)={
+        let s=locked(&state)?;
+        let (u,i)=checked_instance(&s,&project_id,&name,true)?;
+        if project_id==PERSONAL_PROJECT_ID{return Err("La instancia personal administra sus mods desde VIS Worlds".into());}
+        if !minecraft::installed(&minecraft::instance_dir(&s.data_root,&u,&i)?,&i){
+            return Err("Instalá Minecraft antes de sincronizar el contenido del proyecto".into());
+        }
+        let items=s.project(&project_id).map(project_content_items).ok_or("Proyecto inexistente")?;
+        (u,i,s.data_root.clone(),items)
+    };
+    tauri::async_runtime::spawn_blocking(move||install_required_content(&root,&username,&instance,&items))
+        .await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 async fn search_modrinth(state:State<'_,Mutex<Backend>>,query:String,version:String,kind:String)->Result<Vec<minecraft::ModHit>,String>{
@@ -1057,9 +1126,9 @@ fn main() {
             save_project, delete_project, save_instance, ensure_project_instance, configure_shared_ram, delete_instance,
             request_friend, accept_friend, send_message,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
-            set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
+            set_project_execution, set_project_active, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
-            list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
+            list_instance_files, toggle_instance_file, remove_instance_file, sync_project_content, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe
         ])
         .run(tauri::generate_context!())
