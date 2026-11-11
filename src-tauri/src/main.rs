@@ -283,6 +283,11 @@ impl Backend {
 fn locked<'a>(state: &'a State<'_, Mutex<Backend>>) -> Result<std::sync::MutexGuard<'a, Backend>, String> {
     state.lock().map_err(|_| "No se pudo acceder al estado interno del cliente.".into())
 }
+/// VIS Humile public endpoint set at compile time (never contains credentials).
+#[tauri::command]
+fn social_endpoint() -> String {
+    option_env!("VIS_SOCIAL_URL").unwrap_or_default().to_owned()
+}
 #[tauri::command]
 fn get_state(state: State<'_, Mutex<Backend>>) -> Result<Snapshot, String> {
     Ok(locked(&state)?.snapshot())
@@ -1277,7 +1282,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
+            get_state, social_endpoint, register, login, login_offline, logout, update_presence, set_avatar_preset,
             save_project, delete_project, save_instance, set_instance_icon, ensure_project_instance, configure_shared_ram, delete_instance,
             request_friend, accept_friend, send_message,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
