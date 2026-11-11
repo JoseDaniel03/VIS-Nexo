@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeUsername, validMessage, pair, isAllowedOrigin } from "./worker.mjs";
+import socialWorker, { normalizeUsername, validMessage, pair, isAllowedOrigin } from "./worker.mjs";
 import { readFileSync } from "node:fs";
 
 test("Ceibo usernames are canonical and reject unsafe names", () => {
@@ -28,4 +28,21 @@ test("Migration includes integrity and membership constraints", () => {
   assert.match(sql, /PRIMARY KEY\(chat_id, account_id\)/);
   assert.match(sql, /token_hash TEXT NOT NULL UNIQUE/);
   assert.match(sql, /CHECK\(length\(body\) BETWEEN 1 AND 2000\)/);
+});
+
+test("Daily cleanup only removes stale authentication metadata", async () => {
+  const statements = [];
+  const db = {
+    prepare(sql) { return { bind(...values) { return { sql, values }; } }; },
+    async batch(entries) { statements.push(...entries); return []; }
+  };
+  const promises = [];
+  await socialWorker.scheduled({}, { DB: db }, { waitUntil(promise) { promises.push(promise); } });
+  await Promise.all(promises);
+  assert.equal(statements.length, 3);
+  assert.ok(statements.some(s => s.sql.includes("ceibo_sessions")));
+  assert.ok(statements.some(s => s.sql.includes("humile_ws_tickets")));
+  assert.ok(statements.some(s => s.sql.includes("ceibo_auth_attempts")));
+  assert.equal(statements.some(s => s.sql.includes("humile_messages")), false);
+  for (const s of statements) assert.equal(s.values.length, 1);
 });
