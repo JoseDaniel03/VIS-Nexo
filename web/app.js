@@ -908,8 +908,11 @@ root.addEventListener('click',async event=>{
   try{
     const info=await command('social_identity_info');
     const detail='Usuario: '+info.username+'\\nSHA-256: '+info.fingerprint_sha256+'\\nClave pública Ed25519: '+info.public_key;
-    if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(detail);
-    window.prompt('Identidad pública (también copiada al portapapeles). Nunca compartas la clave privada:',detail);
+    let copied=false;
+    try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(detail);copied=true;}}
+    catch { /* OS clipboard permissions vary; always offer the public key manually. */ }
+    window.prompt(copied?'Identidad pública copiada. Nunca compartas la clave privada:':
+      'Copiá esta identidad pública. Nunca compartas la clave privada:',detail);
   }catch(e){message(String(e),true);}
  }
  else if(act==='social-subscribe-project'){
