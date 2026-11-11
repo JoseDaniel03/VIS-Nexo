@@ -11,7 +11,7 @@ checks={
         and 'valid_offline_owner' in accounts and 'self.get(name).is_none() && !valid_offline_owner(name)' in accounts,
     'Offline game profiles are persistent and have isolated storage':
         'fn guest_instances(&self)' in backend and 'self.storage.prefs(&owner).instances' in backend
-        and 'self.storage.save_prefs(&username,&prefs)?' in backend,
+        and 's.storage.save_prefs(&username,&prefs)?' in backend,
     'Guest cannot author admin projects':
         's.admin()?;' in backend and 's.guest_name.is_some() &&' in backend
         and 'instance.project_id!=PERSONAL_PROJECT_ID' in backend,
