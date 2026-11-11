@@ -133,7 +133,7 @@ pub(crate) async fn social_connect(
     }).await.map_err(|_| "VIS Social interrumpido")??;
     {
         let current = backend.lock().map_err(|_| "Estado local bloqueado")?;
-        if current.active_user.as_deref() != Some(&username) {
+        if current.active_user.as_deref() != Some(username.as_str()) {
             return Err("La cuenta cambió durante la conexión a VIS Social".into());
         }
     }
