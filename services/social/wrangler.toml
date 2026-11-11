@@ -1,0 +1,10 @@
+# VIS Social runs separately from VIS Universe and VIS Nexo's native launcher.
+name = "vis-social"
+main = "worker.mjs"
+compatibility_date = "2026-11-11"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vis-social-db"
+database_id = "3f1a6ccf-2d84-4233-bde3-d3887d1ea60a"
+migrations_dir = "migrations"
