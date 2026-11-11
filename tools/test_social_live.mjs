@@ -76,23 +76,33 @@ async function deliver(from,to,phrase){
 const health=await request("/health");
 assert.equal(health.status,"ready");
 assert.equal(health.schema,5);
-const testPassword="VIS CI Cloud Password 2026!";
-const online=await request("/v1/accounts/register",{
- username:names[2],password:testPassword
-});
+// The actual launcher derives this Ed25519 key using Argon2id/password.
+// The network protocol proves possession of the key, never transmits a PIN.
+const cloudSigning=await crypto.subtle.generateKey("Ed25519",true,["sign","verify"]);
+const cloudSalt=b64(crypto.getRandomValues(new Uint8Array(16)));
+const cloudPublic=b64(await crypto.subtle.exportKey("raw",cloudSigning.publicKey));
+const cloudRegistration={
+ username:names[2],password_salt:cloudSalt,password_public_key:cloudPublic,
+ registration_signature:await sign(cloudSigning.privateKey,
+  "VIS-CLOUD-REGISTER-V2\n"+names[2]+"\n"+cloudSalt)
+};
+const online=await request("/v1/accounts/register",cloudRegistration);
 assert.match(online.public_id,/^[a-f0-9]{24}$/);
 assert.equal(online.username,names[2]);
-const byId=await request("/v1/accounts/login",{
- identifier:online.public_id,password:testPassword
-});
-const byName=await request("/v1/accounts/login",{
- identifier:names[2],password:testPassword
-});
+async function loginCloud(identifier) {
+ const challenge=await request("/v1/accounts/login/challenge",{identifier});
+ assert.equal(challenge.salt,cloudSalt);
+ const signature=await sign(cloudSigning.privateKey,
+  "VIS-CLOUD-AUTH-V2\n"+names[2]+"\n"+challenge.challenge_id+"\n"+challenge.nonce);
+ return request("/v1/accounts/login/verify",{
+  identifier,challenge_id:challenge.challenge_id,signature
+ });
+}
+const byId=await loginCloud(online.public_id);
+const byName=await loginCloud(names[2]);
 assert.equal(byId.username,names[2]);
 assert.equal(byName.username,names[2]);
-await request("/v1/accounts/login",{
- identifier:names[2],password:"incorrect-password-2026"
-},undefined,401);
+await request("/v1/accounts/login/challenge",{identifier:"accountdoesnotexist"},undefined,401);
 const onlineInfo=await request("/v1/account",undefined,byId.token);
 assert.equal(onlineInfo.account.role,"user");
 assert.equal(onlineInfo.account.cloud_login_enabled,true);
