@@ -25,3 +25,6 @@ jobs:
       - run: node --check web/social-cloud.js
       - run: node --check web/app.js
       - run: node --test services/social/test_social.mjs
+      - run: python3 services/social/test_schema.py
+      - run: npm ci
+      - run: npm run validate
