@@ -83,6 +83,30 @@ La sincronización de datos antiguos locales con la nube no se hace
 automáticamente. Las funciones de moderación, eliminación/exportación de cuenta
 y retención efectiva necesitan desarrollo y validación antes de producción.
 
+## Historial local ligero (VIS Humile)
+
+Los mensajes nuevos no quedan almacenados en Cloudflare D1. El Worker de
+VIS Humile los retransmite por WebSocket únicamente a los participantes
+conectados, y cada jugador conserva en su computadora un registro compacto
+por conversación de **hasta 2.048 bytes**, con retención máxima de
+**30 días**.
+
+Cuando se llena ese espacio se eliminan primero los mensajes más viejos.
+No significa que puedan conservarse todos los mensajes de un mes: 2 KB es
+un límite estricto. El usuario puede borrar un chat desde su menú contextual.
+
+Solo los miembros conectados reciben mensajes; si el destinatario está
+desconectado, el launcher indica que no se pudo entregar y conserva el texto
+en el editor. Los mensajes del historial no se comparten entre computadoras
+y se pierden al borrar los datos locales. Los textos de los mensajes no se
+guardan en D1, aunque el servidor sí conserva la información necesaria para
+las cuentas, amistades y pertenencia a los chats.
+
+El cambio requiere aplicar la migración `0005_local_messages_only.sql`,
+que elimina el historial antiguo guardado en D1. **Hacé un respaldo antes de
+aplicarla**. No proporciona cifrado de extremo a extremo; hay que realizar
+una revisión de seguridad antes de ofrecerlo públicamente.
+
 ## Nickname dentro de Minecraft
 
 En Minecraft Java local, el lanzamiento utiliza el campo player_name
