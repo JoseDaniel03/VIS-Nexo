@@ -1,4 +1,4 @@
-import { socialOnlinePanel, syncSocialOwner, suspendSocialCloud, resumeSocialCloud } from './social-cloud.js';
+import { socialOnlinePanel, syncSocialOwner, suspendSocialCloud, resumeSocialCloud, socialGameStarted, socialGameStopped } from './social-cloud.js';
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 /* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
    VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
@@ -1210,6 +1210,9 @@ async function performLaunch(projectId,name,sourceOwner=''){
    const result=instance.engine==='horizon'?
      await command('launch_horizon',{projectId,name,sessionFile:'',sourceOwner:sourceOwner||null}):
      await command('launch_minecraft',{projectId,name,sourceOwner:sourceOwner||null});
+   const projectTitle=instance.project_id===PERSONAL_PROJECT_ID?'':db.projects.find(p=>p.id===instance.project_id)?.title||'';
+   socialGameStarted({ pid: result.pid, engine: instance.engine==='horizon'?'rust':'java',
+     project: String(projectTitle).replace(/[\\x00-\\x1f\\x7f<>]/g,'').slice(0,64) });
    message('Minecraft iniciado · PID '+result.pid+'. Logs en '+result.log_file);
  }catch(e){message('No se pudo iniciar Minecraft: '+String(e),true);}
  finally{minecraftBusy=false;installProgress=null;render();}
@@ -1258,6 +1261,7 @@ async function boot(){
  if(native&&T?.event?.listen){
   T.event.listen('minecraft-progress',e=>{installProgress=e.payload;const el=document.querySelector('#minecraft-progress');if(el)el.textContent=`${e.payload.stage}: ${e.payload.completed}/${e.payload.total} · ${e.payload.detail}`;updateDownloadDock();}).catch(()=>{});
   T.event.listen('minecraft-process-exited',e=>{
+    socialGameStopped(e.payload.pid);
     lastMinecraftExit=e.payload;
     if(!e.payload.success)message(`Minecraft finalizó con error (${e.payload.exit_code??'sin código'}). Revisá el log: ${e.payload.log_file}`,true);
     else message('Minecraft se cerró correctamente.');
