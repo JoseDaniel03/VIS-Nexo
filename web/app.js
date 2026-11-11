@@ -309,7 +309,7 @@ function socialPanel(){
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
  <div class="social-bottom"><form id="friend-form" class="friend-add-row"><input name="username" placeholder="Agregar por usuario" aria-label="Usuario de amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
- <span class="local-hint" title="${attr(socialError)}">${I('shield',13)} ${socialMode==='connected'?'VIS Social · Mensajes cifrados':socialMode==='connecting'?'Conectando VIS Social…':socialMode==='degraded'?'VIS Social · Reconectando…':'Modo local · VIS Social desconectado'}</span>${native&&socialMode!=='connected'?`<button type="button" class="icon-btn" data-action="social-retry" title="Reintentar VIS Social" aria-label="Reintentar conexión">${I('cloud',14)}</button>`:''}</div>
+ <span class="local-hint" title="${attr(socialError)}">${I('shield',13)} ${socialMode==='connected'?'VIS Social · Mensajes cifrados':socialMode==='connecting'?'Conectando VIS Social…':socialMode==='degraded'?'VIS Social · Reconectando…':socialMode==='security_warning'?'ALERTA: verificar clave del contacto':'Modo local · VIS Social desconectado'}</span>${native&&socialMode!=='connected'?`<button type="button" class="icon-btn" data-action="social-retry" title="Reintentar VIS Social" aria-label="Reintentar conexión">${I('cloud',14)}</button>`:''}</div>
  ${chatWith?chatDrawer():''}
  </aside>`;
 }
