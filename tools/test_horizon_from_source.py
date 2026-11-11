@@ -41,6 +41,7 @@ class TestSourceBuild(unittest.TestCase):
             (exporters/'VanillaHeightmapOracle.java').write_text('// test exporter')
             files={p.relative_to(path).as_posix():module.digest(p) for p in path.rglob('*') if p.is_file()}
             (path/'vis-horizon-source.json').write_text(json.dumps({'source_commit':'a'*40,
+               'vis_direct_patch':module.VIS_DIRECT_PATCH,
                'platform':module.platform.system().lower(),'arch':module.platform.machine().lower(),
                'sha256':files}))
             self.assertTrue(module.is_valid(path,'a'*40))
@@ -53,6 +54,23 @@ class TestSourceBuild(unittest.TestCase):
             (path/module.binary_name('horizon-client')).write_bytes(b'tampered')
             self.assertFalse(module.is_valid(path,'a'*40))
 
+    def test_boot_splash_hidden_when_launched_from_vis(self):
+        with tempfile.TemporaryDirectory() as dirname:
+            base=Path(dirname)
+            boot=base/module.VIS_LOADING
+            boot.parent.mkdir(parents=True)
+            boot.write_text('Window::default_attributes().with_title("Horizon")\n'
+                '.with_visible(!self.options.as_ref().is_some_and(|o| o.offscreen)),\n'
+                'Step::Ready(game) => *self = App::Ready(game),\n')
+            module.apply_vis_direct_launch(base)
+            modified=boot.read_text()
+            self.assertIn('VIS_NEXO_DIRECT_START', modified)
+            self.assertIn('Minecraft Rust Edition', modified)
+            self.assertIn('window.set_visible(true)', modified)
+            self.assertIn('App::Ready(game)', modified)
+            module.apply_vis_direct_launch(base)
+            self.assertEqual(modified,boot.read_text())
+
     def test_compiler_artifacts_are_staged_and_reused(self):
         with tempfile.TemporaryDirectory() as dirname:
             tmp=Path(dirname)
@@ -60,6 +78,11 @@ class TestSourceBuild(unittest.TestCase):
             module.CACHE=tmp/'cache'
             checkout=tmp/'fake-upstream';checkout.mkdir()
             (checkout/'.git').mkdir();(checkout/'Cargo.toml').write_text('[workspace]\n')
+            boot=checkout/module.VIS_LOADING
+            boot.parent.mkdir(parents=True)
+            boot.write_text('Window::default_attributes().with_title("Horizon")\n'
+                '.with_visible(!self.options.as_ref().is_some_and(|o| o.offscreen)),\n'
+                'Step::Ready(game) => *self = App::Ready(game),\n')
             (checkout/'research-lock.json').write_text('{}')
             (checkout/'LICENSE').write_text('MIT license placeholder for test')
             exporters=checkout/module.EXPORTER_SOURCES
