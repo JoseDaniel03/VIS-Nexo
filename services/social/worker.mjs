@@ -15,6 +15,16 @@ export function normalizeUsername(value) {
 export function validMessage(value) {
   return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 2000;
 }
+export function validCustomStatus(value) {
+  return typeof value === "string" && [...value].length <= 80 &&
+    !/[\\u0000-\\u001f\\u007f]/.test(value) && !/[<>]/.test(value);
+}
+export function validGameProject(value) {
+  return typeof value === "string" && [...value].length <= 64 &&
+    !/[\\u0000-\\u001f\\u007f]/.test(value) && !/[<>]/.test(value);
+}
+const GAME_TTL_MS = 4 * 60 * 1000; // Launcher refreshes activity while a game is active.
+
 export function pair(a, b) {
   return [a, b].sort();
 }
@@ -171,26 +181,40 @@ async function socialSnapshot(request, env, me) {
     "WHERE m.account_id=? ORDER BY latest_seq DESC,c.created_at DESC LIMIT 100"
   ).bind(id, id, id).all();
   const friends = relationships.results.filter(x => x.status === "accepted");
-  const myPresence = await db.prepare("SELECT visibility FROM humile_presence WHERE account_id=?").bind(id).first();
+  const myPresence = await db.prepare("SELECT visibility,custom_status,share_game FROM humile_presence WHERE account_id=?")
+    .bind(id).first();
+  const mineActivity = await db.prepare(
+    "SELECT engine,project FROM humile_game_activity WHERE account_id=? AND expires_at>?")
+    .bind(id, NOW()).first();
   const visibleFriends = friends.slice(0, 40);
   const statuses = visibleFriends.length
-    ? await db.prepare("SELECT account_id,visibility FROM humile_presence WHERE account_id IN (" +
+    ? await db.prepare("SELECT account_id,visibility,custom_status,share_game FROM humile_presence WHERE account_id IN (" +
         visibleFriends.map(() => "?").join(",") + ")").bind(...visibleFriends.map(f => f.other_id)).all()
     : { results: [] };
-  const preferences = new Map(statuses.results.map(x => [x.account_id, x.visibility]));
+  const gameRows = visibleFriends.length
+    ? await db.prepare("SELECT account_id,engine,project FROM humile_game_activity WHERE expires_at>? AND account_id IN (" +
+        visibleFriends.map(() => "?").join(",") + ")").bind(NOW(), ...visibleFriends.map(f => f.other_id)).all()
+    : { results: [] };
+  const preferences = new Map(statuses.results.map(x => [x.account_id, x]));
+  const activities = new Map(gameRows.results.map(x => [x.account_id, { engine: x.engine, project: x.project }]));
   const enriched = await Promise.all(visibleFriends.map(async f => {
-    const visibility = preferences.get(f.other_id) || "online";
-    if (visibility === "invisible") return { ...f, online: false, presence: "offline" };
+    const preference = preferences.get(f.other_id);
+    const visibility = preference?.visibility || "online";
+    if (visibility === "invisible") return { ...f, online: false, presence: "offline", custom_status: "", activity: null };
     try {
       const room = env.HUB.get(env.HUB.idFromName(f.other_id));
       const res = await room.fetch("https://internal/status");
       const online = !!(await res.json()).online;
-      return { ...f, online, presence: online ? visibility : "offline" };
-    } catch { return { ...f, online: false, presence: "offline" }; }
+      return { ...f, online, presence: online ? visibility : "offline",
+        custom_status: online ? (preference?.custom_status || "") : "",
+        activity: online && preference?.share_game !== 0 ? (activities.get(f.other_id) || null) : null };
+    } catch { return { ...f, online: false, presence: "offline", custom_status: "", activity: null }; }
   }));
   return response(request, env, {
-    me: { id, username: me.username, presence: myPresence?.visibility || "online" },
-    friends: enriched.concat(friends.slice(40).map(f => ({ ...f, online: false, presence: "offline" }))),
+    me: { id, username: me.username, presence: myPresence?.visibility || "online",
+      custom_status: myPresence?.custom_status || "", share_game: myPresence?.share_game !== 0,
+      activity: mineActivity ? { engine: mineActivity.engine, project: mineActivity.project } : null },
+    friends: enriched.concat(friends.slice(40).map(f => ({ ...f, online: false, presence: "offline", custom_status: "", activity: null }))),
     incoming: relationships.results.filter(x => x.status === "pending" && x.requester_id !== id),
     outgoing: relationships.results.filter(x => x.status === "pending" && x.requester_id === id),
     blocked: blocks.results, favorites: favorites.results.map(x => x.target_id), chats: chats.results
@@ -253,19 +277,54 @@ async function changeFriend(request, env, me, targetId, operation) {
   await notify(env, targetId, { type: "social:update" });
   return response(request, env, { ok: true });
 }
-async function setPresence(request, env, me) {
-  const { visibility } = await json(request);
-  if (!["online", "away", "busy", "invisible"].includes(visibility)) fail(400, "Estado inválido");
-  await rate(env.DB, "presence:" + me.id, 80, 3600000);
-  await env.DB.prepare("INSERT INTO humile_presence(account_id,visibility,updated_at) VALUES(?,?,?) " +
-    "ON CONFLICT(account_id) DO UPDATE SET visibility=excluded.visibility, updated_at=excluded.updated_at")
-    .bind(me.id, visibility, ISO()).run();
+async function notifyFriends(env, accountId) {
   const contacts = await env.DB.prepare(
     "SELECT CASE WHEN user_a=? THEN user_b ELSE user_a END AS peer FROM humile_friendships " +
-    "WHERE status='accepted' AND (user_a=? OR user_b=?) LIMIT 100"
-  ).bind(me.id, me.id, me.id).all();
+    "WHERE status='accepted' AND (user_a=? OR user_b=?) LIMIT 250"
+  ).bind(accountId, accountId, accountId).all();
   await Promise.all(contacts.results.map(x => notify(env, x.peer, { type: "social:update" })));
-  return response(request, env, { visibility });
+}
+async function setPresence(request, env, me) {
+  const body = await json(request);
+  const old = await env.DB.prepare("SELECT visibility,custom_status,share_game FROM humile_presence WHERE account_id=?")
+    .bind(me.id).first();
+  const visibility = body.visibility === undefined ? (old?.visibility || "online") : body.visibility;
+  const custom = body.custom_status === undefined ? (old?.custom_status || "") : body.custom_status;
+  const shareGame = body.share_game === undefined ? old?.share_game !== 0 : body.share_game;
+  if (!["online", "away", "busy", "invisible"].includes(visibility)) fail(400, "Estado inválido");
+  if (!validCustomStatus(custom)) fail(400, "Estado personalizado inválido (máximo 80 caracteres)");
+  if (typeof shareGame !== "boolean") fail(400, "Privacidad de actividad inválida");
+  await rate(env.DB, "presence:" + me.id, 80, 3600000);
+  await env.DB.prepare("INSERT INTO humile_presence(account_id,visibility,custom_status,share_game,updated_at) VALUES(?,?,?,?,?) " +
+    "ON CONFLICT(account_id) DO UPDATE SET visibility=excluded.visibility,custom_status=excluded.custom_status, " +
+    "share_game=excluded.share_game,updated_at=excluded.updated_at")
+    .bind(me.id, visibility, custom.trim(), shareGame ? 1 : 0, ISO()).run();
+  if (!shareGame) await env.DB.prepare("DELETE FROM humile_game_activity WHERE account_id=?").bind(me.id).run();
+  await notifyFriends(env, me.id);
+  return response(request, env, { visibility, custom_status: custom.trim(), share_game: shareGame });
+}
+async function setActivity(request, env, me) {
+  const body = await json(request);
+  if (body.engine !== null && !["java", "rust"].includes(body.engine))
+    fail(400, "Solo se acepta Minecraft Java o Minecraft Rust Edition");
+  if (body.engine !== null && !validGameProject(body.project ?? ""))
+    fail(400, "Nombre de proyecto inválido");
+  await rate(env.DB, "activity:" + me.id, 120, 3600000);
+  const old = await env.DB.prepare("SELECT engine,project FROM humile_game_activity WHERE account_id=? AND expires_at>?")
+    .bind(me.id, NOW()).first();
+  const allowed = await env.DB.prepare("SELECT share_game FROM humile_presence WHERE account_id=?").bind(me.id).first();
+  if (body.engine === null || allowed?.share_game === 0) {
+    await env.DB.prepare("DELETE FROM humile_game_activity WHERE account_id=?").bind(me.id).run();
+    if (old) await notifyFriends(env, me.id);
+    return response(request, env, { activity: null });
+  }
+  const project = (body.project || "").trim();
+  await env.DB.prepare("INSERT INTO humile_game_activity(account_id,engine,project,expires_at,updated_at) VALUES(?,?,?,?,?) " +
+    "ON CONFLICT(account_id) DO UPDATE SET engine=excluded.engine,project=excluded.project," +
+    "expires_at=excluded.expires_at,updated_at=excluded.updated_at")
+    .bind(me.id, body.engine, project, NOW() + GAME_TTL_MS, ISO()).run();
+  if (!old || old.engine !== body.engine || old.project !== project) await notifyFriends(env, me.id);
+  return response(request, env, { activity: { engine: body.engine, project }, expires_in: GAME_TTL_MS / 1000 });
 }
 async function setFavorite(request, env, me, targetId, add) {
   if (!ID.test(targetId)) fail(400, "Usuario inválido");
@@ -448,6 +507,7 @@ export default {
       if (path === "/v1/me" && method === "GET") return response(request, env, { id: me.id, username: me.username });
       if (path === "/v1/social" && method === "GET") return await socialSnapshot(request, env, me);
       if (path === "/v1/presence" && method === "POST") return await setPresence(request, env, me);
+      if (path === "/v1/activity" && method === "POST") return await setActivity(request, env, me);
       const favorites = /^\/v1\/favorites\/([a-f0-9-]{36})$/i.exec(path);
       if (favorites && ["POST", "DELETE"].includes(method))
         return await setFavorite(request, env, me, favorites[1], method === "POST");
@@ -489,7 +549,8 @@ export default {
       await env.DB.batch([
         env.DB.prepare("DELETE FROM ceibo_sessions WHERE expires_at<? OR revoked_at IS NOT NULL").bind(now),
         env.DB.prepare("DELETE FROM humile_ws_tickets WHERE expires_at<?").bind(now),
-        env.DB.prepare("DELETE FROM ceibo_auth_attempts WHERE reset_at<?").bind(now)
+        env.DB.prepare("DELETE FROM ceibo_auth_attempts WHERE reset_at<?").bind(now),
+        env.DB.prepare("DELETE FROM humile_game_activity WHERE expires_at<?").bind(now)
       ]);
     })());
   }
