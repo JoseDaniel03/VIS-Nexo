@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 const base=(process.env.VIS_SOCIAL_TEST_URL || "https://vis-social.defreitascarranza-845.workers.dev").replace(/\/$/,"");
 if (!/^https:\/\/[a-z0-9.-]+$/.test(base)) throw Error("Trusted HTTPS Worker URL required");
 const suffix=crypto.randomUUID().replaceAll("-","").slice(0,12);
-const names=["visci"+suffix+"a","visci"+suffix+"b"];
+const names=["visci"+suffix+"a","visci"+suffix+"b","visci"+suffix+"c"];
 assert(names.every(n=>/^[a-z0-9_]{3,24}$/.test(n)));
 writeFileSync(new URL("../services/social/.vis-ci-live-users.sql",import.meta.url),
   "DELETE FROM social_users WHERE username IN ("+names.map(n=>"'"+n+"'").join(",")+");\n");
@@ -76,6 +76,26 @@ async function deliver(from,to,phrase){
 const health=await request("/health");
 assert.equal(health.status,"ready");
 assert.equal(health.schema,5);
+const testPassword="VIS CI Cloud Password 2026!";
+const online=await request("/v1/accounts/register",{
+ username:names[2],password:testPassword
+});
+assert.match(online.public_id,/^[a-f0-9]{24}$/);
+assert.equal(online.username,names[2]);
+const byId=await request("/v1/accounts/login",{
+ identifier:online.public_id,password:testPassword
+});
+const byName=await request("/v1/accounts/login",{
+ identifier:names[2],password:testPassword
+});
+assert.equal(byId.username,names[2]);
+assert.equal(byName.username,names[2]);
+await request("/v1/accounts/login",{
+ identifier:names[2],password:"incorrect-password-2026"
+},undefined,401);
+const onlineInfo=await request("/v1/account",undefined,byId.token);
+assert.equal(onlineInfo.account.role,"user");
+assert.equal(onlineInfo.account.cloud_login_enabled,true);
 const a=await identity(names[0]), b=await identity(names[1]);
 const accountA=await request("/v1/account",undefined,a.token);
 const accountB=await request("/v1/account",undefined,b.token);
@@ -111,6 +131,13 @@ const visible=await request("/v1/state",undefined,a.token);
 assert(visible.friends.some(f=>f.username===b.username&&f.presence==="online"));
 await deliver(a,b,"VIS Social live A -> B");
 await deliver(b,a,"VIS Social live B -> A");
+await request("/v1/avatar/upload",{
+ mime:"image/svg+xml",data:"PHN2Zz48L3N2Zz4="
+},a.token,400);
+await request("/v1/avatar/get",{username:a.username},byId.token,403);
+await request("/v1/auth/logout",{},online.token);
+await request("/v1/auth/logout",{},byId.token);
+await request("/v1/auth/logout",{},byName.token);
 await request("/v1/auth/logout",{},a.token);
 await request("/v1/auth/logout",{},b.token);
 console.log("PASS: Cloudflare two-device bidirectional encrypted chat, ACK, friendship and presence");
