@@ -96,6 +96,24 @@ response = await call('/v1/state', undefined, bob.token);
 assert.deepEqual(response.data.incoming_requests, ['alice']);
 assert.equal((await call('/v1/friends/accept', {username: 'alice'}, alice.token)).status, 404);
 assert.equal((await call('/v1/friends/accept', {username: 'alice'}, bob.token)).status, 200);
+
+const avatarBytes=Buffer.alloc(32);
+avatarBytes.write('RIFF',0,'ascii');
+avatarBytes.writeUInt32LE(avatarBytes.length-8,4);
+avatarBytes.write('WEBP',8,'ascii');
+avatarBytes.write('VP8 ',12,'ascii');
+const avatarEncoded=avatarBytes.toString('base64');
+assert.equal((await call('/v1/avatar/upload',{
+  mime:'image/png',data:avatarEncoded
+},bob.token)).status,400,'refuse non-WebP avatar');
+assert.equal((await call('/v1/avatar/upload',{
+  mime:'image/webp',data:avatarEncoded
+},bob.token)).status,200,'save bounded server avatar');
+const avatarRead=await call('/v1/avatar/get',{username:'bob'},alice.token);
+assert.equal(avatarRead.status,200);
+assert.equal(avatarRead.data.avatar,'data:image/webp;base64,'+avatarEncoded);
+assert.equal(avatarRead.data.avatar_version,1);
+
 response = await call('/v1/state', undefined, alice.token);
 assert.equal(response.data.friends[0].username, 'bob');
 assert.equal(response.data.friends[0].public_key, bob.encryptionPublic);
@@ -212,6 +230,10 @@ assert.equal((await call('/v1/account',undefined,cloudLogin.data.token)).data.ac
 assert.equal((await call('/v1/admin/projects/upsert',{
   id:'cloud-super',title:'No permissions',visibility:'published'
 },cloudLogin.data.token)).status,403);
+
+assert.equal((await call('/v1/avatar/get',{username:'bob'},cloudLogin.data.token)).status,403,
+ 'only friends may retrieve protected avatars');
+
 const stored=DB.sqlite.prepare("SELECT password_hash,password_salt FROM social_users WHERE username='clouduser'").get();
 assert(!stored.password_hash.includes(cloudPassword));
 assert.equal(stored.password_salt.length,24);
