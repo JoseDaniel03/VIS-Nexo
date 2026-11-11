@@ -845,6 +845,16 @@ async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,proj
     let (owner,instance,root,visitor)={
         let s=locked(&state)?;
         let active=s.username()?.to_owned();
+        // Shared builds must not bypass project availability or this player's pause.
+        if project_id!=PERSONAL_PROJECT_ID {
+            let project=s.project(&project_id).ok_or("Proyecto inexistente")?;
+            if !project.installable || s.project_execution.get(&project_id)==Some(&false){
+                return Err("VIS STUDIOS deshabilitó este proyecto".into());
+            }
+            if s.storage.prefs(&active).disabled_projects.contains(&project_id){
+                return Err("Reanudá el proyecto en tu biblioteca para jugar".into());
+            }
+        }
         let from=source_owner.as_deref().filter(|o|*o!=active);
         let (owner,instance)=if let Some(other)=from {
             let ins=s.machine_instances(Some(&active)).into_iter()
@@ -958,6 +968,18 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
     let (owner,ins,data_root,guest_name)={
         let s=locked(&state)?;
         let guest_name=s.guest_name.clone();
+        // Applies also to shared and guest instances, which do not pass checked_instance.
+        if project_id!=PERSONAL_PROJECT_ID {
+            let project=s.project(&project_id).ok_or("Proyecto inexistente")?;
+            if !project.installable || s.project_execution.get(&project_id)==Some(&false){
+                return Err("VIS STUDIOS deshabilitó este proyecto".into());
+            }
+            if let Some(user)=s.active_user.as_deref(){
+                if s.storage.prefs(user).disabled_projects.contains(&project_id){
+                    return Err("Reanudá el proyecto en tu biblioteca para jugar".into());
+                }
+            }
+        }
         let (owner,ins)=if let Some(guest)=s.guest_name.as_deref() {
             let source=source_owner.ok_or("Elegí una instancia instalada")?;
             let mut ins=s.guest_instances().into_iter()
