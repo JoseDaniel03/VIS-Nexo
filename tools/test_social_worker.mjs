@@ -10,7 +10,8 @@ class D1Database {
     for (const path of [
       '../services/social/migrations/0001_social_core.sql',
       '../services/social/migrations/0002_device_auth.sql',
-      '../services/social/migrations/0003_roles_projects.sql'
+      '../services/social/migrations/0003_roles_projects.sql',
+      '../services/social/migrations/0004_cloud_credentials.sql'
     ]) this.sqlite.exec(readFileSync(new URL(path, import.meta.url), 'utf8'));
   }
   prepare(sql) {
@@ -83,7 +84,7 @@ async function account(username) {
 }
 let response = await call('/health');
 assert.equal(response.status, 200, JSON.stringify(response));
-assert.equal(response.data.schema, 3);
+assert.equal(response.data.schema, 4);
 assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
@@ -194,6 +195,25 @@ assert.equal((await call('/v1/state',undefined,bob.token)).status,401,
 assert.equal(DB.sqlite.prepare("SELECT count(*) AS n FROM admin_audit").get().n>=4,true);
 assert.equal((await call('/v1/auth/logout',{},alice.token)).status,200);
 assert.equal((await call('/v1/state',undefined,alice.token)).status,401);
+
+// Cloud identities use public IDs and one-way verifiers; local PINs cannot log in.
+const cloudPassword="Strong cloud password 2026!";
+assert.equal((await call('/v1/accounts/register',{username:'clouduser',password:'1234'})).status,400);
+const cloud=await call('/v1/accounts/register',{username:'clouduser',password:cloudPassword});
+assert.equal(cloud.status,200,JSON.stringify(cloud));
+assert.match(cloud.data.public_id,/^[0-9a-f]{24}$/);
+assert.equal((await call('/v1/accounts/register',{username:'clouduser',password:cloudPassword})).status,409);
+assert.equal((await call('/v1/accounts/login',{identifier:'clouduser',password:'Wrong pass 2026!'})).status,401);
+const cloudLogin=await call('/v1/accounts/login',{identifier:cloud.data.public_id,password:cloudPassword});
+assert.equal(cloudLogin.status,200,JSON.stringify(cloudLogin));
+assert.equal(cloudLogin.data.username,'clouduser');
+assert.equal((await call('/v1/account',undefined,cloudLogin.data.token)).data.account.role,'user');
+assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'cloud-super',title:'No permissions',visibility:'published'
+},cloudLogin.data.token)).status,403);
+const stored=DB.sqlite.prepare("SELECT password_hash,password_salt FROM social_users WHERE username='clouduser'").get();
+assert(!stored.password_hash.includes(cloudPassword));
+assert.equal(stored.password_salt.length,24);
 
 DB.sqlite.exec("UPDATE auth_sessions SET expires_at=1");
 DB.sqlite.exec("UPDATE auth_challenges SET expires_at=1");
