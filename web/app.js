@@ -637,9 +637,7 @@ async function projectInstallAndPlay(){
    db=await command('ensure_project_instance',{projectId,gameDir,ramMb});dialog=null;render();
    const ins=db.instances.find(i=>i.project_id===projectId&&!i.source_owner);
    if(!ins)throw Error('No se pudo registrar la instancia');
-   if(!ins.installed)await performInstall(ins.project_id,ins.name);
-   const ready=db.instances.find(i=>i.project_id===projectId&&i.name===ins.name&&!i.source_owner);
-   if(ready?.installed)await performLaunch(projectId,ready.name);
+   await performLaunch(projectId,ins.name);
  }catch(e){message('No se pudo instalar el proyecto: '+String(e),true)}
 }
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste es exclusivo de tu perfil VIS. No modifica la instalación ni los mundos del propietario.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
@@ -906,7 +904,7 @@ async function saveInstanceForm(installAndPlay=false){
      catch(e){message('Instancia guardada, pero no se pudo cambiar el icono: '+String(e),true);}
    }
    stagedInstanceIcon=undefined;
-   dialog=null;render();if(installAndPlay){await performInstall(instance.project_id,instance.name);const actual=db.instances.find(x=>x.project_id===instance.project_id&&x.name===instance.name);if(actual?.installed){await performLaunch(instance.project_id,instance.name);}}}
+   dialog=null;render();if(installAndPlay){await performLaunch(instance.project_id,instance.name);}}
 }
 root.addEventListener('click',async event=>{
  if(!(event.target instanceof Element))return;
@@ -1177,26 +1175,44 @@ async function importWorldsInstance(){
  }catch(e){message(String(e),true)}
 }
 async function performInstall(projectId,name){
- if(!native)return message('La instalación real requiere ejecutar el cliente Tauri.',true);
- if(minecraftBusy)return;
- minecraftBusy=true;installProgress={detail:'Iniciando instalación',completed:0,total:1};render();
- try{db=await command('install_minecraft',{projectId,name});message('Minecraft se instaló correctamente.');}
- catch(e){message(String(e),true)}finally{minecraftBusy=false;installProgress=null;render();}
+ if(!native){message('La instalación requiere VIS Nexo de escritorio.',true);return false;}
+ if(minecraftBusy)return false;
+ const current=db.instances.find(i=>i.project_id===projectId&&i.name===name);
+ minecraftBusy=true;
+ installProgress={stage:'VIS Nexo',detail:current?.engine==='horizon'?'Preparando Minecraft Rust Edition…':'Preparando Minecraft Java…',completed:0,total:100};
+ render();
+ try{
+   db=await command('install_minecraft',{projectId,name});
+   message('Versión instalada y verificada.');
+   return true;
+ }catch(e){message('No se pudo instalar Minecraft: '+String(e),true);return false;}
+ finally{minecraftBusy=false;installProgress=null;render();}
 }
 async function performLaunch(projectId,name,sourceOwner=''){
+ if(!native)return message('Para jugar abrí VIS Nexo de escritorio.',true);
+ if(minecraftBusy)return;
  lastMinecraftExit=null;
- if(!native)return message('Para iniciar Minecraft abrí el cliente Tauri.',true);
+ let instance=db.instances.find(i=>i.project_id===projectId&&i.name===name&&
+   (!sourceOwner||i.source_owner===sourceOwner));
+ if(!instance)return message('No se encontró la instancia elegida.',true);
+ // One click: first install the game if it does not exist yet.
+ if(!instance.installed){
+   if(sourceOwner)return message('La instancia compartida necesita que su propietario la instale.',true);
+   if(!await performInstall(projectId,name))return;
+   instance=db.instances.find(i=>i.project_id===projectId&&i.name===name&&!i.source_owner);
+   if(!instance?.installed)return message('La instalación no pasó la verificación final.',true);
+ }
+ if(minecraftBusy)return;
+ minecraftBusy=true;
+ installProgress={stage:'VIS Nexo',detail:instance.engine==='horizon'?'Abriendo Minecraft Rust Edition…':'Abriendo Minecraft Java…',completed:100,total:100};
+ render();
  try{
-  const instance=db.instances.find(i=>i.project_id===projectId&&i.name===name);
-  let result;
-  if(instance?.engine==='horizon'){
-    const sessionFile=''; // Supported local game mode; Microsoft integration remains separate.
-    result=await command('launch_horizon',{projectId,name,sessionFile,sourceOwner:sourceOwner||null});
-  }else{
-    result=await command('launch_minecraft',{projectId,name,sourceOwner:sourceOwner||null});
-  }
-  message(`Minecraft iniciado · PID ${result.pid}. Logs en ${result.log_file}`);
- }catch(e){message(String(e),true)}
+   const result=instance.engine==='horizon'?
+     await command('launch_horizon',{projectId,name,sessionFile:'',sourceOwner:sourceOwner||null}):
+     await command('launch_minecraft',{projectId,name,sourceOwner:sourceOwner||null});
+   message('Minecraft iniciado · PID '+result.pid+'. Logs en '+result.log_file);
+ }catch(e){message('No se pudo iniciar Minecraft: '+String(e),true);}
+ finally{minecraftBusy=false;installProgress=null;render();}
 }
 async function performModSearch(data){
  const i=selectedMcInstance();if(!i)return;
