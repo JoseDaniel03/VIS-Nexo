@@ -21,3 +21,7 @@ new_sqlite_classes = ["SocialHub"]
 [vars]
 # Extra trusted desktop/browser origins, comma-separated if needed.
 ALLOWED_ORIGINS = "http://tauri.localhost,https://tauri.localhost,tauri://localhost,http://localhost:1420,http://127.0.0.1:1420"
+
+# Clean expired sessions and temporary tickets once per day (04:00 UTC).
+[triggers]
+crons = ["0 4 * * *"]
