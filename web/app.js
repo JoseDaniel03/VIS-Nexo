@@ -284,17 +284,28 @@ function sidebar(){
 function socialPanel(){
  const related = socialTab==='projects' && page==='project';
  const friends = db.friends; // Global friendships persist; project context is a view, not a second friend list.
+ const cloudProjects=social.state()?.projects||[];
+ const projectId=page==='project'?currentProject()?.id||'':'';
+ const projectFriends=socialTab==='projects'?
+   projectId?friends.filter(f=>(f.shared_projects||[]).includes(projectId)):[]
+   :friends;
+ const socialOwner=social.state()?.role==='super_admin';
  return `<aside class="social-pane ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
  <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
  <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
  <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span></div>
  <label class="social-small-title" for="social-presence">TU ESTADO</label><div class="presence-picker"><button type="button" class="icon-btn" data-action="social-custom-status" title="Editar estado personalizado" aria-label="Editar estado personalizado">${I('edit',14)}</button>${I('circle',16)}<select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select>${I('chevrondown',14)}</div>
- <div class="social-group-head"><span>${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'}</span><span>${friends.length}</span></div>
+ <div class="social-group-head"><span>${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'}</span><span>${projectFriends.length}</span></div>
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
- ${socialTab==='projects'&&page!=='project'?`<p class="social-empty">Abrí un proyecto para ver sus contactos.</p>`:''}
- ${friends.filter(f=>(f.username+' '+(f.alias||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${avatarVisual('',f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span><span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
- ${friends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
+ ${socialTab==='projects'&&!projectId?`<p class="social-empty">Abrí un proyecto para ver contactos que también lo siguen.</p>`:''}
+ ${projectFriends.filter(f=>(f.username+' '+(f.alias||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${avatarVisual('',f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span><span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
+ ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
+ ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
+ ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
+ ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}
+ <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>
+ `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
  <div class="social-bottom"><form id="friend-form" class="friend-add-row"><input name="username" placeholder="Agregar por usuario" aria-label="Usuario de amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
@@ -892,6 +903,41 @@ root.addEventListener('click',async event=>{
  else if(act==='open-chat'){chatWith=id;chatWindowSize=100;render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';render();},{reducedMotion:prefs.reducedMotion});}
+ else if(act==='social-public-identity'){
+  if(!native){message('La identidad se muestra desde VIS Nexo nativo.',true);return;}
+  try{
+    const info=await command('social_identity_info');
+    const detail='Usuario: '+info.username+'\\nSHA-256: '+info.fingerprint_sha256+'\\nClave pública Ed25519: '+info.public_key;
+    if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(detail);
+    window.prompt('Identidad pública (también copiada al portapapeles). Nunca compartas la clave privada:',detail);
+  }catch(e){message(String(e),true);}
+ }
+ else if(act==='social-subscribe-project'){
+  try{await social.subscribeProject(id,button.dataset.subscribed!=='true');}
+  catch(e){message(String(e),true);}
+ }
+ else if(act==='social-register-project'){
+  if(social.state()?.role!=='super_admin'){message('Solo la supercuenta puede registrar proyectos.',true);return;}
+  const projectId=window.prompt('ID público de proyecto (letras, números, _ y -):');
+  if(!projectId)return;
+  const title=window.prompt('Nombre del proyecto:');
+  if(!title)return;
+  const visibility=window.confirm('¿Publicar el proyecto para todos?')?'published':'draft';
+  try{await social.manageProject({id:projectId,title,summary:'',visibility});message('Proyecto registrado en VIS Social');}
+  catch(e){message(String(e),true);}
+ }
+ else if(act==='social-manage-user'){
+  if(social.state()?.role!=='super_admin'){message('Solo la supercuenta puede gestionar usuarios.',true);return;}
+  const username=window.prompt('Usuario de VIS Social:');
+  if(!username)return;
+  const choice=window.prompt('Operación: user, moderator, project_manager, disable, enable');
+  if(!choice)return;
+  try{
+   if(choice==='disable'||choice==='enable')await social.setAccountDisabled(username,choice==='disable');
+   else await social.setAccountRole(username,choice);
+   message('Permiso actualizado en el servidor');
+  }catch(e){message(String(e),true);}
+ }
  else if(act==='social-retry'){if(!social.connected())void connectSocial();}
  else if(act==='social-custom-status'){
   if(!social.connected()){message('Conectá VIS Social para usar estados personalizados.',true);return;}
