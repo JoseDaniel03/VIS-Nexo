@@ -37,3 +37,20 @@ Vanilla no admite mods Fabric; Horizon no admite packs Modrinth Java. Las versio
 - Editar el proyecto, añadir un mod compatible, republicar y utilizar **Sincronizar contenido**.
 - Confirmar que Horizon rechace mods Modrinth y Vanilla rechace mods Fabric.
 - Revisar logs de arranque del juego; una CI verde valida Rust/JS pero **no equivale** a ejecutar Minecraft en un entorno gráfico real.
+
+## Modo offline: creación y gestión de instancias
+
+Los jugadores que eligen **Offline** en el login no necesitan registrar una cuenta VIS para usar **VIS Worlds**. Las instalaciones creadas quedan asociadas al nickname local, en preferencias con prefijo `offline--`. El nickname se normaliza a minúsculas para conservar el mismo UUID offline y los datos del jugador al volver a entrar. No hay contraseña para ese nickname: cualquier persona que tenga acceso al mismo equipo y escriba el mismo nick puede usar ese perfil.
+
+**Disponible en modo offline:**
+- Crear, editar, duplicar configuración, importar/exportar y eliminar de la lista las instancias propias.
+- Instalar, reparar e iniciar Minecraft Java Vanilla/Fabric en carpetas locales separadas.
+- Buscar mods compatibles en Modrinth, importar JAR/ZIP, activar/desactivar mods, texturas y shaders por instancia.
+- Instalar proyectos Java publicados en VIS Universe con carpeta y RAM propios; pausar o reanudar esos proyectos por nickname.
+- Jugar instancias Java previamente instaladas en cuentas locales del mismo equipo con guardados separados, pero sin modificar sus archivos como si fueran propias.
+
+**No disponible:** privilegios de administrador ni edición de proyectos oficiales; sincronización de amigos/chat; autenticación Microsoft; servidores premium/online-mode; instalación/ejecución de Horizon en un perfil offline. El modo offline no demuestra titularidad de Minecraft.
+
+**Seguridad y persistencia:** las preferencias offline se guardan fuera de los perfiles registrados. Los mundos no se borran al eliminar una entrada de la lista. El backend rechaza directorios raíz y carpetas que se superponen con instalaciones de cuentas registradas. Al cambiar el nickname cambia el perfil offline; para transferir instancias, exportá/importá un ZIP de VIS Worlds.
+
+**Validación:** `python3 tools/check_vis_offline.py` comprueba los contratos del código en CI, y `cargo test --workspace --bins --lib --locked` incluye la prueba de persistencia y aislamiento en `accounts.rs`. Los tests fuente no sustituyen una sesión real de Minecraft.
