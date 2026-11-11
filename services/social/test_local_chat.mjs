@@ -70,6 +70,8 @@ test("Oversized messages and future-dated messages do not write storage", () => 
   const storage = new MemoryStorage(), now = Date.now();
   assert.equal(LOCAL_MESSAGE_LIMIT_BYTES, 1536);
   assert.throws(() => appendLocalChat(storage, origin, alice, chat, msg(1, now, bob, "🔥".repeat(500)), now));
+  assert.throws(() => appendLocalChat(storage, origin, alice, chat,
+    msg(3, now, bob, "a" + "\\n".repeat(950) + "b"), now));
   assert.throws(() => appendLocalChat(storage, origin, alice, chat, msg(2, now + 120000), now));
   assert.equal(storage.length, 0);
 });
