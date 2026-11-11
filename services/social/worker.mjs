@@ -6,7 +6,7 @@ const USERNAME = /^[a-z0-9_]{3,24}$/;
 const MAX_BODY = 8192;
 const MAX_MESSAGE_BYTES = 2048;
 const HOUR = 3600;
-const PASSWORD_ITERATIONS = 210000;
+const PASSWORD_ARGON2_PASSES = 2;
 const reply = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: {
@@ -163,30 +163,14 @@ async function session(request, db) {
     .bind(await hash(token), row.user_id, expiresAt).run();
   return reply({ token, expires_at: expiresAt, username });
 }
-// Password-based cloud accounts are independent of legacy local PINs.
-// PBKDF2 runs server-side using WebCrypto, and only the derived salted verifier
-// is stored in D1. Do not accept 4-digit PINs for Internet login.
-function validateCloudPassword(value) {
-  if (typeof value !== "string" || value.length < 10 || value.length > 128 ||
-      te.encode(value).length > 256) bad(400, "Online password must be 10-128 characters");
-  return value;
-}
-async function passwordVerifier(password, salt, iterations = PASSWORD_ITERATIONS) {
-  const input = await crypto.subtle.importKey("raw", te.encode(password), "PBKDF2",
-    false, ["deriveBits"]);
-  const result = await crypto.subtle.deriveBits({
-    name: "PBKDF2", hash: "SHA-256", salt: unbase64(salt, 16),
-    iterations
-  }, input, 256);
-  return base64(new Uint8Array(result));
-}
-function equalVerifier(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const aBytes = te.encode(a), bBytes = te.encode(b);
-  if (aBytes.length !== bBytes.length || aBytes.length !== 44) return false;
-  let difference = 0;
-  for (let i = 0; i < aBytes.length; i++) difference |= aBytes[i] ^ bBytes[i];
-  return difference === 0;
+// The Rust client derives an Ed25519 credential from the account password
+// using Argon2id (19 MiB, t=2). The password/seed never leaves the launcher.
+// Workers Free has a 10-ms CPU limit, so the Worker verifies signatures only.
+function cloudVerifier(body, username) {
+  const salt = body.password_salt, pub = body.password_public_key;
+  unbase64(salt, 16);
+  unbase64(pub, 32);
+  return { salt, pub, text: "VIS-CLOUD-REGISTER-V2\n"+username+"\n"+salt };
 }
 async function startCloudSession(db, user) {
   const token = randomToken();
@@ -197,55 +181,81 @@ async function startCloudSession(db, user) {
     public_id:user.public_id});
 }
 async function cloudRegister(request, db) {
-  await rateLimit(db, request, "cloud-register", 5);
-  const body = await parseBody(request);
-  const username = normalName(body.username);
-  const password = validateCloudPassword(body.password);
-  const existing = await db.prepare("SELECT id FROM social_users WHERE username=?")
+  await rateLimit(db,request,"cloud-register",5);
+  const body=await parseBody(request);
+  const username=normalName(body.username);
+  const { salt, pub, text }=cloudVerifier(body,username);
+  if (!await verifySignature(pub,body.registration_signature,text))
+    bad(401,"Invalid password credential proof");
+  const existing=await db.prepare("SELECT id FROM social_users WHERE username=?")
     .bind(username).first();
-  if (existing) bad(409, "Username already taken; sign in or migrate existing device account");
-  const salt = base64(crypto.getRandomValues(new Uint8Array(16)));
-  const verifier = await passwordVerifier(password, salt);
-  const publicId = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
-  const id = crypto.randomUUID();
+  if (existing) bad(409,"Username already taken; sign in or migrate existing device account");
+  const publicId=crypto.randomUUID().replaceAll("-","").slice(0,24);
+  const id=crypto.randomUUID();
   try {
     await db.prepare(
-      "INSERT INTO social_users(id,username,public_id,display_name," +
+      "INSERT INTO social_users(id,username,public_id,display_name,"+
       "password_hash,password_salt,password_iterations) VALUES (?,?,?,?,?,?,?)"
-    ).bind(id,username,publicId,username,verifier,salt,PASSWORD_ITERATIONS).run();
-  } catch { bad(409, "Username already taken"); }
+    ).bind(id,username,publicId,username,"ed25519:"+pub,salt,PASSWORD_ARGON2_PASSES).run();
+  } catch {bad(409,"Username already taken");}
   return startCloudSession(db,{id,username,public_id:publicId});
 }
-async function cloudLogin(request, db) {
-  await rateLimit(db, request, "cloud-login", 12);
-  const body = await parseBody(request);
-  const identifier = typeof body.identifier==="string" ? body.identifier.trim().toLowerCase() : "";
-  const password = validateCloudPassword(body.password);
-  if (!(/^[a-z0-9_]{3,24}$/.test(identifier) || /^[a-f0-9]{24}$/.test(identifier)))
-    bad(401, "Invalid username/ID or password");
-  await rateLimit(db, request, "cloud-identifier:"+identifier, 8);
-  const user = await db.prepare(
-    "SELECT id,username,public_id,password_hash,password_salt,password_iterations " +
+async function cloudChallenge(request, db) {
+  await rateLimit(db,request,"cloud-login-challenge",20);
+  const body=await parseBody(request);
+  const identifier=typeof body.identifier==="string"?body.identifier.trim().toLowerCase():"";
+  if(!/^[a-z0-9_]{3,24}$/.test(identifier))
+    bad(401,"Invalid username/ID or password");
+  await rateLimit(db,request,"cloud-identifier:"+identifier,9);
+  const user=await db.prepare(
+    "SELECT id,username,public_id,password_hash,password_salt,password_iterations "+
     "FROM social_users WHERE (username=? OR public_id=?) AND disabled_at IS NULL"
   ).bind(identifier,identifier).first();
-  if (!user || !user.password_hash) bad(401, "Invalid username/ID or password");
-  if (user.password_iterations !== PASSWORD_ITERATIONS ||
-      !user.password_salt) bad(503, "Account credential migration required");
-  const candidate = await passwordVerifier(password,user.password_salt,user.password_iterations);
-  if (!equalVerifier(candidate,user.password_hash)) bad(401,"Invalid username/ID or password");
-  return startCloudSession(db,user);
+  if(!user || !user.password_hash?.startsWith("ed25519:") ||
+     user.password_iterations!==PASSWORD_ARGON2_PASSES)
+    bad(401,"Invalid username/ID or password");
+  const id=crypto.randomUUID(),nonce=randomToken();
+  await db.prepare(
+    "INSERT INTO auth_challenges(id,user_id,nonce,expires_at) VALUES (?,?,?,?)"
+  ).bind(id,user.id,nonce,now()+120).run();
+  return reply({challenge_id:id,nonce,username:user.username,
+    salt:user.password_salt,kdf:"argon2id-19m-t2",expires_in:120});
+}
+async function cloudVerify(request, db) {
+  await rateLimit(db,request,"cloud-login-verify",15);
+  const body=await parseBody(request);
+  const identifier=typeof body.identifier==="string"?body.identifier.trim().toLowerCase():"";
+  if(!/^[a-z0-9_]{3,24}$/.test(identifier) ||
+     typeof body.challenge_id!=="string" || body.challenge_id.length>80)
+    bad(401,"Invalid username/ID or password");
+  const row=await db.prepare(
+    "SELECT c.id,c.nonce,u.id AS user_id,u.username,u.public_id,u.password_hash "+
+    "FROM auth_challenges c JOIN social_users u ON u.id=c.user_id "+
+    "WHERE c.id=? AND (u.username=? OR u.public_id=?) "+
+    "AND u.disabled_at IS NULL AND c.expires_at>?"
+  ).bind(body.challenge_id,identifier,identifier,now()).first();
+  if(!row || !row.password_hash?.startsWith("ed25519:"))
+    bad(401,"Invalid username/ID or password");
+  const proof="VIS-CLOUD-AUTH-V2\n"+row.username+"\n"+row.id+"\n"+row.nonce;
+  if(!await verifySignature(row.password_hash.slice(8),body.signature,proof))
+    bad(401,"Invalid username/ID or password");
+  const claimed=await db.prepare(
+    "DELETE FROM auth_challenges WHERE id=? AND user_id=? AND expires_at>?"
+  ).bind(row.id,row.user_id,now()).run();
+  if(claimed.meta?.changes!==1)bad(401,"Challenge already used");
+  return startCloudSession(db,{id:row.user_id,username:row.username,public_id:row.public_id});
 }
 async function upgradeCloudLogin(request, db, user) {
   await rateLimit(db,request,"cloud-upgrade:"+user.id,3);
-  const body = await parseBody(request);
-  const password = validateCloudPassword(body.password);
-  const salt = base64(crypto.getRandomValues(new Uint8Array(16)));
-  const verifier = await passwordVerifier(password,salt);
-  const updated = await db.prepare(
+  const body=await parseBody(request);
+  const { salt,pub,text }=cloudVerifier(body,user.username);
+  if(!await verifySignature(pub,body.registration_signature,text))
+    bad(401,"Invalid credential proof");
+  const changed=await db.prepare(
     "UPDATE social_users SET password_hash=?,password_salt=?,password_iterations=?,"+
     "updated_at=unixepoch() WHERE id=? AND password_hash=''"
-  ).bind(verifier,salt,PASSWORD_ITERATIONS,user.id).run();
-  if (updated.meta?.changes !== 1) bad(409,"Online password already configured");
+  ).bind("ed25519:"+pub,salt,PASSWORD_ARGON2_PASSES,user.id).run();
+  if(changed.meta?.changes!==1)bad(409,"Online password already configured");
   return reply({ok:true,public_id:user.public_id});
 }
 
@@ -674,7 +684,8 @@ export default {
           ready ? 200 : 503);
       }
       if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
-      if (method === "POST" && path === "/v1/accounts/login") return await cloudLogin(request, db);
+      if (method === "POST" && path === "/v1/accounts/login/challenge") return await cloudChallenge(request, db);
+      if (method === "POST" && path === "/v1/accounts/login/verify") return await cloudVerify(request, db);
       if (method === "POST" && path === "/v1/auth/register") return await register(request, db);
       if (method === "POST" && path === "/v1/auth/challenge") return await challenge(request, db);
       if (method === "POST" && path === "/v1/auth/session") return await session(request, db);
