@@ -12,7 +12,7 @@ mod horizon_download;
 // Reserved namespace for player-owned instances; project editor slugs cannot create this ID.
 const PERSONAL_PROJECT_ID: &str = "__personal__";
 
-use accounts::{atomic_json, data_directory, Instance, LocalMessage, LocalStore, Role};
+use accounts::{atomic_json, data_directory, offline_pref_owner, Instance, LocalMessage, LocalStore, Role};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::{Path, PathBuf}, sync::Mutex, time::{SystemTime, UNIX_EPOCH}};
@@ -181,7 +181,27 @@ impl Backend {
         available.sort_by(|a,b|a.name.cmp(&b.name).then(a.source_owner.cmp(&b.source_owner)));
         available
     }
-    fn guest_instances(&self) -> Vec<Instance> { self.machine_instances(None) }
+    /// Offline guests keep their own persistent installation list in a
+    /// separate namespaced preferences file. They can still play installed
+    /// Java games shared by registered profiles, with separate saves.
+    fn guest_instances(&self) -> Vec<Instance> {
+        let mut available=Vec::new();
+        if let Some(owner)=self.guest_name.as_deref().and_then(|nick|offline_pref_owner(nick).ok()) {
+            available=self.storage.prefs(&owner).instances;
+            for instance in &mut available {
+                instance.source_owner.clear();
+                instance.installed=minecraft::instance_dir(&self.data_root,&owner,instance)
+                    .is_ok_and(|dir|minecraft::installed(&dir,instance));
+            }
+        }
+        available.extend(self.machine_instances(None));
+        available
+    }
+    fn player_owner(&self)->Result<String,String>{
+        if let Some(user)=self.active_user.as_ref(){return Ok(user.clone());}
+        if let Some(nick)=self.guest_name.as_deref(){return offline_pref_owner(nick);}
+        Err("Iniciá sesión o elegí un nick offline para continuar".into())
+    }
 
     fn username(&self) -> Result<&str, String> {
         self.active_user.as_deref().ok_or_else(|| "Iniciá sesión para continuar.".into())
@@ -241,7 +261,9 @@ impl Backend {
                 if !admin {*existing=published.clone();}
             } else {projects.push(published.clone());}
         }
-        let paused_projects=username.map(|name|self.storage.prefs(name).disabled_projects.into_iter().collect()).unwrap_or_default();
+        let paused_projects=self.player_owner().ok()
+            .map(|owner|self.storage.prefs(&owner).disabled_projects.into_iter().collect())
+            .unwrap_or_default();
         Snapshot { user, projects, instances,
             friends, incoming_requests, outgoing_requests, messages,
             branding: self.branding.clone(), project_execution: self.project_execution.clone(), paused_projects,
@@ -292,9 +314,7 @@ fn logout(state: State<'_, Mutex<Backend>>) -> Result<Snapshot, String> {
 #[tauri::command]
 fn login_offline(state: State<'_, Mutex<Backend>>, nickname: String) -> Result<Snapshot, String> {
     let nick = nickname.trim();
-    if !(3..=16).contains(&nick.len()) || !nick.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_') {
-        return Err("El nick offline debe tener 3–16 caracteres (letras, números y _).".into());
-    }
+    offline_pref_owner(nick)?;
     let mut s = locked(&state)?;
     s.active_user = None;
     s.guest_name = Some(nick.to_owned());
@@ -409,7 +429,11 @@ fn delete_project(state: State<'_, Mutex<Backend>>, project_id: String) -> Resul
 #[tauri::command]
 fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Result<Snapshot, String> {
     let s = locked(&state)?;
-    let username = s.username()?.to_string();
+    let username = s.player_owner()?;
+    if s.guest_name.is_some() &&
+        (instance.project_id!=PERSONAL_PROJECT_ID || instance.engine!="java") {
+        return Err("El modo offline solo crea instancias personales de Minecraft Java (Vanilla/Fabric). Para proyectos públicos, usá Instalar y jugar.".into());
+    }
     if instance.name.trim().is_empty() || instance.name.chars().count() > 60 { return Err("Nombre de instancia inválido".into()); }
     if !(1024..=32768).contains(&instance.ram_mb) { return Err("La RAM debe estar entre 1024 y 32768 MB".into()); }
     if instance.project_id != PERSONAL_PROJECT_ID {
@@ -451,7 +475,8 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
     }
     if !instance.player_name.is_empty() && (instance.player_name.len()>16 || instance.player_name.len()<3 || !instance.player_name.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_')) {return Err("El nick de Minecraft debe tener de 3 a 16 caracteres (letras, números y _).".into());}
     instance.source_owner.clear();
-    instance.share_offline = instance.engine == "java" && instance.game_dir.trim().is_empty();
+    if let Some(guest)=s.guest_name.as_deref(){instance.player_name=guest.to_owned();}
+    instance.share_offline = s.guest_name.is_none() && instance.engine == "java" && instance.game_dir.trim().is_empty();
     let dir=minecraft::instance_dir(&s.data_root,&username,&instance)?;
     instance.installed=minecraft::installed(&dir,&instance);
     let mut prefs = s.storage.prefs(&username);
@@ -483,8 +508,11 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
 fn ensure_project_instance(state:State<'_,Mutex<Backend>>,project_id:String,game_dir:String,ram_mb:u32)->Result<Snapshot,String>{
     if game_dir.trim().is_empty(){return Err("Elegí una carpeta para esta instancia".into());}
     let s=locked(&state)?;
-    let username=s.username()?.to_owned();
+    let username=s.player_owner()?;
     let project=s.project(&project_id).ok_or("Proyecto inexistente")?;
+    if s.guest_name.is_some() && project.engine!="java"{
+        return Err("El modo offline permite proyectos de Minecraft Java; Horizon requiere una sesión compatible.".into());
+    }
     if !project.installable || s.project_execution.get(&project_id)==Some(&false){
         return Err("VIS Studios todavía no habilitó este proyecto".into());
     }
@@ -554,7 +582,7 @@ fn configure_shared_ram(state:State<'_,Mutex<Backend>>,source_owner:String,proje
 #[tauri::command]
 fn delete_instance(state: State<'_, Mutex<Backend>>, project_id: String, name: String) -> Result<Snapshot, String> {
     let s = locked(&state)?;
-    let username = s.username()?.to_string();
+    let username = s.player_owner()?;
     let mut prefs = s.storage.prefs(&username);
     prefs.instances.retain(|p| p.project_id != project_id || p.name != name);
     s.storage.save_prefs(&username, &prefs)?;
@@ -764,7 +792,7 @@ fn save_brand_name(state: State<'_, Mutex<Backend>>, name: String) -> Result<Sna
 // Minecraft Java / Fabric / Modrinth: direct service layer over the existing account and project state.
 // Admin policy is ALWAYS validated by Rust before a game process is spawned.
 fn checked_instance(s:&Backend,project_id:&str,name:&str,require_enabled:bool)->Result<(String,Instance),String>{
-    let username=s.username()?.to_owned();
+    let username=s.player_owner()?;
     // Personal profiles belong to the authenticated local account and are not
     // governed by publication flags of administrator-owned Virgoland projects.
     if project_id != PERSONAL_PROJECT_ID {
@@ -792,7 +820,7 @@ fn set_project_execution(state:State<'_,Mutex<Backend>>,project_id:String,enable
 #[tauri::command]
 fn set_project_active(state:State<'_,Mutex<Backend>>,project_id:String,enabled:bool)->Result<Snapshot,String>{
     let s=locked(&state)?;
-    let username=s.username()?.to_owned();
+    let username=s.player_owner()?;
     if project_id==PERSONAL_PROJECT_ID || s.project(&project_id).is_none(){return Err("Proyecto inexistente".into());}
     let mut prefs=s.storage.prefs(&username);
     if enabled{prefs.disabled_projects.remove(&project_id);}
@@ -945,13 +973,22 @@ async fn export_worlds_instance(state:State<'_,Mutex<Backend>>,project_id:String
 #[tauri::command]
 async fn import_worlds_instance(state:State<'_,Mutex<Backend>>,archive:String,library:String)->Result<Snapshot,String>{
     let (username,taken)={let s=locked(&state)?;
-        let username=s.username()?.to_owned();
+        let username=s.player_owner()?;
         let taken=s.storage.prefs(&username).instances.into_iter().map(|i|i.name).collect::<Vec<_>>();
         (username,taken)
     };
-    let imported=tauri::async_runtime::spawn_blocking(move||ombu::import_instance(Path::new(&archive),Path::new(&library),&taken))
+    let mut imported=tauri::async_runtime::spawn_blocking(move||ombu::import_instance(Path::new(&archive),Path::new(&library),&taken))
         .await.map_err(|e|e.to_string())??;
     let s=locked(&state)?;
+    if let Some(nick)=s.guest_name.as_deref(){
+        if imported.engine!="java" {
+            return Err("Solo se pueden importar instancias Java en modo offline.".into());
+        }
+        imported.project_id=PERSONAL_PROJECT_ID.into();
+        imported.player_name=nick.to_owned();
+        imported.source_owner.clear();
+        imported.share_offline=false;
+    }
     let mut prefs=s.storage.prefs(&username);
     if prefs.instances.iter().any(|i|i.name.eq_ignore_ascii_case(&imported.name)) {
        return Err("La instancia ya existe. Volvé a importar con otro nombre.".into());
@@ -981,13 +1018,18 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
             }
         }
         let (owner,ins)=if let Some(guest)=s.guest_name.as_deref() {
-            let source=source_owner.ok_or("Elegí una instancia instalada")?;
-            let mut ins=s.guest_instances().into_iter()
-                .find(|i|i.project_id==project_id && i.name==name && i.source_owner==source)
-                .ok_or("Instancia instalada no disponible en esta computadora")?;
-            ins.java_path.clear();
-            ins.player_name=guest.to_owned();
-            (source,ins)
+            if let Some(source)=source_owner.as_deref().filter(|owner|!owner.is_empty()) {
+                let mut ins=s.machine_instances(None).into_iter()
+                    .find(|i|i.project_id==project_id && i.name==name && i.source_owner==source)
+                    .ok_or("Instancia compartida no disponible en esta computadora")?;
+                ins.java_path.clear();
+                ins.player_name=guest.to_owned();
+                (source.to_owned(),ins)
+            }else{
+                let (owner,mut ins)=checked_instance(&s,&project_id,&name,true)?;
+                ins.player_name=guest.to_owned();
+                (owner,ins)
+            }
         }else if source_owner.as_deref().is_some_and(|owner|owner!=s.username().unwrap_or("")) {
             let source=source_owner.as_deref().unwrap_or("");
             let mut ins=s.machine_instances(Some(s.username()?)).into_iter()
@@ -1009,7 +1051,7 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
     let active={let s=locked(&state)?;s.active_user.clone()};
     let shared=ins.source_owner.len()>0;
     let result=tauri::async_runtime::spawn_blocking(move||{
-        if shared || guest_name.is_some() {
+        if shared {
             let player=guest_name.or(active).ok_or("Falta el perfil que ejecuta la instancia")?;
             minecraft::launch_shared(&launch_app,&data_root,&owner,&ins,&player)
         } else {minecraft::launch(&launch_app,&data_root,&owner,&ins)}
@@ -1035,7 +1077,7 @@ async fn sync_project_content(state:State<'_,Mutex<Backend>>,project_id:String,n
 }
 #[tauri::command]
 async fn search_modrinth(state:State<'_,Mutex<Backend>>,query:String,version:String,kind:String)->Result<Vec<minecraft::ModHit>,String>{
-    {locked(&state)?.username()?;}
+    {locked(&state)?.player_owner()?;}
     tauri::async_runtime::spawn_blocking(move||minecraft::search_modrinth(&query,&version,&kind))
       .await.map_err(|e|e.to_string())?
 }
