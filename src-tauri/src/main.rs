@@ -12,6 +12,11 @@ mod horizon_download;
 // Reserved namespace for player-owned instances; project editor slugs cannot create this ID.
 const PERSONAL_PROJECT_ID: &str = "__personal__";
 
+fn valid_game_nickname(value: &str) -> bool {
+    (3..=16).contains(&value.len()) &&
+    value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 use accounts::{atomic_json, data_directory, offline_pref_owner, Instance, LocalMessage, LocalStore, Role};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -475,7 +480,12 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
         let path=Path::new(&instance.reuse_source);
         if instance.reuse_source.len()>1024 || !path.is_absolute() {return Err("La ruta opcional de reutilización debe ser absoluta".into());}
     }
-    if !instance.player_name.is_empty() && (instance.player_name.len()>16 || instance.player_name.len()<3 || !instance.player_name.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_')) {return Err("El nick de Minecraft debe tener de 3 a 16 caracteres (letras, números y _).".into());}
+    if instance.player_name.trim().is_empty() && s.guest_name.is_none() && valid_game_nickname(&username) {
+        instance.player_name = username.clone(); // New instances default to the VIS username.
+    }
+    if !instance.player_name.is_empty() && !valid_game_nickname(&instance.player_name) {
+        return Err("El nick de Minecraft debe tener de 3 a 16 caracteres (letras, números y _).".into());
+    }
     instance.source_owner.clear();
     if let Some(guest)=s.guest_name.as_deref(){instance.player_name=guest.to_owned();}
     instance.share_offline = s.guest_name.is_none() && instance.engine == "java" && instance.game_dir.trim().is_empty();
@@ -502,6 +512,7 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
     instance.installed=minecraft::installed(&dir,&instance);
     let mut prefs = s.storage.prefs(&username);
     if let Some(previous)=prefs.instances.iter().find(|i|i.project_id==instance.project_id&&i.name==instance.name) {
+        instance.icon_path = previous.icon_path.clone(); // Only set_instance_icon may replace imported artwork.
         if previous.engine!=instance.engine && previous.installed {
             return Err("No podés cambiar el motor de una instancia ya instalada. Creá otra instancia para proteger sus mundos.".into());
         }
@@ -570,6 +581,10 @@ fn ensure_project_instance(state:State<'_,Mutex<Backend>>,project_id:String,game
     ins.engine=project.engine.clone();ins.version=project.mc_version.clone();
     ins.loader=project.loader.clone();ins.loader_version=project.loader_version.clone();
     ins.ram_mb=ram_mb;ins.game_dir=game_dir;ins.source_owner.clear();
+    let player = s.guest_name.as_deref().unwrap_or(&username);
+    if ins.player_name.trim().is_empty() && valid_game_nickname(player) {
+        ins.player_name = player.to_owned();
+    }
     ins.share_offline=ins.engine=="java" && ins.game_dir.is_empty();
     let dir=minecraft::instance_dir(&s.data_root,&username,&ins)?;
     let canonical_dir=fs::canonicalize(&dir).unwrap_or_else(|_|dir.clone());
@@ -803,6 +818,36 @@ fn commit_profile_asset(state:State<'_,Mutex<Backend>>,path:String,kind:String)-
     s.storage.save()?;
     Ok(s.snapshot())
 }
+/// Import an icon into the launcher's private assets, not the user's game directory.
+#[tauri::command]
+fn set_instance_icon(state: State<'_, Mutex<Backend>>, project_id: String, name: String, path: Option<String>) -> Result<Snapshot, String> {
+    let s=locked(&state)?;
+    let username=s.player_owner()?;
+    let mut prefs=s.storage.prefs(&username);
+    let index=prefs.instances.iter().position(|i|i.project_id==project_id && i.name==name)
+        .ok_or("La instancia no existe o no pertenece a tu perfil")?;
+    let new_path=if let Some(path)=path {
+        if path.len()>2048 {return Err("Ruta de icono demasiado larga".into());}
+        let source=PathBuf::from(path);
+        let mime=mime_from(&source).ok_or("Usá PNG, JPG o WebP")?;
+        let meta=fs::symlink_metadata(&source).map_err(|e|e.to_string())?;
+        if !meta.is_file() || meta.file_type().is_symlink() || meta.len()==0 || meta.len()>3*1024*1024 {
+            return Err("El icono debe ser una imagen normal de hasta 3 MB".into());
+        }
+        let bytes=fs::read(&source).map_err(|e|e.to_string())?;
+        if !image_magic_ok(mime,&bytes) {return Err("El archivo no es una imagen válida".into());}
+        let folder=asset_dir(&s).join("instance-icons");
+        fs::create_dir_all(&folder).map_err(|e|e.to_string())?;
+        let stamp=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+        let ext=source.extension().and_then(|x|x.to_str()).unwrap_or("png").to_ascii_lowercase();
+        let target=folder.join(format!("{}-{}-{stamp}.{ext}",slug(&username),slug(&name)));
+        fs::write(&target,&bytes).map_err(|e|e.to_string())?;
+        target.to_string_lossy().to_string()
+    }else{String::new()};
+    prefs.instances[index].icon_path=new_path;
+    s.storage.save_prefs(&username,&prefs)?;
+    Ok(s.snapshot())
+}
 #[tauri::command]
 fn preview_asset(state: State<'_, Mutex<Backend>>, path: String) -> Result<String, String> {
     let s = locked(&state)?;
@@ -896,6 +941,16 @@ async fn horizon_local_builds()->Result<Vec<String>,String>{
 async fn horizon_probe(state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<horizon::Probe,String>{
     let (owner,instance,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;(u,i,s.data_root.clone())};
     if instance.engine!="horizon" {return Err("No es una instancia Horizon".into())}
+    let mut instance=instance;
+    // Offline Horizon otherwise invents a Player#### fallback when --name is missing.
+    // A Microsoft session provides its own authenticated username; never replace it.
+    if session_file.is_empty() && (instance.player_name.trim().is_empty() || visitor.is_some()) {
+        let playing_as=visitor.as_deref().unwrap_or(&owner);
+        if !valid_game_nickname(playing_as) {
+            return Err("Configurá un nick Minecraft de 3 a 16 caracteres en la instancia".into());
+        }
+        instance.player_name=playing_as.to_owned();
+    }
     tauri::async_runtime::spawn_blocking(move||{
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
         horizon::inspect(&dir,&instance)
@@ -1221,7 +1276,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, ensure_project_instance, configure_shared_ram, delete_instance,
+            save_project, delete_project, save_instance, set_instance_icon, ensure_project_instance, configure_shared_ram, delete_instance,
             request_friend, accept_friend, send_message,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
             set_project_execution, set_project_active, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
