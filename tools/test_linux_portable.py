@@ -64,6 +64,15 @@ class LinuxPortableTests(unittest.TestCase):
             readme = source.extractfile(files[prefix + "LEEME - VIS Nexo Linux.txt"]).read().decode()
             self.assertIn("SIN INSTALADOR", readme)
 
+
+    def test_slim_launcher_is_independent_of_horizon(self):
+        app, archive = module.package(self.bundle, self.horizon, self.release, inspect=False, slim=True)
+        with tarfile.open(archive, "r:gz") as tarball:
+            files = tarball.getnames()
+            self.assertIn("VIS-Nexo-Linux-Portable/VIS-Nexo.AppImage", files)
+            guide = tarball.extractfile("VIS-Nexo-Linux-Portable/LEEME - VIS Nexo Linux.txt").read().decode()
+            self.assertIn("no incluye binarios", guide)
+
     def test_rejects_modified_horizon(self):
         (self.horizon / "horizon-client").write_bytes(b"tampered")
         with self.assertRaisesRegex(RuntimeError, "SHA-256"):
