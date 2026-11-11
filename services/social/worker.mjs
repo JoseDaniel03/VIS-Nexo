@@ -168,8 +168,8 @@ async function session(request, db) {
 // Workers Free has a 10-ms CPU limit, so the Worker verifies signatures only.
 function cloudVerifier(body, username) {
   const salt = body.password_salt, pub = body.password_public_key;
-  unbase64(salt, 16);
-  unbase64(pub, 32);
+  try {unbase64(salt, 16);}catch {bad(400,"Invalid cloud salt");}
+  try {unbase64(pub, 32);}catch {bad(400,"Invalid cloud public verifier");}
   return { salt, pub, text: "VIS-CLOUD-REGISTER-V2\n"+username+"\n"+salt };
 }
 async function startCloudSession(db, user) {
@@ -185,8 +185,10 @@ async function cloudRegister(request, db) {
   const body=await parseBody(request);
   const username=normalName(body.username);
   const { salt, pub, text }=cloudVerifier(body,username);
-  if (!await verifySignature(pub,body.registration_signature,text))
-    bad(401,"Invalid password credential proof");
+  let valid=false;
+  try { valid=await verifySignature(pub,body.registration_signature,text); }
+  catch { bad(400,"Invalid cloud registration signature"); }
+  if (!valid) bad(401,"Invalid password credential proof");
   const existing=await db.prepare("SELECT id FROM social_users WHERE username=?")
     .bind(username).first();
   if (existing) bad(409,"Username already taken; sign in or migrate existing device account");
