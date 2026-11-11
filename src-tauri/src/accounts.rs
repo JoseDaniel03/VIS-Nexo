@@ -69,6 +69,21 @@ pub struct Instance {
     #[serde(default)] pub horizon_minecraft_dir: String,
     #[serde(default)] pub horizon_server_jar: String,
 }
+/// Separate guest profiles from registered accounts. The '-' delimiter cannot
+/// appear in local account names, so an offline guest cannot impersonate one.
+pub fn offline_pref_owner(nickname:&str)->Result<String,String>{
+    let nick=nickname.trim();
+    if !(3..=16).contains(&nick.len()) ||
+       !nick.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'){
+        return Err("El nick offline debe tener 3–16 caracteres (letras, números y _).".into());
+    }
+    Ok(format!("offline--{}",nick.to_ascii_lowercase()))
+}
+fn valid_offline_owner(owner:&str)->bool{
+    owner.strip_prefix("offline--")
+      .and_then(|nick|offline_pref_owner(nick).ok())
+      .is_some_and(|expected|expected==owner)
+}
 fn default_loader()->String{"vanilla".into()}
 fn default_engine()->String{"java".into()}
 impl Default for Instance {
@@ -186,7 +201,9 @@ impl LocalStore {
         fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
     pub fn save_prefs(&self, name: &str, prefs: &PlayerPrefs) -> Result<(), String> {
-        if self.get(name).is_none() {return Err("Cuenta inexistente".into());}
+        if self.get(name).is_none() && !valid_offline_owner(name) {
+            return Err("Perfil local inexistente".into());
+        }
         atomic_json(&self.root.join("users").join(format!("{name}.json")), prefs)
     }
     pub fn request_friend(&mut self, from: &str, to: &str) -> Result<(), String> {
@@ -225,6 +242,27 @@ impl LocalStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn offline_nick_has_isolated_persistent_preferences_without_registration() {
+        let root=std::env::temp_dir().join(format!("vis-guest-preferences-{}-{}",
+            std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut store=LocalStore::load(root.clone());
+        store.register("player","password-123","password-123").unwrap();
+        let guest=offline_pref_owner("Guest_03").unwrap();
+        assert_eq!(guest,"offline--guest_03");
+        assert_eq!(guest,offline_pref_owner("guest_03").unwrap());
+        assert!(offline_pref_owner("../unsafe").is_err());
+        assert!(offline_pref_owner("ab").is_err());
+        assert!(store.get(&guest).is_none());
+        let mut prefs=store.prefs(&guest);
+        prefs.instances.push(Instance{name:"Sin cuenta".into(),project_id:"__personal__".into(),
+            version:"1.21.4".into(),..Instance::default()});
+        store.save_prefs(&guest,&prefs).unwrap();
+        assert!(store.save_prefs("offline--../../bad",&prefs).is_err());
+        assert_eq!(store.prefs(&guest).instances.len(),1);
+        assert!(store.prefs("player").instances.is_empty());
+        let _=fs::remove_dir_all(root);
+    }
     #[test]
     fn project_pauses_are_profile_local_and_persisted() {
         let root = std::env::temp_dir().join(format!("vis-paused-projects-{}-{}",
