@@ -4,7 +4,7 @@ let endpoint = "";
 try { endpoint = localStorage.getItem(endpointKey) || ""; } catch {}
 let localOwner = "", account = null, token = "", snapshot = null, chatId = "", chatMessages = [];
 let loading = false, error = "", socket = null, mounted = null, reconnect = null;
-let poll = null, chatBefore = null, connected = false;
+let poll = null, socketPing = null, chatBefore = null, connected = false;
 const chatDrafts = new Map();
 let renderedChatId = "", olderScroll = null;
 let statusDraft = null;
@@ -69,6 +69,8 @@ const safeEndpoint = value => {
 const showError = value => { error = String(value || "Error"); draw(); };
 const endpointReady = () => !!safeEndpoint(endpoint);
 function stopSocket() {
+  if (socketPing) clearInterval(socketPing);
+  socketPing = null;
   if (socket) { socket.onclose = null; try { socket.close(); } catch {} }
   socket = null; connected = false;
   if (reconnect) clearTimeout(reconnect);
@@ -170,7 +172,16 @@ async function connect() {
     if (!cloudActive || token !== credentials || account?.id !== connectingAccount) return;
     const url = endpoint.replace(/^https:/, "wss:") + "/v1/rt?ticket=" + encodeURIComponent(data.ticket);
     socket = new WebSocket(url);
-    socket.onopen = () => { connected = true; draw(); };
+    socket.onopen = () => {
+      connected = true;
+      if (socketPing) clearInterval(socketPing);
+      socketPing = setInterval(() => {
+        if (socket?.readyState === WebSocket.OPEN) {
+          try { socket.send("ping"); } catch { /* WebSocket close will reconnect. */ }
+        }
+      }, 45000);
+      draw();
+    };
     socket.onmessage = event => {
       if (event.data === "pong") return;
       try {
@@ -179,6 +190,8 @@ async function connect() {
       } catch {}
     };
     socket.onclose = () => {
+      if (socketPing) clearInterval(socketPing);
+      socketPing = null;
       connected = false;
       if (cloudActive && token) reconnect = setTimeout(() => void connect(), 4500);
       draw();
