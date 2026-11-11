@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import socialWorker, { normalizeUsername, validMessage, pair, isAllowedOrigin } from "./worker.mjs";
+import socialWorker, { normalizeUsername, validMessage, validCustomStatus, validGameProject, pair, isAllowedOrigin } from "./worker.mjs";
 import { readFileSync } from "node:fs";
 
 test("Ceibo usernames are canonical and reject unsafe names", () => {
@@ -39,10 +39,22 @@ test("Daily cleanup only removes stale authentication metadata", async () => {
   const promises = [];
   await socialWorker.scheduled({}, { DB: db }, { waitUntil(promise) { promises.push(promise); } });
   await Promise.all(promises);
-  assert.equal(statements.length, 3);
+  assert.equal(statements.length, 4);
   assert.ok(statements.some(s => s.sql.includes("ceibo_sessions")));
   assert.ok(statements.some(s => s.sql.includes("humile_ws_tickets")));
   assert.ok(statements.some(s => s.sql.includes("ceibo_auth_attempts")));
+  assert.ok(statements.some(s => s.sql.includes("humile_game_activity")));
   assert.equal(statements.some(s => s.sql.includes("humile_messages")), false);
   for (const s of statements) assert.equal(s.values.length, 1);
+});
+
+test("Statuses and game labels reject controls, markup and oversized text", () => {
+  assert.equal(validCustomStatus("Jugando Minecraft ☕"), true);
+  assert.equal(validCustomStatus("x".repeat(81)), false);
+  assert.equal(validCustomStatus("Hola\nsecret"), false);
+  assert.equal(validCustomStatus("<b>unsafe</b>"), false);
+  assert.equal(validGameProject("Virgoland 26.3"), true);
+  assert.equal(validGameProject("x".repeat(65)), false);
+  assert.equal(validGameProject("Incorrecto\\u0000"), true);
+  assert.equal(validGameProject("<img src=x>"), false);
 });
