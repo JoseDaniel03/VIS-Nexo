@@ -94,6 +94,13 @@ jobs:
           name: vis-nexo-linux-portable
           path: target/release/portable-linux/VIS-Nexo-Linux-x86_64-Portable.tar.gz
           if-no-files-found: error
+      - name: Upload standalone Linux AppImage (no installer)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-linux-appimage
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
       - name: Upload Windows portable app (unzip and run VIS Nexo.exe)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
