@@ -26,5 +26,14 @@ jobs:
       - run: node --check web/app.js
       - run: node --test services/social/test_social.mjs
       - run: python3 services/social/test_schema.py
+      - name: Install Cloudflare Wrangler for local end-to-end tests
+        run: npm install --no-package-lock --ignore-scripts
+        working-directory: services/social
+      - name: Apply migrations to isolated D1
+        run: npx --no-install wrangler d1 migrations apply vis-social-test --local --config wrangler.test.toml --persist-to .wrangler-test
+        working-directory: services/social
+      - name: Exercise real social API on local Workers runtime
+        run: node test_integration.mjs
+        working-directory: services/social
       - run: npm ci
       - run: npm run validate
