@@ -6,6 +6,7 @@ const USERNAME = /^[a-z0-9_]{3,24}$/;
 const MAX_BODY = 8192;
 const MAX_MESSAGE_BYTES = 2048;
 const HOUR = 3600;
+const PASSWORD_ITERATIONS = 210000;
 const reply = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: {
@@ -97,7 +98,7 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at " +
+    "SELECT u.id,u.username,u.public_id,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
   ).bind(tokenHash, now()).first();
@@ -120,8 +121,8 @@ async function register(request, db) {
   const id = crypto.randomUUID();
   try {
     await db.prepare(
-      "INSERT INTO social_users (id,username,display_name,signing_public_key) VALUES (?,?,?,?)"
-    ).bind(id, username, username, body.public_key).run();
+      "INSERT INTO social_users (id,username,public_id,display_name,signing_public_key) VALUES (?,?,?,?,?)"
+    ).bind(id, username, randomToken().slice(0,24), username, body.public_key).run();
   } catch {
     bad(409, "Username already registered");
   }
@@ -161,6 +162,92 @@ async function session(request, db) {
     .bind(await hash(token), row.user_id, expiresAt).run();
   return reply({ token, expires_at: expiresAt, username });
 }
+// Password-based cloud accounts are independent of legacy local PINs.
+// PBKDF2 runs server-side using WebCrypto, and only the derived salted verifier
+// is stored in D1. Do not accept 4-digit PINs for Internet login.
+function validateCloudPassword(value) {
+  if (typeof value !== "string" || value.length < 10 || value.length > 128 ||
+      te.encode(value).length > 256) bad(400, "Online password must be 10-128 characters");
+  return value;
+}
+async function passwordVerifier(password, salt, iterations = PASSWORD_ITERATIONS) {
+  const input = await crypto.subtle.importKey("raw", te.encode(password), "PBKDF2",
+    false, ["deriveBits"]);
+  const result = await crypto.subtle.deriveBits({
+    name: "PBKDF2", hash: "SHA-256", salt: unbase64(salt, 16),
+    iterations
+  }, input, 256);
+  return base64(new Uint8Array(result));
+}
+function equalVerifier(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const aBytes = te.encode(a), bBytes = te.encode(b);
+  if (aBytes.length !== bBytes.length || aBytes.length !== 44) return false;
+  let difference = 0;
+  for (let i = 0; i < aBytes.length; i++) difference |= aBytes[i] ^ bBytes[i];
+  return difference === 0;
+}
+async function startCloudSession(db, user) {
+  const token = randomToken();
+  const expiresAt = now() + 12 * HOUR;
+  await db.prepare("INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES (?,?,?)")
+    .bind(await hash(token), user.id, expiresAt).run();
+  return reply({ok:true,token,expires_at:expiresAt,username:user.username,
+    public_id:user.public_id});
+}
+async function cloudRegister(request, db) {
+  await rateLimit(db, request, "cloud-register", 5);
+  const body = await parseBody(request);
+  const username = normalName(body.username);
+  const password = validateCloudPassword(body.password);
+  const existing = await db.prepare("SELECT id FROM social_users WHERE username=?")
+    .bind(username).first();
+  if (existing) bad(409, "Username already taken; sign in or migrate existing device account");
+  const salt = base64(crypto.getRandomValues(new Uint8Array(16)));
+  const verifier = await passwordVerifier(password, salt);
+  const publicId = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
+  const id = crypto.randomUUID();
+  try {
+    await db.prepare(
+      "INSERT INTO social_users(id,username,public_id,display_name," +
+      "password_hash,password_salt,password_iterations) VALUES (?,?,?,?,?,?,?)"
+    ).bind(id,username,publicId,username,verifier,salt,PASSWORD_ITERATIONS).run();
+  } catch { bad(409, "Username already taken"); }
+  return startCloudSession(db,{id,username,public_id:publicId});
+}
+async function cloudLogin(request, db) {
+  await rateLimit(db, request, "cloud-login", 12);
+  const body = await parseBody(request);
+  const identifier = typeof body.identifier==="string" ? body.identifier.trim().toLowerCase() : "";
+  const password = validateCloudPassword(body.password);
+  if (!(/^[a-z0-9_]{3,24}$/.test(identifier) || /^[a-f0-9]{24}$/.test(identifier)))
+    bad(401, "Invalid username/ID or password");
+  await rateLimit(db, request, "cloud-identifier:"+identifier, 8);
+  const user = await db.prepare(
+    "SELECT id,username,public_id,password_hash,password_salt,password_iterations " +
+    "FROM social_users WHERE (username=? OR public_id=?) AND disabled_at IS NULL"
+  ).bind(identifier,identifier).first();
+  if (!user || !user.password_hash) bad(401, "Invalid username/ID or password");
+  if (user.password_iterations !== PASSWORD_ITERATIONS ||
+      !user.password_salt) bad(503, "Account credential migration required");
+  const candidate = await passwordVerifier(password,user.password_salt,user.password_iterations);
+  if (!equalVerifier(candidate,user.password_hash)) bad(401,"Invalid username/ID or password");
+  return startCloudSession(db,user);
+}
+async function upgradeCloudLogin(request, db, user) {
+  await rateLimit(db,request,"cloud-upgrade:"+user.id,3);
+  const body = await parseBody(request);
+  const password = validateCloudPassword(body.password);
+  const salt = base64(crypto.getRandomValues(new Uint8Array(16)));
+  const verifier = await passwordVerifier(password,salt);
+  const updated = await db.prepare(
+    "UPDATE social_users SET password_hash=?,password_salt=?,password_iterations=?,"+
+    "updated_at=unixepoch() WHERE id=? AND password_hash=''"
+  ).bind(verifier,salt,PASSWORD_ITERATIONS,user.id).run();
+  if (updated.meta?.changes !== 1) bad(409,"Online password already configured");
+  return reply({ok:true,public_id:user.public_id});
+}
+
 async function setKey(request, db, user) {
   const body = await parseBody(request);
   if (typeof body.public_key !== "string" || body.public_key.length < 80 ||
@@ -221,7 +308,7 @@ async function currentState(db, user) {
   for (const friend of visible) friend.shared_projects=idsByFriend.get(friend.username)||[];
   return reply({
     projects,
-    username: user.username, presence: user.presence, role: user.role,
+    username: user.username, public_id: user.public_id, presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
     public_key: user.encryption_public_key,
     friends: visible,
@@ -357,12 +444,13 @@ function auditStatement(db, actorId, operation, target) {
 }
 async function accountInfo(db, user) {
   const row = await db.prepare(
-    "SELECT id,username,role,signing_public_key,disabled_at,created_at FROM social_users WHERE id=?"
+    "SELECT id,username,public_id,role,signing_public_key,disabled_at,created_at,password_hash FROM social_users WHERE id=?"
   ).bind(user.id).first();
   if (!row || row.disabled_at !== null) bad(403, "Account disabled");
   return reply({ account: {
-    username: row.username, role: row.role, signing_public_key: row.signing_public_key,
-    created_at: row.created_at
+    username: row.username, public_id: row.public_id, role: row.role,
+    cloud_login_enabled: !!row.password_hash,
+    signing_public_key: row.signing_public_key, created_at: row.created_at
   } });
 }
 async function getProjects(db, user) {
@@ -525,16 +613,24 @@ export default {
           "('social_users','friend_requests','friendships','friend_aliases'," +
           "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 10;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 3 : 0 },
+        const columns=await db.prepare(
+          "SELECT name FROM pragma_table_info('social_users') "+
+          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations')"
+        ).all();
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 10 &&
+          new Set((columns.results || []).map(x=>x.name)).size === 4;
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 4 : 0 },
           ready ? 200 : 503);
       }
+      if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
+      if (method === "POST" && path === "/v1/accounts/login") return await cloudLogin(request, db);
       if (method === "POST" && path === "/v1/auth/register") return await register(request, db);
       if (method === "POST" && path === "/v1/auth/challenge") return await challenge(request, db);
       if (method === "POST" && path === "/v1/auth/session") return await session(request, db);
       if (!path.startsWith("/v1/")) return reply({ error: "Not found" }, 404);
       const user = await getSession(request, db);
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
+      if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
       if (method === "GET" && path === "/v1/account") return await accountInfo(db,user);
       if (method === "GET" && path === "/v1/projects") return reply({projects:await getProjects(db,user)});
       if (method === "POST" && path === "/v1/projects/subscribe") return await projectSubscription(request,db,user,"subscribe");
