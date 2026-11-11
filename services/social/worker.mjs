@@ -479,5 +479,18 @@ export default {
       if (!(err instanceof ApiError)) console.error("VIS Social request failed", String(err));
       return response(request, env, { error: err instanceof ApiError ? err.message : "Error interno" }, err instanceof ApiError ? err.status : 500);
     }
+  },
+  // Daily, bounded cleanup for authentication metadata only. User messages
+  // need an explicit retention/export policy before we automate deletion.
+  async scheduled(_event, env, ctx) {
+    if (!env.DB) return;
+    ctx.waitUntil((async () => {
+      const now = NOW();
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM ceibo_sessions WHERE expires_at<? OR revoked_at IS NOT NULL").bind(now),
+        env.DB.prepare("DELETE FROM humile_ws_tickets WHERE expires_at<?").bind(now),
+        env.DB.prepare("DELETE FROM ceibo_auth_attempts WHERE reset_at<?").bind(now)
+      ]);
+    })());
   }
 };
