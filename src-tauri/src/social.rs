@@ -142,6 +142,92 @@ pub(crate) fn social_identity_info(
     }))
 }
 
+fn activate_cloud_user(
+    backend: &Mutex<Backend>, social: &Mutex<SocialSession>, authenticated: Value
+) -> Result<crate::Snapshot,String> {
+    let username = authenticated.get("username").and_then(Value::as_str)
+        .ok_or("Respuesta de usuario de VIS Social inválida")?;
+    let token = authenticated.get("token").and_then(Value::as_str)
+        .ok_or("VIS Social no entregó una sesión válida")?;
+    if token.len() < 40 || !username.bytes().all(|b|
+        b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+        return Err("Sesión VIS Social inválida".into());
+    }
+    let mut current = backend.lock().map_err(|_| "Cuenta local bloqueada")?;
+    current.storage.ensure_cloud_profile(username)?;
+    current.guest_name = None;
+    current.active_user = Some(username.to_owned());
+    current.presence = "online".into();
+    current.add_recent(username,"vis-social")?;
+    let snapshot = current.snapshot();
+    let mut active = social.lock().map_err(|_| "Sesión VIS Social bloqueada")?;
+    active.username = Some(username.to_owned());
+    active.bearer = Some(token.to_owned());
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub(crate) async fn social_cloud_register(
+    backend: State<'_,Mutex<Backend>>, social: State<'_,Mutex<SocialSession>>,
+    username: String, password: String, confirm: String
+) -> Result<crate::Snapshot,String> {
+    if password!=confirm {return Err("Las contraseñas no coinciden".into());}
+    if !(10..=128).contains(&password.len()) {
+        return Err("Para VIS Social necesitás una contraseña de 10 a 128 caracteres".into());
+    }
+    let name = username.trim().to_ascii_lowercase();
+    // Prevent unintentionally claiming an existing local profile.
+    {
+        let current=backend.lock().map_err(|_| "Cuenta local bloqueada")?;
+        if current.storage.get(&name).is_some() {
+            return Err("Este nombre ya existe como cuenta local en este dispositivo. Entrá por Cuenta local y vinculala.".into());
+        }
+    }
+    let data = tauri::async_runtime::spawn_blocking(move || {
+        request(&client()?,&base_url()?,"/v1/accounts/register","POST",
+            Some(&json!({"username":name,"password":password})),None)
+    }).await.map_err(|_| "Registro online interrumpido")??;
+    activate_cloud_user(&backend,&social,data)
+}
+
+#[tauri::command]
+pub(crate) async fn social_cloud_login(
+    backend: State<'_,Mutex<Backend>>, social: State<'_,Mutex<SocialSession>>,
+    identifier: String, password: String
+) -> Result<crate::Snapshot,String> {
+    if identifier.trim().is_empty() || password.is_empty() {
+        return Err("Ingresá tu usuario o ID y contraseña".into());
+    }
+    let data = tauri::async_runtime::spawn_blocking(move || {
+        request(&client()?,&base_url()?,"/v1/accounts/login","POST",
+            Some(&json!({"identifier":identifier,"password":password})),None)
+    }).await.map_err(|_| "Inicio de sesión online interrumpido")??;
+    activate_cloud_user(&backend,&social,data)
+}
+
+#[tauri::command]
+pub(crate) async fn social_enable_cloud_password(
+    backend: State<'_,Mutex<Backend>>, social: State<'_,Mutex<SocialSession>>,
+    password: String, confirm: String
+) -> Result<Value,String> {
+    if password != confirm || !(10..=128).contains(&password.len()) {
+        return Err("Las contraseñas deben coincidir y tener entre 10 y 128 caracteres".into());
+    }
+    let username=backend.lock().map_err(|_| "Cuenta local bloqueada")?
+        .active_user.clone().ok_or("Iniciá sesión primero")?;
+    let token={
+        let active=social.lock().map_err(|_| "Sesión social bloqueada")?;
+        if active.username.as_deref()!=Some(username.as_str()) {
+            return Err("Conectá VIS Social antes de vincular la cuenta".into());
+        }
+        active.bearer.clone().ok_or("Sesión social vencida")?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        request(&client()?,&base_url()?,"/v1/accounts/upgrade","POST",
+            Some(&json!({"password":password})),Some(&token))
+    }).await.map_err(|_| "Vinculación de cuenta interrumpida")?
+}
+
 #[tauri::command]
 pub(crate) async fn social_connect(
     backend: State<'_, Mutex<Backend>>, social: State<'_, Mutex<SocialSession>>
@@ -175,7 +261,7 @@ pub(crate) async fn social_request(
 ) -> Result<Value, String> {
     const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects"];
     const POST: &[&str] = &[
-        "/v1/keys", "/v1/presence", "/v1/projects/subscribe",
+        "/v1/keys", "/v1/presence", "/v1/accounts/upgrade", "/v1/projects/subscribe",
         "/v1/projects/unsubscribe", "/v1/admin/projects/upsert",
         "/v1/admin/projects/staff", "/v1/admin/accounts/role",
         "/v1/admin/accounts/disable", "/v1/friends/request",
