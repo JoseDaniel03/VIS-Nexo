@@ -534,7 +534,7 @@ function cropDialog(){
  if(!cropState)return '';
  const dims=['icon','avatar'].includes(cropState.kind)?[512,512]:cropState.kind==='logo'?[960,400]:cropState.kind==='profile_banner'?[1280,420]:[1280,720];
  const names={banner:'Portada',logo:'Logo',icon:'Icono',avatar:'Avatar',profile_banner:'Banner de perfil'};
- return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog crop-dialog" role="dialog" aria-modal="true" aria-label="Ajustar y recortar imagen"><header class="modal-head"><div><span class="page-eyebrow">RECURSOS VISUALES · ${names[cropState.kind]||'IMAGEN'}</span><h2>Mover y recortar imagen</h2><p class="wizard-header-subtitle">Arrastrá para posicionar. Ajustá el zoom y guardá una copia recortada.</p></div><button class="icon-btn" data-action="cancel-crop" aria-label="Cerrar">${I('x',20)}</button></header><div class="crop-body"><div class="crop-stage"><canvas id="crop-canvas" width="${dims[0]}" height="${dims[1]}" aria-label="Vista previa interactiva del recorte" tabindex="0"></canvas></div><div class="crop-controls"><label for="crop-zoom">Zoom <output id="crop-zoom-value">${Math.round(cropState.zoom*100)}%</output></label><input type="range" min="1" max="3" step="0.05" id="crop-zoom" value="${cropState.zoom}"/><div class="crop-actions"><button class="subtle-btn" data-action="crop-reset" type="button">${I('circle',15)} Restablecer</button><span>${dims[0]} × ${dims[1]} PNG</span></div></div></div><footer class="modal-footer"><button class="subtle-btn" data-action="cancel-crop">Volver sin guardar</button>${cropState.origin==='profile'?`<button class="outline-btn" data-action="apply-original-profile">Usar original</button>`:''}<button class="primary-btn" data-action="save-crop">${I('crop',17)} Guardar recorte</button></footer></div></div>`;
+ return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog crop-dialog" role="dialog" aria-modal="true" aria-label="Ajustar y recortar imagen"><header class="modal-head"><div><span class="page-eyebrow">RECURSOS VISUALES · ${names[cropState.kind]||'IMAGEN'}</span><h2>Mover y recortar imagen</h2><p class="wizard-header-subtitle">Arrastrá para posicionar. Ajustá el zoom y guardá una copia recortada.</p></div><button class="icon-btn" data-action="cancel-crop" aria-label="Cerrar">${I('x',20)}</button></header><div class="crop-body"><div class="crop-stage"><canvas id="crop-canvas" width="${dims[0]}" height="${dims[1]}" aria-label="Vista previa interactiva del recorte" tabindex="0"></canvas></div><div class="crop-controls"><label for="crop-zoom">Zoom <output id="crop-zoom-value">${Math.round(cropState.zoom*100)}%</output></label><input type="range" min="1" max="3" step="0.05" id="crop-zoom" value="${cropState.zoom}"/><div class="crop-actions"><button class="subtle-btn" data-action="crop-reset" type="button">${I('circle',15)} Restablecer</button><span>${dims[0]} × ${dims[1]} · WebP optimizado</span></div></div></div><footer class="modal-footer"><button class="subtle-btn" data-action="cancel-crop">Volver sin guardar</button>${cropState.origin==='profile'?`<button class="outline-btn" data-action="apply-original-profile">Usar original</button>`:''}<button class="primary-btn" data-action="save-crop">${I('crop',17)} Guardar recorte</button></footer></div></div>`;
 }
 function openCrop(field,kind){
  if(!wizard?.[field]||!preview(wizard[field])){message('Primero importá una imagen.',true);return;}
@@ -565,12 +565,13 @@ function paintCrop(){
 async function saveCrop(){
  if(!cropState||(cropState.origin!=='profile'&&(!wizard||!isAdmin())))return;
  const canvas=document.querySelector('#crop-canvas');if(!canvas)return;
- const png=canvas.toDataURL('image/png'),field=cropState.field,kind=cropState.kind;
+ const webp=canvas.toDataURL('image/webp',0.82),dataUrl=webp.startsWith('data:image/webp;base64,')?webp:canvas.toDataURL('image/png');
+ const format=dataUrl.startsWith('data:image/webp;')?'webp':'png',field=cropState.field,kind=cropState.kind;
  try{
   let result;
   const personal=cropState.origin==='profile';
-  if(native){result=await command('save_cropped_asset',{dataUrl:png,kind,projectId:personal?null:wizard.id||null});}
-  else {result={path:`preview/crop-${kind}-${Date.now()}.png`,data_url:png};if(personal)db.user[kind]=result.path;}
+  if(native){result=await command('save_cropped_asset',{dataUrl,kind,projectId:personal?null:wizard.id||null});}
+  else {result={path:`preview/crop-${kind}-${Date.now()}.${format}`,data_url:dataUrl};if(personal)db.user[kind]=result.path;}
   assetCache[result.path]=result.data_url;
   if(personal){if(native)db=await command('get_state');}
   else wizard[field]=result.path;
@@ -737,6 +738,33 @@ async function changeInstanceIcon(projectId,name,clear=false) {
     render();message(clear?'Icono restaurado al predeterminado.':'Icono de la instancia actualizado.');
   }catch(e){message(String(e),true)}
 }
+// Project artwork is optimized in WebView2/WebKitGTK, not on the server.
+ // Keep the imported source so artists can crop or replace it without losing quality.
+async function optimizeProjectArtwork(imported, kind, projectId) {
+  if (!native || !['banner','logo','icon'].includes(kind) || typeof imported?.data_url !== 'string') return imported;
+  try {
+    const img=await new Promise((resolve,reject)=>{
+      const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Imagen no decodificable'));
+      image.src=imported.data_url;
+    });
+    if (!img.naturalWidth || !img.naturalHeight) return imported;
+    const limits={banner:[1280,720],logo:[960,400],icon:[512,512]};
+    const [maxW,maxH]=limits[kind];
+    const scale=Math.min(1,maxW/img.naturalWidth,maxH/img.naturalHeight);
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+    canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+    const context=canvas.getContext('2d',{alpha:true});
+    if(!context)return imported;
+    context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';
+    context.drawImage(img,0,0,canvas.width,canvas.height);
+    const webp=canvas.toDataURL('image/webp',0.82);
+    if(!webp.startsWith('data:image/webp;base64,') || webp.length >= imported.data_url.length*0.9)return imported;
+    const compressed=await command('save_cropped_asset',{dataUrl:webp,kind,projectId:projectId||null});
+    return compressed;
+  }catch(err){console.warn('[VIS Nexo] Se conserva el recurso original sin comprimir:',String(err));return imported;}
+}
+
 async function chooseAsset(kind,field='',projectId='') {
  try {
    if(native){
@@ -745,7 +773,9 @@ async function chooseAsset(kind,field='',projectId='') {
      const personal=['avatar','profile_banner'].includes(kind);
      const result=await command('import_asset',{path,kind,projectId:projectId||null,stageOnly:personal});
      assetCache[result.path]=result.data_url;
-     if(wizard&&field)wizard[field]=result.path;
+     const artwork=wizard&&field?await optimizeProjectArtwork(result,kind,projectId):result;
+     if(artwork!==result)assetCache[artwork.path]=artwork.data_url;
+     if(wizard&&field)wizard[field]=artwork.path;
      if(personal){openPersonalCrop(kind,result.path);return;}
      if(['skin','cape','avatar_layer','home','login','launcher_logo'].includes(kind)) db=await command('get_state');
      render();message('Recurso importado correctamente.');
