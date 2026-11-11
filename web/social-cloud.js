@@ -409,7 +409,9 @@ function thread() {
     esc(chat?.kind === "group" ? chat.title : (displayFriend(friendByUsername(chat?.peer_username)) || chat?.peer_username || "Conversación")) +
     '</b>' + (chat?.kind === "group" ? '<button class="vis-cloud-mini" data-cloud="leave-group" title="Salir del grupo">Salir del grupo</button>' : '') +
     '<button data-cloud="close-chat" aria-label="Cerrar conversación">×</button></div>' +
-    '<p class="vis-cloud-local-hint">Historial local · 30 días · máximo 2 KB por chat · sin sincronización entre equipos</p>' +
+    '<p class="vis-cloud-local-hint">Historial local · ' +
+      Math.floor(LOCAL_CHAT_RETENTION_MS / 86400000) + ' días · máximo ' +
+      Math.round(LOCAL_CHAT_LIMIT_BYTES / 1024) + ' KB por chat · sin sincronización entre equipos</p>' +
     '<div class="vis-cloud-messages">';
   // The current device contains all retained history. No remote page is queried.
   if (!chatMessages.length) markup += '<p class="vis-social-note">Todavía no hay mensajes.</p>';
