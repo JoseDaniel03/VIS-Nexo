@@ -19,8 +19,9 @@ El servicio online soporta:
 - Casilla para no compartir el juego y modo invisible que oculta toda la actividad.
 - Los estados de juego tienen una caducidad automática de cuatro minutos si VIS se
   cierra o pierde conexión; mientras se juega, VIS renueva la actividad.
-- Mensajes directos y grupos de hasta diez usuarios, historial persistente y
-  paginación, contadores de mensajes no leídos y notificaciones WebSocket.
+- Mensajes directos y grupos de hasta diez usuarios, con retransmisión en
+  tiempo real por WebSocket. El historial y los no leídos se guardan localmente
+  hasta 30 días, con un límite de 2 KB por conversación.
 
 ### Apodos privados y menús contextuales
 
