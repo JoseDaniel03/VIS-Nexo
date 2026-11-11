@@ -7,6 +7,7 @@ on:
     paths:
       - 'services/social/**'
       - 'web/social-cloud.js'
+      - 'web/humile-local-log.js'
       - 'web/social-cloud.css'
       - 'web/app.js'
       - 'web/index.html'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'services/social/**'
       - 'web/social-cloud.js'
+      - 'web/humile-local-log.js'
       - 'web/app.js'
       - 'src-tauri/src/**'
 jobs:
@@ -32,6 +34,8 @@ jobs:
       - run: node --check web/social-cloud.js
       - run: node --check web/app.js
       - run: node --test services/social/test_social.mjs
+      - run: node --test services/social/test_local_chat.mjs
+      - run: node --check web/humile-local-log.js
       - run: python3 services/social/test_schema.py
       - name: Install Cloudflare Wrangler for local end-to-end tests
         run: npm install --no-package-lock --ignore-scripts
