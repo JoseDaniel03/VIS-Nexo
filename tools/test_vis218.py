@@ -17,7 +17,7 @@ with sync_playwright() as playwright:
         page.evaluate('''() => {window.calls=[];window.__TAURI__={core:{invoke:async(name,args)=>{
             window.calls.push(name);
             if(name==='get_state')return {user:{username:'VIS STUDIOS',role:'admin',presence:'online'},projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo'},project_execution:{},mode:'local'};
-            if(name==='horizon_source_build')return '/usr/lib/vis-nexo/horizon';
+            if(name==='install_vis_rust_runtime')return '/usr/lib/vis-nexo/horizon';
             if(name==='check_app_update')return {available:false};
             if(name==='fetch_cloud_catalog')return {projects:[]};
             return [];
@@ -30,7 +30,7 @@ with sync_playwright() as playwright:
         page.locator('summary').filter(has_text='Opciones avanzadas de Horizon').click()
         page.locator('#horizon-build-dir').fill('/custom/older-build')
         page.locator('[data-action="use-horizon-source"]').first.click()
-        page.wait_for_function("window.calls.includes('horizon_source_build')")
+        page.wait_for_function("window.calls.includes('install_vis_rust_runtime')")
         assert page.locator('#horizon-build-dir').input_value()=='vis:source'
         page.evaluate("async()=>{db.instances[0].installed=true; await performLaunch('__personal__','Horizon source');}")
         assert page.evaluate("window.calls.includes('launch_horizon')")
@@ -60,6 +60,6 @@ with sync_playwright() as playwright:
         assert [x['name'] for x in requests if x['name'] in ('save_instance','install_minecraft','launch_horizon')]==['save_instance','install_minecraft','launch_horizon']
         assert next(x['args'] for x in requests if x['name']=='launch_horizon')['sessionFile']==''
         assert not errors,errors
-        print(f'OK VIS v2.18 Chromium {width}: bundled source is default, no Nightly downloader, selection works')
+        print(f'OK VIS v2.18 Chromium {width}: optional source-built runtime is default, no Nightly downloader, selection works')
         page.close()
     browser.close()
