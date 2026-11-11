@@ -92,6 +92,28 @@ class SocialSchemaTests(unittest.TestCase):
             self.db.execute("INSERT INTO humile_game_activity(account_id,engine,project,expires_at,updated_at)"
                             " VALUES('bob','other','',2000,'2026-11-11')")
 
+    def test_friend_nicknames_private_per_owner_and_constraints(self):
+        self.db.execute("INSERT INTO humile_friendships(id,user_a,user_b,requester_id,status,created_at)"
+                        " VALUES('f1','anna','bob','anna','accepted','2026-11-11')")
+        self.db.execute("INSERT INTO humile_friend_nicknames(owner_id,target_id,nickname,updated_at)"
+                        " VALUES('anna','bob','Mi compa','2026-11-11')")
+        self.db.execute("INSERT INTO humile_friend_nicknames(owner_id,target_id,nickname,updated_at)"
+                        " VALUES('bob','anna','Amiga del server','2026-11-11')")
+        pairs = self.db.execute("SELECT owner_id,target_id,nickname FROM humile_friend_nicknames"
+                                " ORDER BY owner_id").fetchall()
+        self.assertEqual([(x["owner_id"], x["nickname"]) for x in pairs],
+                         [("anna", "Mi compa"), ("bob", "Amiga del server")])
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO humile_friend_nicknames(owner_id,target_id,nickname,updated_at)"
+                            " VALUES('anna','anna','Yo','2026-11-11')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE humile_friend_nicknames SET nickname=? WHERE owner_id='anna'",
+                            ("x" * 41,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE humile_friend_nicknames SET nickname=' ' WHERE owner_id='anna'")
+        self.db.execute("DELETE FROM humile_friend_nicknames WHERE owner_id='anna' AND target_id='bob'")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM humile_friend_nicknames").fetchone()[0], 1)
+
     def test_chat_summary_query_matches_worker_api(self):
         self.db.execute("INSERT INTO humile_chats(id,kind,pair_key,created_at) VALUES('c1','direct','dm:anna:bob','2026-11-11')")
         for user in ("anna", "bob"):
