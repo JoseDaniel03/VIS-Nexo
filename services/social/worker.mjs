@@ -97,11 +97,12 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key " +
+    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
   ).bind(tokenHash, now()).first();
   if (!user) bad(401, "Session expired");
+  if (user.disabled_at !== null && user.disabled_at !== undefined) bad(403, "Account disabled");
   return { ...user, tokenHash };
 }
 async function register(request, db) {
@@ -109,8 +110,9 @@ async function register(request, db) {
   const username = normalName(body.username);
   if (!await verifySignature(body.public_key, body.signature,
     "VIS-SOCIAL-REGISTER-V1\n" + username)) bad(401, "Invalid device signature");
-  const current = await db.prepare("SELECT username,signing_public_key FROM social_users WHERE username=?").bind(username).first();
+  const current = await db.prepare("SELECT username,signing_public_key,disabled_at FROM social_users WHERE username=?").bind(username).first();
   if (current) {
+    if (current.disabled_at !== null && current.disabled_at !== undefined) bad(403, "Account disabled");
     if (current.signing_public_key !== body.public_key) bad(409, "Username already registered on another device");
     return reply({ ok: true, username, existing: true });
   }
@@ -129,7 +131,7 @@ async function challenge(request, db) {
   await rateLimit(db, request, "challenge", 25);
   const { username: name } = await parseBody(request);
   const username = normalName(name);
-  const user = await db.prepare("SELECT id FROM social_users WHERE username=?").bind(username).first();
+  const user = await db.prepare("SELECT id FROM social_users WHERE username=? AND disabled_at IS NULL").bind(username).first();
   if (!user) bad(404, "Social account not found");
   const id = crypto.randomUUID();
   const nonce = randomToken();
@@ -145,7 +147,7 @@ async function session(request, db) {
   const row = await db.prepare(
     "SELECT c.id,c.nonce,c.expires_at,u.id AS user_id,u.signing_public_key " +
     "FROM auth_challenges c JOIN social_users u ON u.id=c.user_id " +
-    "WHERE c.id=? AND u.username=? AND c.expires_at>?"
+    "WHERE c.id=? AND u.username=? AND u.disabled_at IS NULL AND c.expires_at>?"
   ).bind(body.challenge_id, username, now()).first();
   if (!row) bad(401, "Invalid or expired challenge");
   const message = "VIS-SOCIAL-AUTH-V1\n" + username + "\n" + row.id + "\n" + row.nonce;
@@ -205,8 +207,21 @@ async function currentState(db, user) {
     "WHERE m.recipient_id=? AND m.expires_at>? AND m.acknowledged_at IS NULL " +
     "ORDER BY m.created_at ASC LIMIT 100"
   ).bind(user.id, now()).all();
+  const [projects, memberships] = await Promise.all([
+    getProjects(db,user),sharedProjectMemberships(db,user)
+  ]);
+  const idsByFriend=new Map();
+  const userIds=new Map((friends.results||[]).map(f=>[f.id,f.username]));
+  for (const membership of memberships) {
+    const username=userIds.get(membership.user_id);
+    if (!username) continue;
+    if (!idsByFriend.has(username)) idsByFriend.set(username,[]);
+    idsByFriend.get(username).push(membership.project_id);
+  }
+  for (const friend of visible) friend.shared_projects=idsByFriend.get(friend.username)||[];
   return reply({
-    username: user.username, presence: user.presence,
+    projects,
+    username: user.username, presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
     public_key: user.encryption_public_key,
     friends: visible,
@@ -324,6 +339,162 @@ async function ackMessages(request, db, user) {
   }
   return reply({ ok: true });
 }
+
+const PROJECT_ID = /^[a-z0-9][a-z0-9_-]{2,47}$/;
+function projectId(value) {
+  const id = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!PROJECT_ID.test(id)) bad(400, "Invalid project ID");
+  return id;
+}
+function isSuper(user) { return user.role === "super_admin"; }
+function requireSuper(user) {
+  if (!isSuper(user)) bad(403, "Super administrator permission required");
+}
+async function audit(db, actorId, operation, target) {
+  await db.prepare(
+    "INSERT INTO admin_audit(id,actor_id,operation,target) VALUES (?,?,?,?)"
+  ).bind(crypto.randomUUID(), actorId, operation, target).run();
+}
+async function accountInfo(db, user) {
+  const row = await db.prepare(
+    "SELECT id,username,role,signing_public_key,disabled_at,created_at FROM social_users WHERE id=?"
+  ).bind(user.id).first();
+  if (!row || row.disabled_at !== null) bad(403, "Account disabled");
+  return reply({ account: {
+    username: row.username, role: row.role, signing_public_key: row.signing_public_key,
+    created_at: row.created_at
+  } });
+}
+async function getProjects(db, user) {
+  const projects = await db.prepare(
+    "SELECT p.id,p.title,p.summary,p.visibility,p.updated_at," +
+    "CASE WHEN s.user_id IS NULL THEN 0 ELSE 1 END AS subscribed," +
+    "COALESCE(st.staff_role,'') AS staff_role " +
+    "FROM social_projects p " +
+    "LEFT JOIN project_subscriptions s ON s.project_id=p.id AND s.user_id=? " +
+    "LEFT JOIN project_staff st ON st.project_id=p.id AND st.user_id=? " +
+    "WHERE p.visibility='published' OR (?=1 AND p.visibility!='published') " +
+    "OR st.user_id IS NOT NULL " +
+    "ORDER BY p.updated_at DESC LIMIT 200"
+  ).bind(user.id,user.id,isSuper(user)?1:0).all();
+  return (projects.results || []).map(p=>({
+    id:p.id,title:p.title,summary:p.summary,visibility:p.visibility,
+    subscribed:!!p.subscribed,staff_role:p.staff_role,updated_at:p.updated_at
+  }));
+}
+async function sharedProjectMemberships(db, user) {
+  const rows = await db.prepare(
+    "SELECT a.user_id,a.project_id FROM project_subscriptions a " +
+    "JOIN project_subscriptions mine ON mine.project_id=a.project_id AND mine.user_id=? " +
+    "JOIN social_projects p ON p.id=a.project_id AND p.visibility='published' " +
+    "WHERE a.user_id IN (SELECT user_b FROM friendships WHERE user_a=? " +
+    "UNION SELECT user_a FROM friendships WHERE user_b=?) LIMIT 1500"
+  ).bind(user.id,user.id,user.id).all();
+  return rows.results || [];
+}
+async function projectSubscription(request, db, user, action) {
+  await rateLimit(db, request, "project-subscribe:" + user.id, 25);
+  const { project_id } = await parseBody(request);
+  const id = projectId(project_id);
+  const project = await db.prepare(
+    "SELECT id FROM social_projects WHERE id=? AND visibility='published'"
+  ).bind(id).first();
+  if (!project) bad(404, "Published project not found");
+  if (action === "subscribe") {
+    await db.prepare(
+      "INSERT OR IGNORE INTO project_subscriptions(project_id,user_id) VALUES (?,?)"
+    ).bind(id,user.id).run();
+  } else {
+    await db.prepare(
+      "DELETE FROM project_subscriptions WHERE project_id=? AND user_id=?"
+    ).bind(id,user.id).run();
+  }
+  return reply({ok:true,project_id:id,subscribed:action==="subscribe"});
+}
+async function adminProjectUpsert(request, db, user) {
+  requireSuper(user);
+  await rateLimit(db, request, "admin-project:" + user.id, 40);
+  const data = await parseBody(request);
+  const id=projectId(data.id);
+  const title = typeof data.title === "string" ? data.title.trim() : "";
+  const summary = typeof data.summary === "string" ? data.summary.trim() : "";
+  const visibility = data.visibility;
+  if (title.length < 1 || title.length > 100 || summary.length > 500 ||
+      !["draft","published","archived"].includes(visibility)) {
+    bad(400,"Invalid project metadata");
+  }
+  await db.prepare(
+    "INSERT INTO social_projects(id,title,summary,visibility,created_by,updated_by) " +
+    "VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET " +
+    "title=excluded.title,summary=excluded.summary,visibility=excluded.visibility," +
+    "updated_by=excluded.updated_by,updated_at=unixepoch()"
+  ).bind(id,title,summary,visibility,user.id,user.id).run();
+  await audit(db,user.id,"project.upsert",id);
+  return reply({ok:true,project_id:id,visibility});
+}
+async function adminProjectStaff(request, db, user) {
+  requireSuper(user);
+  const data = await parseBody(request);
+  const id=projectId(data.project_id);
+  const username=normalName(data.username);
+  const staffRole=data.staff_role;
+  if (!["editor","manager","none"].includes(staffRole)) bad(400,"Invalid staff role");
+  const existing=await db.prepare("SELECT id FROM social_projects WHERE id=?").bind(id).first();
+  if (!existing) bad(404,"Project not found");
+  const peer=await db.prepare(
+    "SELECT id FROM social_users WHERE username=? AND disabled_at IS NULL"
+  ).bind(username).first();
+  if (!peer) bad(404,"Account not found");
+  if (staffRole==="none") {
+    await db.prepare("DELETE FROM project_staff WHERE project_id=? AND user_id=?")
+      .bind(id,peer.id).run();
+  } else {
+    await db.prepare(
+      "INSERT INTO project_staff(project_id,user_id,staff_role,granted_by) VALUES (?,?,?,?) " +
+      "ON CONFLICT(project_id,user_id) DO UPDATE SET staff_role=excluded.staff_role," +
+      "granted_by=excluded.granted_by,updated_at=unixepoch()"
+    ).bind(id,peer.id,staffRole,user.id).run();
+  }
+  await audit(db,user.id,"project.staff",id+":"+username+":"+staffRole);
+  return reply({ok:true,project_id:id,username,staff_role:staffRole});
+}
+async function adminAccountRole(request, db, user) {
+  requireSuper(user);
+  await rateLimit(db, request, "admin-account:" + user.id, 15);
+  const data=await parseBody(request);
+  const username=normalName(data.username);
+  const role=data.role;
+  // super_admin can ONLY be granted through the protected CI operation.
+  if (!["user","moderator","project_manager"].includes(role)) bad(400,"Invalid grant");
+  const target=await db.prepare(
+    "SELECT id,role FROM social_users WHERE username=? AND disabled_at IS NULL"
+  ).bind(username).first();
+  if (!target) bad(404,"Active account not found");
+  if (target.role==="super_admin") bad(403,"Cannot change super administrator");
+  await db.prepare(
+    "UPDATE social_users SET role=?,updated_at=unixepoch() WHERE id=? AND role!='super_admin'"
+  ).bind(role,target.id).run();
+  await audit(db,user.id,"account.role",username+":"+role);
+  return reply({ok:true,username,role});
+}
+async function adminAccountDisable(request, db, user) {
+  requireSuper(user);
+  await rateLimit(db, request, "admin-account:" + user.id, 15);
+  const data=await parseBody(request);
+  const username=normalName(data.username);
+  const target=await db.prepare("SELECT id,role FROM social_users WHERE username=?").bind(username).first();
+  if (!target) bad(404,"Account not found");
+  if (target.id===user.id || target.role==="super_admin") bad(403,"Cannot disable super administrator");
+  const disabled=!!data.disabled;
+  await db.batch([
+    db.prepare("UPDATE social_users SET disabled_at=?,updated_at=unixepoch() WHERE id=? AND role!='super_admin'")
+      .bind(disabled?now():null,target.id),
+    db.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(target.id)
+  ]);
+  await audit(db,user.id,"account.disabled",username+":"+(disabled?"yes":"no"));
+  return reply({ok:true,username,disabled});
+}
+
 async function cleanup(db) {
   const t = now();
   await db.batch([
@@ -336,6 +507,9 @@ async function cleanup(db) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // The Worker has no CORS grants: native Rust is the supported client.
+    // Browser-origin requests are rejected to reduce CSRF/XSS exposure.
+    if (request.headers.has("origin")) return reply({error:"Browser origins are not authorized"},403);
     const path = url.pathname;
     const method = request.method;
     if (!env?.DB) return reply({ service: "vis-social", status: "unavailable" }, 503);
@@ -345,10 +519,10 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 7;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 2 : 0 },
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 10;
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 3 : 0 },
           ready ? 200 : 503);
       }
       if (method === "POST" && path === "/v1/auth/register") return await register(request, db);
@@ -357,6 +531,14 @@ export default {
       if (!path.startsWith("/v1/")) return reply({ error: "Not found" }, 404);
       const user = await getSession(request, db);
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
+      if (method === "GET" && path === "/v1/account") return await accountInfo(db,user);
+      if (method === "GET" && path === "/v1/projects") return reply({projects:await getProjects(db,user)});
+      if (method === "POST" && path === "/v1/projects/subscribe") return await projectSubscription(request,db,user,"subscribe");
+      if (method === "POST" && path === "/v1/projects/unsubscribe") return await projectSubscription(request,db,user,"unsubscribe");
+      if (method === "POST" && path === "/v1/admin/projects/upsert") return await adminProjectUpsert(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/staff") return await adminProjectStaff(request,db,user);
+      if (method === "POST" && path === "/v1/admin/accounts/role") return await adminAccountRole(request,db,user);
+      if (method === "POST" && path === "/v1/admin/accounts/disable") return await adminAccountDisable(request,db,user);
       if (method === "POST" && path === "/v1/keys") return await setKey(request, db, user);
       if (method === "POST" && path === "/v1/friends/request") return await friendRequest(request, db, user);
       if (method === "POST" && path === "/v1/friends/accept") return await friendAccept(request, db, user);
