@@ -317,7 +317,9 @@ fn login_offline(state: State<'_, Mutex<Backend>>, nickname: String) -> Result<S
     offline_pref_owner(nick)?;
     let mut s = locked(&state)?;
     s.active_user = None;
-    s.guest_name = Some(nick.to_owned());
+    // Minecraft offline UUID depends on nickname casing; canonicalizing keeps
+    // the same player inventory when the nickname is typed differently.
+    s.guest_name = Some(nick.to_ascii_lowercase());
     s.presence = "offline".into();
     Ok(s.snapshot())
 }
@@ -980,6 +982,7 @@ async fn import_worlds_instance(state:State<'_,Mutex<Backend>>,archive:String,li
     let mut imported=tauri::async_runtime::spawn_blocking(move||ombu::import_instance(Path::new(&archive),Path::new(&library),&taken))
         .await.map_err(|e|e.to_string())??;
     let s=locked(&state)?;
+    if s.player_owner()?!=username {return Err("Cambiaste de perfil durante la importación. Volvé a intentarlo.".into());}
     if let Some(nick)=s.guest_name.as_deref(){
         if imported.engine!="java" {
             return Err("Solo se pueden importar instancias Java en modo offline.".into());
