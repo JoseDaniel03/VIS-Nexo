@@ -121,6 +121,9 @@ ese período, la eliminación física se ejecuta al abrirlo nuevamente.
   Emoji y otros caracteres Unicode pueden ocupar varios bytes.
 - El Worker comprueba la membresía y los bloqueos, retransmite por WebSocket
   y no escribe ningún texto del mensaje en D1.
+- La API devuelve `relayed_to` como cantidad de usuarios con sockets que
+  aceptaron la retransmisión. **Esto no garantiza que el destinatario haya
+  guardado el texto localmente.**
 - Los destinatarios tienen que estar **conectados**: el servidor devuelve HTTP
   409 cuando nadie puede recibir. No hay una bandeja offline.
   Si un grupo incluye usuarios desconectados, recibirán el mensaje solo
