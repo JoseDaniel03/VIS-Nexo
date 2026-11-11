@@ -137,8 +137,13 @@ fn build_folder(ins:&Instance)->Result<PathBuf,String>{
         ||!folder.join("research-lock.json").is_file(){
         return Err("El build debe contener horizon-client, horizon-prepare y research-lock.json juntos".into());
     }
-    crate::horizon_download::verify_managed_build(&folder)?;
-    if folder.join("vis-horizon-source.json").is_file(){verify_source_build(&folder)?;}
+    if folder.join("vis-horizon-source.json").is_file(){
+        // VIS source-built engines have their own official-source SHA-256
+        // manifest; upstream signed nightlies use a different receipt format.
+        verify_source_build(&folder)?;
+    }else{
+        crate::horizon_download::verify_managed_build(&folder)?;
+    }
     Ok(folder)
 }
 fn api(folder:&Path,exe:&str)->Result<Value,String>{
