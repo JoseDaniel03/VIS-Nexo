@@ -337,6 +337,13 @@ function draw() {
   }
   captureChatDraft();
   captureCustomDraft();
+  // Realtime events redraw the sidebar. Preserve chat/status input focus and
+  // caret so receiving a message doesn't interrupt someone typing.
+  const focused = document.activeElement;
+  const focusSelector = focused?.matches?.('[data-cloud-custom-status]') ?
+    '[data-cloud-custom-status]' : focused?.matches?.('form[data-cloud-form="message"] input[name="body"]') ?
+    'form[data-cloud-form="message"] input[name="body"]' : null;
+  const caret = focusSelector && focused ? [focused.selectionStart, focused.selectionEnd] : null;
   const previousRegion = host.querySelector(".vis-cloud-messages");
   const sameThread = !!chatId && renderedChatId === chatId;
   const wasAtBottom = !previousRegion || previousRegion.scrollHeight - previousRegion.scrollTop - previousRegion.clientHeight < 36;
@@ -345,6 +352,13 @@ function draw() {
   renderedChatId = chatId;
   const input = host.querySelector('form[data-cloud-form="message"] input[name="body"]');
   if (input && chatDrafts.has(chatId)) input.value = chatDrafts.get(chatId);
+  if (focusSelector) {
+    const restored = host.querySelector(focusSelector);
+    if (restored) {
+      restored.focus({ preventScroll: true });
+      if (caret?.every(Number.isInteger)) restored.setSelectionRange(caret[0], caret[1]);
+    }
+  }
   const region = host.querySelector(".vis-cloud-messages");
   if (region) {
     if (olderScroll && sameThread) region.scrollTop = olderScroll.top + region.scrollHeight - olderScroll.height;
