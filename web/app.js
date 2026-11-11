@@ -1212,7 +1212,7 @@ async function performLaunch(projectId,name,sourceOwner=''){
      await command('launch_minecraft',{projectId,name,sourceOwner:sourceOwner||null});
    const projectTitle=instance.project_id===PERSONAL_PROJECT_ID?'':db.projects.find(p=>p.id===instance.project_id)?.title||'';
    socialGameStarted({ pid: result.pid, engine: instance.engine==='horizon'?'rust':'java',
-     project: String(projectTitle).replace(/[\\x00-\\x1f\\x7f<>]/g,'').slice(0,64) });
+     project: String(projectTitle).replace(/[\x00-\x1f\x7f<>]/g,'').slice(0,64) });
    message('Minecraft iniciado · PID '+result.pid+'. Logs en '+result.log_file);
  }catch(e){message('No se pudo iniciar Minecraft: '+String(e),true);}
  finally{minecraftBusy=false;installProgress=null;render();}
