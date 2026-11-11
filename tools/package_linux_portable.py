@@ -102,15 +102,16 @@ def verify_embedded_horizon(image: Path, manifest: dict) -> None:
                 raise RuntimeError(f"Falta o cambió el recurso Horizon dentro de AppImage: {name}")
 
 
-def package(bundle_dir: Path, horizon_dir: Path, release_dir: Path, *, inspect: bool = True) -> tuple[Path, Path]:
+def package(bundle_dir: Path, horizon_dir: Path, release_dir: Path, *, inspect: bool = True, slim: bool = False) -> tuple[Path, Path]:
     images = sorted(bundle_dir.glob("*.AppImage"))
     if len(images) != 1:
         raise RuntimeError(f"Se esperaba una sola AppImage en {bundle_dir}; encontradas {len(images)}")
     image = images[0]
     validate_appimage(image)
-    manifest = verify_horizon_source(horizon_dir)
-    if inspect:
-        verify_embedded_horizon(image, manifest)
+    if not slim:
+        manifest = verify_horizon_source(horizon_dir)
+        if inspect:
+            verify_embedded_horizon(image, manifest)
     folder = release_dir / "portable-linux"
     app = folder / "app"
     if app.exists():
@@ -123,7 +124,13 @@ def package(bundle_dir: Path, horizon_dir: Path, release_dir: Path, *, inspect: 
     opener.write_text(LAUNCHER, encoding="utf-8")
     opener.chmod(0o755)
     (app / ".vis-portable").write_text("VIS Nexo Linux portable\n", encoding="utf-8")
-    (app / "LEEME - VIS Nexo Linux.txt").write_text(README, encoding="utf-8")
+    guide = README
+    if slim:
+        guide = guide.replace(
+            "5. Horizon va compilado desde el código fuente oficial e incluido en AppImage.",
+            "5. Rust Edition descarga su motor de juego oficial compilado por VIS cuando lo elegís.")
+        guide += "\nVIS Nexo abre sin Horizon y no incluye binarios del motor Rust.\n"
+    (app / "LEEME - VIS Nexo Linux.txt").write_text(guide, encoding="utf-8")
     archive = folder / ARCHIVE_NAME
     with tarfile.open(archive, "w:gz", compresslevel=6) as out:
         for file in sorted(app.iterdir()):
@@ -148,8 +155,9 @@ def main() -> None:
     parser.add_argument("--bundle-dir", type=Path, default=Path("target/release/bundle/appimage"))
     parser.add_argument("--horizon-dir", type=Path, default=Path("src-tauri/resources/horizon"))
     parser.add_argument("--release-dir", type=Path, default=Path("target/release"))
+    parser.add_argument("--slim", action="store_true", help="Game runtime is shipped as a separate download")
     args = parser.parse_args()
-    package(args.bundle_dir.resolve(), args.horizon_dir.resolve(), args.release_dir.resolve())
+    package(args.bundle_dir.resolve(), args.horizon_dir.resolve(), args.release_dir.resolve(), slim=args.slim)
 
 
 if __name__ == "__main__":
