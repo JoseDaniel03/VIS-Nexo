@@ -210,9 +210,13 @@ async function main() {
   assert.equal(me.username, "bobby");
 
   // Disconnected recipients cannot receive an offline message without a server queue.
-  const closed = new Promise(resolve => socket.addEventListener("close", resolve, { once: true }));
+  const closed = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("El WebSocket no se cerró")), 5000);
+    socket.addEventListener("close", () => { clearTimeout(timeout); resolve(); }, { once: true });
+  });
   socket.close();
   await closed;
+  await sleep(150); // Give the Durable Object a chance to remove the socket.
   await call("/v1/chats/" + direct.id + "/messages", "POST",
     { body: "No se entrega offline" }, alice.token, 409);
   assert.deepEqual((await call("/v1/chats/" + direct.id + "/messages", "GET",
