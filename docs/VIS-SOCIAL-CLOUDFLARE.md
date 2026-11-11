@@ -2,29 +2,29 @@
 
 Estado técnico: el código del Worker y del cliente Tauri está implementado en GitHub,
 pero **no se debe anunciar un despliegue real** hasta que GitHub Actions complete
-satisfactoriamente \`VIS Social - Cloudflare D1\` y el endpoint \`/health\` responda listo.
+satisfactoriamente `VIS Social - Cloudflare D1` y el endpoint `/health` responda listo.
 
 ## Infraestructura
 
-- D1: \`vis-social-db\` (\`3f1a6ccf-2d84-4233-bde3-d3887d1ea60a\`).
-- Worker aislado: \`vis-social\`, binding \`DB\`.
-- URL por defecto del cliente: \`https://vis-social.defreitascarranza-845.workers.dev\`.
-- URL alternativa en compilación: variable pública \`VIS_SOCIAL_URL\`.
-- No afecta a \`vis-universe\` ni a sus R2/KV.
-- Las migraciones \`0001_social_core.sql\` y \`0002_device_auth.sql\` se
+- D1: `vis-social-db` (`3f1a6ccf-2d84-4233-bde3-d3887d1ea60a`).
+- Worker aislado: `vis-social`, binding `DB`.
+- URL por defecto del cliente: `https://vis-social.defreitascarranza-845.workers.dev`.
+- URL alternativa en compilación: variable pública `VIS_SOCIAL_URL`.
+- No afecta a `vis-universe` ni a sus R2/KV.
+- Las migraciones `0001_social_core.sql` y `0002_device_auth.sql` se
   aplican mediante Wrangler antes de desplegar el Worker.
 
 ## GitHub Actions y credenciales
 
-El workflow \`.github/workflows/vis-social-deploy.yml\` requiere:
+El workflow `.github/workflows/vis-social-deploy.yml` requiere:
 
 | Tipo | Nombre | Contenido |
 | --- | --- | --- |
-| Secret | \`CLOUDFLARE_API_TOKEN\` | API Token Cloudflare para Workers y D1 |
-| Secret o variable | \`CLOUDFLARE_ACCOUNT_ID\` | Account ID de Cloudflare (no secreto) |
+| Secret | `CLOUDFLARE_API_TOKEN` | API Token Cloudflare para Workers y D1 |
+| Secret o variable | `CLOUDFLARE_ACCOUNT_ID` | Account ID de Cloudflare (no secreto) |
 
 Si el token anterior está guardado con **otro nombre** o en **otro repositorio**,
-vincularlo o cambiar el nombre leído por el workflow. El \`GITHUB_TOKEN\`
+vincularlo o cambiar el nombre leído por el workflow. El `GITHUB_TOKEN`
 automático no concede acceso a Cloudflare. Nunca pegar tokens en commits,
 configuración del launcher, scripts, documentación o conversaciones.
 
@@ -33,17 +33,17 @@ Worker. No pasar a las pruebas en dos PC antes de que el job sea verde.
 La URL final aparecerá en el log del despliegue de Wrangler.
 
 Comprobar:
-\`\`\`sh
+```sh
 curl -fsS https://vis-social.defreitascarranza-845.workers.dev/health
 # Esperado: {"service":"vis-social","status":"ready","schema":2}
-\`\`\`
+```
 
 ## Modelo de autenticación
 
 VIS Nexo conserva el PIN local de cuatro dígitos y las cuentas con Argon2id.
 Al entrar en una cuenta local, genera una identidad de dispositivo **Ed25519**
 persistida en el directorio privado de datos de la aplicación:
-\`social-device-keys/<usuario>.json\`. El secreto nunca sale del proceso Rust.
+`social-device-keys/<usuario>.json`. El secreto nunca sale del proceso Rust.
 El servidor registra su clave pública, entrega un desafío temporal de un solo
 uso y acepta una firma digital, no el PIN. El token temporal resultante
 se guarda solo en memoria del backend Rust, sin pasar al WebView.
@@ -63,7 +63,7 @@ proceso de recuperación o traslado de cuenta a otro equipo.
 - D1 solo almacena el sobre cifrado de entrega, hasta 2 KiB. Cada mensaje
   se borra tras confirmación y también caduca automáticamente a las 48 horas.
 - Cada cliente mantiene **su propio** historial en IndexedDB, con retención de
-  30 días y máximo de 5.000 mensajes recientes. No se mantienen historiales
+  30 días y límite de 2 KiB por conversación (mensajes y metadatos). No se mantienen historiales
   permanentes de mensajes de chat en D1.
 - Si la clave de IndexedDB se pierde, no se pueden recuperar mensajes
   cifrados pendientes. No hay copias de seguridad de claves en la nube.
@@ -73,35 +73,35 @@ proceso de recuperación o traslado de cuenta a otro equipo.
 
 ## API autenticada
 
-\`GET /health\` es público.
-\`POST /v1/auth/register\`, \`POST /v1/auth/challenge\` y
-\`POST /v1/auth/session\` constituyen el login por firma.
-Con bearer temporal: \`GET /v1/state\` y \`POST /v1/keys\`,
-\`/v1/presence\`, \`/v1/friends/request\`, \`/v1/friends/accept\`,
-\`/v1/friends/alias\`, \`/v1/messages/send\`, \`/v1/messages/ack\`.
+`GET /health` es público.
+`POST /v1/auth/register`, `POST /v1/auth/challenge` y
+`POST /v1/auth/session` constituyen el login por firma.
+Con bearer temporal: `GET /v1/state` y `POST /v1/keys`,
+`/v1/presence`, `/v1/friends/request`, `/v1/friends/accept`,
+`/v1/friends/alias`, `/v1/messages/send`, `/v1/messages/ack`.
 Se aplican límites básicos de solicitudes para reducir abusos.
 Los cuerpos de chat enviados a D1 deben ser sobres cifrados, nunca texto
 en claro.
 
 ## Validación automatizada
 
-\`\`\`sh
+```sh
 npm run validate
 npm run test:social
 cargo check -p vslauncher-tauri --all-targets --locked
-\`\`\`
+```
 
-\`tools/test_social_worker.mjs\` usa SQLite local para probar migraciones,
+`tools/test_social_worker.mjs` usa SQLite local para probar migraciones,
 sesiones, amistades, privacidad de presencia y colas de mensajería. Esto
 **no equivale** a comprobar el despliegue real ni dos computadores distintos.
 
 ## Prueba pendiente entre dos equipos físicos
 
-1. GitHub Actions \`VIS Social - Cloudflare D1\` termina verde.
-2. \`GET /health\` devuelve status \`ready\`, schema \`2\`.
+1. GitHub Actions `VIS Social - Cloudflare D1` termina verde.
+2. `GET /health` devuelve status `ready`, schema `2`.
 3. Instalar el **mismo commit del launcher** en dos equipos distintos.
 4. Crear dos cuentas locales con nombres distintos y conectarse a VIS
-   Social, ambos con estado \`Mensajes cifrados\`.
+   Social, ambos con estado `Mensajes cifrados`.
 5. Desde PC A solicitar amistad a PC B; B acepta y ambos aparecen como amigos.
 6. A envía mensaje; B lo recibe, lo descifra, muestra hora y guarda
    su historial local. B contesta a A.
@@ -109,5 +109,5 @@ sesiones, amistades, privacidad de presencia y colas de mensajería. Esto
 8. Reiniciar ambas aplicaciones y verificar persistencia de los últimos
    mensajes locales. Confirmar que la cola en D1 queda vacía tras ACK.
 
-Importante: si aparece \`Modo local · VIS Social desconectado\`, **NO** asumir
+Importante: si aparece `Modo local · VIS Social desconectado`, **NO** asumir
 que se enviaron mensajes por Internet. El botón Cloud permite reintentar.
