@@ -149,15 +149,25 @@ async function main() {
     const direct = await call("/v1/chats/direct", "POST", { username: "bobby" }, alice.token);
   const same = await call("/v1/chats/direct", "POST", { username: "alice" }, bob.token);
   assert.equal(direct.id, same.id, "Direct chats must be unique per user pair");
+  // The Worker relays content only to connected devices and never stores it in D1.
   const notified = nextSocketEvent(socket, "chat:message");
-  await call("/v1/chats/" + direct.id + "/messages", "POST", { body: "Hola, Bob" }, alice.token, 201);
+  const sent = await call("/v1/chats/" + direct.id + "/messages", "POST",
+    { body: "Hola, Bob" }, alice.token, 201);
   const delivered = await notified;
-  assert.equal(delivered.chat_id, direct.id, "WebSocket notification must reference the committed chat");
+  assert.equal(delivered.chat_id, direct.id);
+  assert.equal(delivered.body, "Hola, Bob");
+  assert.equal(delivered.id, sent.id);
+  assert.equal(delivered.sender_id, alice.account.id);
+  assert.equal(sent.storage, "device-only");
+  assert.equal(sent.delivered_to, 1);
   const msgs = await call("/v1/chats/" + direct.id + "/messages", "GET", undefined, bob.token);
-  assert.equal(msgs.messages[0].body, "Hola, Bob");
-  assert.equal((await call("/v1/social", "GET", undefined, bob.token)).chats[0].unread, 1);
+  assert.deepEqual(msgs.messages, [], "Remote chat history must remain empty");
+  assert.equal(msgs.storage, "device-only");
+  assert.equal((await call("/v1/social", "GET", undefined, bob.token)).chats[0].unread, 0,
+    "Unread counters are stored locally, not in D1");
   await call("/v1/chats/" + direct.id + "/read", "POST", {}, bob.token);
-  assert.equal((await call("/v1/social", "GET", undefined, bob.token)).chats[0].unread, 0);
+  await call("/v1/chats/" + direct.id + "/messages", "POST",
+    { body: "🔥".repeat(500) }, alice.token, 400);
 
   const group = await call("/v1/chats/groups", "POST",
     { title: "Amigos VIS", members: ["bobby"] }, alice.token, 201);
@@ -198,7 +208,16 @@ async function main() {
     null, "Unfriending must erase nicknames before re-adding");
   const me = await call("/v1/me", "GET", undefined, bob.token);
   assert.equal(me.username, "bobby");
-  console.log("PASS local Worker + D1 + Durable Objects (friends, private nicknames, DM/groups, custom status, game activity, privacy, websocket)");
+
+  // Disconnected recipients cannot receive an offline message without a server queue.
+  const closed = new Promise(resolve => socket.addEventListener("close", resolve, { once: true }));
+  socket.close();
+  await closed;
+  await call("/v1/chats/" + direct.id + "/messages", "POST",
+    { body: "No se entrega offline" }, alice.token, 409);
+  assert.deepEqual((await call("/v1/chats/" + direct.id + "/messages", "GET",
+    undefined, alice.token)).messages, []);
+  console.log("PASS local Worker + D1 + Durable Objects (friends, private nicknames, device-only DMs, groups, privacy, WebSocket relay)");
 }
 try {
   await main();
