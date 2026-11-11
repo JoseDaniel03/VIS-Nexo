@@ -462,7 +462,7 @@ async function relayToOnline(env, accountId, payload) {
     });
     if (!result.ok) return 0;
     const receipt = await result.json();
-    return Number.isSafeInteger(receipt.delivered) ? receipt.delivered : 0;
+    return Number.isSafeInteger(receipt.relayed) ? receipt.relayed : 0;
   } catch { return 0; }
 }
 async function sendMessage(request, env, me, chatId) {
@@ -481,7 +481,7 @@ async function sendMessage(request, env, me, chatId) {
   if (!online) fail(409, "Sin destinatarios conectados: el chat local no tiene bandeja de mensajes offline");
   return response(request, env, {
     id, chat_id: chat.id, sender_id: me.id, sender: me.username,
-    body: content, created_at: time, delivered_to: online, storage: "device-only"
+    body: content, created_at: time, relayed_to: online, delivery: "websocket-relay", storage: "device-only"
   }, 201);
 }
 async function markRead(request, env, me, chatId) {
@@ -514,10 +514,13 @@ export class SocialHub {
     if (url.pathname === "/publish" && request.method === "POST") {
       const event = await request.text();
       if (event.length > 4096) return new Response("Too large", { status: 413 });
+      let relayed = 0;
       for (const socket of this.state.getWebSockets()) {
-        try { socket.send(event); } catch { /* Peer disconnected */ }
+        try { socket.send(event); relayed++; }
+        catch { try { socket.close(1011, "Socket failed"); } catch {} }
       }
-      return Response.json({ ok: true, delivered: this.state.getWebSockets().length });
+      // Successful socket.send does NOT prove the client persisted a message.
+      return Response.json({ ok: true, relayed });
     }
     if (url.pathname === "/join" && request.headers.get("Upgrade") === "websocket") {
       const pair = new WebSocketPair();
