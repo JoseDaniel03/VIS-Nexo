@@ -125,7 +125,28 @@ async function main() {
   await call("/v1/activity", "POST", { engine: null }, bob.token);
   assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].activity, null);
 
-  const direct = await call("/v1/chats/direct", "POST", { username: "bobby" }, alice.token);
+  // Each account owns its nicknames. The named friend never sees our label.
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "Bobi del servidor 🎮" }, alice.token);
+  const mine = await call("/v1/social", "GET", undefined, alice.token);
+  const theirs = await call("/v1/social", "GET", undefined, bob.token);
+  assert.equal(mine.friends[0].nickname, "Bobi del servidor 🎮");
+  assert.equal(mine.friends[0].username, "bobby", "Canonical Ceibo username must not be rewritten");
+  assert.equal(theirs.friends[0].nickname, null, "A friend must never see another account's private nickname");
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "Bobi 2" }, alice.token);
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].nickname, "Bobi 2");
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "x".repeat(41) }, alice.token, 400);
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "A\nB" }, alice.token, 400);
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "Not permitted" }, charlie.token, 403);
+  await call("/v1/friends/" + bob.account.id + "/nickname", "DELETE", undefined, alice.token);
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].nickname, null);
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "Bobi alias" }, alice.token);
+    const direct = await call("/v1/chats/direct", "POST", { username: "bobby" }, alice.token);
   const same = await call("/v1/chats/direct", "POST", { username: "alice" }, bob.token);
   assert.equal(direct.id, same.id, "Direct chats must be unique per user pair");
   const notified = nextSocketEvent(socket, "chat:message");
@@ -151,11 +172,16 @@ async function main() {
   await call("/v1/chats/groups", "POST", { title: "No friends", members: ["charlie"] }, alice.token, 403);
   await call("/v1/blocks/" + alice.account.id, "POST", {}, bob.token);
   await call("/v1/chats/" + direct.id + "/messages", "POST", { body: "Blocked" }, alice.token, 403);
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "Blocked alias" }, alice.token, 403);
+  // Blocking removes the accepted friendship and clears both parties' nicknames in D1.
+  const nicknameCount = await call("/v1/social", "GET", undefined, alice.token);
+  assert.equal(nicknameCount.friends.length, 0);
   await call("/v1/friends/requests", "POST", { username: "bobby" }, alice.token, 403);
   await call("/v1/blocks/" + alice.account.id, "DELETE", undefined, bob.token);
   const me = await call("/v1/me", "GET", undefined, bob.token);
   assert.equal(me.username, "bobby");
-  console.log("PASS local Worker + D1 + Durable Objects (friends, DM/groups, custom status, game activity, privacy, websocket)");
+  console.log("PASS local Worker + D1 + Durable Objects (friends, private nicknames, DM/groups, custom status, game activity, privacy, websocket)");
 }
 try {
   await main();
