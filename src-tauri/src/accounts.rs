@@ -187,7 +187,8 @@ impl LocalStore {
         self.data.messages.retain(|m| recent_local_message(m, now) && !m.body.trim().is_empty());
         self.data.messages.sort_by_key(|m| message_time_ms(&m.created).unwrap_or_default());
         let mut usage = BTreeMap::<(String, String), usize>::new();
-        self.data.messages = self.data.messages.drain(..).rev().filter(|m| {
+        let ordered = std::mem::take(&mut self.data.messages);
+        self.data.messages = ordered.into_iter().rev().filter(|m| {
             let pair = if m.from <= m.to {
                 (m.from.clone(), m.to.clone())
             } else {
