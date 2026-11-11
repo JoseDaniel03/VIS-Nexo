@@ -4,6 +4,7 @@
 #[path = "../src/minecraft.rs"] mod minecraft;
 #[path = "../src/horizon.rs"] mod horizon;
 #[path = "../src/horizon_download.rs"] mod horizon_download;
+#[path = "../src/rust_runtime.rs"] mod rust_runtime;
 use tauri::{Listener, Manager};
 
 fn main() {
@@ -29,6 +30,7 @@ fn main() {
             horizon::initialize_bundled_source(&handle);
             let result = (|| -> Result<minecraft::LaunchResult, String> {
                 let mut instance = instance;
+                rust_runtime::ensure(&handle)?;
                 let dir = minecraft::instance_dir(&root, "VisTest", &instance)?;
                 instance.horizon_build_dir = horizon::install_instance_engine(&dir, &instance)?;
                 let (mc, server, jdk) = minecraft::horizon_prerequisites(&handle, &root, "VisTest", &instance, &[])?;
