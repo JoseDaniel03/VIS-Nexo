@@ -36,6 +36,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
+      VIS_SOCIAL_URL: ${{ vars.VIS_SOCIAL_URL }}
       VIS_HORIZON_REF: 1405044d0996d37f850f5ab0dec02bab43d4945f
     steps:
       - uses: actions/checkout@v4
