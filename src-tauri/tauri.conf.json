@@ -39,7 +39,7 @@
     ],
     "createUpdaterArtifacts": true,
     "resources": {
-      "resources/horizon/": "horizon/"
+      "resources/vis-rust-runtime.json": "vis-rust-runtime.json"
     }
   }
 }
