@@ -33,6 +33,32 @@ Using Wrangler in the services/social directory:
 The old PostgreSQL drafts in services/ceibo and services/humile are not D1 migrations.
 Do not run them against D1. VIS Universe R2 remains untouched.
 
+## Despliegue desde GitHub Actions (opcional, manual)
+
+Se añadió `.github/workflows/vis-social-deploy.yml`. No se ejecuta automáticamente
+ni desde este PR: está restringido a `main`, requiere confirmación manual y usa
+el entorno protegido `vis-social-production`. Configurá el entorno con aprobación
+manual para evitar despliegues accidentales.
+
+1. Creá D1 **una sola vez** mediante `npx wrangler d1 create vis-social`
+   (o reutilizá una D1 propia con el nombre indicado en la configuración).
+2. En GitHub → Settings → Secrets and variables → Actions, guardá:
+   - Secret `CLOUDFLARE_API_TOKEN`: token Cloudflare acotado a esta cuenta, con
+     permisos para Workers scripts, Durable Objects y D1.
+   - Secret `CLOUDFLARE_ACCOUNT_ID`: ID de cuenta de Cloudflare.
+   - Variable `VIS_SOCIAL_D1_ID`: UUID devuelto al crear la base D1.
+3. Tras fusionar el PR en `main`, en Actions → VIS Social — deploy Cloudflare
+   (manual) → Run workflow, elegí `main` y marcá la confirmación.
+4. El workflow valida variables, ejecuta las migraciones D1 en local y remoto,
+   y despliega el Worker y Durable Object.
+5. Comprobá `/health`, registrá dos cuentas de prueba y verificá un chat entre
+   ambas. Solo entonces configurá VIS Nexo con la URL del Worker.
+
+**Ningún token debe pegarse en este repositorio, en un issue o en el chat.**
+Si usás la cuenta gratuita de Workers, verificá que el cálculo PBKDF2 de los
+inicios de sesión no exceda el límite de CPU de la cuenta. No publiques el
+servicio para usuarios hasta comprobar ese punto en Cloudflare.
+
 ## Security and limitations
 
 - Social passwords must contain 12 to 128 characters. Local launcher accounts
