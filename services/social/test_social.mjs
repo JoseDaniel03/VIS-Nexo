@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import socialWorker, { normalizeUsername, validMessage, validCustomStatus, validGameProject, pair, isAllowedOrigin } from "./worker.mjs";
+import socialWorker, { normalizeUsername, validMessage, validCustomStatus, validGameProject, validFriendNickname, pair, isAllowedOrigin } from "./worker.mjs";
 import { readFileSync } from "node:fs";
 
 test("Ceibo usernames are canonical and reject unsafe names", () => {
@@ -57,4 +57,15 @@ test("Statuses and game labels reject controls, markup and oversized text", () =
   assert.equal(validGameProject("x".repeat(65)), false);
   assert.equal(validGameProject("Incorrecto" + String.fromCharCode(0)), false);
   assert.equal(validGameProject("<img src=x>"), false);
+});
+
+test("Friend nicknames validate unicode, length and direction controls", () => {
+  assert.equal(validFriendNickname("  Amigo del server  "), true);
+  assert.equal(validFriendNickname("José 🎮"), true);
+  assert.equal(validFriendNickname("  "), false);
+  assert.equal(validFriendNickname("a".repeat(41)), false);
+  assert.equal(validFriendNickname(String.fromCharCode(0)), false);
+  assert.equal(validFriendNickname("Hola\namigo"), false);
+  assert.equal(validFriendNickname("A\u202eB"), false);
+  assert.equal(validFriendNickname(null), false);
 });
