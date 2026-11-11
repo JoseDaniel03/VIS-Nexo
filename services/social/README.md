@@ -7,10 +7,14 @@ does **not** grant cloud identity to local or offline nicknames. Deployment is m
 
 - Ceibo: D1 accounts, PBKDF2-SHA256 password verifiers with independent salts,
   seven-day sessions with hashed tokens, account disable flags and rate limits.
-- Humile: requests, acceptance, cancellation, removal, blocks, groups, private chats,
-  persisted messages with cursor pagination, unread counters.
+- Humile: requests, acceptance, cancellation, removal, blocks, group and direct
+  chat routing. **Message bodies are never stored in D1**; they are relayed to
+  connected recipient WebSockets, then saved by each player's VIS Nexo device.
+  Each conversation log is capped at 2048 UTF-8 bytes and content expires
+  30 days after the message timestamp. Unread flags are local too.
 - Durable Object SocialHub: hibernatable WebSockets for user notifications and presence.
-  The database is the source of truth for authorizations and history.
+  D1 remains authoritative for membership, blocks, accounts and chat metadata,
+  **not for message history**.
 - Presencia: preferencia conectado/ausente/ocupado/invisible; estado personalizado
   de hasta 80 caracteres; difusión de juego activable o desactivable.
   El launcher publica automáticamente Minecraft Java o Rust Edition y el nombre
@@ -47,7 +51,7 @@ Worker address. Old builds and local development keep manual configuration.
 
 The Worker also runs one daily cron at 04:00 UTC to delete expired authentication
 sessions, expired WebSocket tickets and spent request-limit counters. This job
-does not remove conversation content. 
+does not need to remove conversation content: none is stored in D1. 
 The old PostgreSQL drafts in services/ceibo and services/humile are not D1 migrations.
 Do not run them against D1. VIS Universe R2 remains untouched.
 
@@ -100,6 +104,43 @@ El estado se renueva mientras el juego sigue ejecutándose.
 que una persona esté jugando en un servidor específico.** Para mostrar un
 servidor público o permitir invitaciones haría falta autorización adicional.
 
+## Historial de chat local (máximo 2 KB por conversación)
+
+El cliente de VIS Nexo guarda cada conversación en un registro compacto
+`localStorage` de su WebView, separado por endpoint Cloudflare, cuenta Ceibo
+e ID del chat. El registro completo, **incluidos metadatos**, no supera
+**2.048 bytes UTF-8 por conversación**. Cuando se llena, se descartan primero
+los mensajes más antiguos para poder conservar los más recientes.
+
+Los mensajes caducan a los **30 días**. El cliente elimina registros caducados
+al abrir los chats o iniciar sesión. Si el programa permanece cerrado durante
+ese período, la eliminación física se ejecuta al abrirlo nuevamente.
+
+- Los mensajes de texto individuales tienen un límite de **1.536 bytes UTF-8**
+  para permitir almacenar al menos un mensaje reciente en el registro pequeño.
+  Emoji y otros caracteres Unicode pueden ocupar varios bytes.
+- El Worker comprueba la membresía y los bloqueos, retransmite por WebSocket
+  y no escribe ningún texto del mensaje en D1.
+- Los destinatarios tienen que estar **conectados**: el servidor devuelve HTTP
+  409 cuando nadie puede recibir. No hay una bandeja offline.
+  Si un grupo incluye usuarios desconectados, recibirán el mensaje solo
+  los integrantes conectados. No hay entrega diferida.
+- El historial **no se sincroniza entre computadoras**, no es un backup en
+  Cloudflare y se pierde si se borran los datos del WebView/launcher.
+- El menú contextual de cada chat ofrece **Borrar historial en este equipo**.
+- Esto es almacenamiento local, **no cifrado de extremo a extremo**; el
+  Worker puede ver los mensajes mientras los retransmite. El WebView los
+  guarda sin cifrado de aplicación. Requiere auditoría antes de producción.
+
+### Migración 0005: destrucción del historial antiguo en D1
+
+`0005_local_messages_only.sql` elimina `humile_messages` y el historial
+central previamente almacenado. **Es irreversible**. Antes de aplicar en una
+instalación existente, exportá la tabla antigua con las herramientas D1 y
+guardá el respaldo según la política de datos vigente; después de la
+migración no habrá una copia de los mensajes de ese servidor.
+Las cuentas, chats/grupos, amigos y estados no se eliminan.
+
 ## Security and limitations
 
 - Social passwords must contain 12 to 128 characters. Local launcher accounts
@@ -113,9 +154,10 @@ servidor público o permitir invitaciones haría falta autorización adicional.
   Direct messaging also requires accepted friendship.
 - Real-time tickets expire after 30 seconds and are single-use. WebSocket events
   merely trigger refetches; they cannot modify data directly.
-- The Worker records 12-month retention timestamps. Actual cleanup, account
-  erasure/export, moderation/reporting, attachments and message editing are not yet
-  implemented. Configure backup/export and policy before scheduling deletion.
+- The cloud retains accounts, friendships and chat membership, not messages.
+  Device-only log cleanup occurs when the account starts or opens its chats.
+  Account erasure/export, moderation, attachments and message editing remain
+  outside this feature.
 - Password hashing uses 600,000 PBKDF2 iterations. Workers Free has a 10ms CPU
   limit; verify signup/login on a real Cloudflare deployment. If that limit is
   reached, use a suitable paid plan or managed identity rather than weakening hashes.
