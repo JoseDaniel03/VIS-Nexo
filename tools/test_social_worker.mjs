@@ -216,27 +216,62 @@ assert.equal((await call('/v1/auth/logout',{},alice.token)).status,200);
 assert.equal((await call('/v1/state',undefined,alice.token)).status,401);
 
 // Cloud identities use public IDs and one-way verifiers; local PINs cannot log in.
-const cloudPassword="Strong cloud password 2026!";
-assert.equal((await call('/v1/accounts/register',{username:'clouduser',password:'1234'})).status,400);
-const cloud=await call('/v1/accounts/register',{username:'clouduser',password:cloudPassword});
+const cloudKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const otherKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const cloudSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const cloudPub=to64(await crypto.subtle.exportKey('raw',cloudKey.publicKey));
+const cloudReg={
+  username:'clouduser',password_salt:cloudSalt,password_public_key:cloudPub,
+  registration_signature:to64(await sign(cloudKey.privateKey,
+    'VIS-CLOUD-REGISTER-V2\nclouduser\n'+cloudSalt))
+};
+assert.equal((await call('/v1/accounts/register',{
+  ...cloudReg,registration_signature:'invalid'
+})).status,400);
+const cloud=await call('/v1/accounts/register',cloudReg);
 assert.equal(cloud.status,200,JSON.stringify(cloud));
 assert.match(cloud.data.public_id,/^[0-9a-f]{24}$/);
-assert.equal((await call('/v1/accounts/register',{username:'clouduser',password:cloudPassword})).status,409);
-assert.equal((await call('/v1/accounts/login',{identifier:'clouduser',password:'Wrong pass 2026!'})).status,401);
-const cloudLogin=await call('/v1/accounts/login',{identifier:cloud.data.public_id,password:cloudPassword});
+assert.equal((await call('/v1/accounts/register',cloudReg)).status,409);
+const challenge=await call('/v1/accounts/login/challenge',{
+  identifier:cloud.data.public_id
+});
+assert.equal(challenge.status,200);
+assert.equal(challenge.data.salt,cloudSalt);
+assert.equal(challenge.data.kdf,'argon2id-19m-t2');
+const proofMessage='VIS-CLOUD-AUTH-V2\nclouduser\n'+challenge.data.challenge_id+'\n'+challenge.data.nonce;
+assert.equal((await call('/v1/accounts/login/verify',{
+  identifier:cloud.data.public_id,challenge_id:challenge.data.challenge_id,
+  signature:to64(await sign(otherKey.privateKey,proofMessage))
+})).status,401);
+const cloudLogin=await call('/v1/accounts/login/verify',{
+  identifier:cloud.data.public_id,challenge_id:challenge.data.challenge_id,
+  signature:to64(await sign(cloudKey.privateKey,proofMessage))
+});
 assert.equal(cloudLogin.status,200,JSON.stringify(cloudLogin));
 assert.equal(cloudLogin.data.username,'clouduser');
-assert.equal((await call('/v1/account',undefined,cloudLogin.data.token)).data.account.role,'user');
+assert.equal((await call('/v1/accounts/login/verify',{
+  identifier:cloud.data.public_id,challenge_id:challenge.data.challenge_id,
+  signature:to64(await sign(cloudKey.privateKey,proofMessage))
+})).status,401,'cloud challenge must be single-use');
+const cloudByNameChallenge=await call('/v1/accounts/login/challenge',{identifier:'clouduser'});
+assert.equal(cloudByNameChallenge.status,200);
+assert.equal((await call('/v1/accounts/login/verify',{
+  identifier:'clouduser',challenge_id:cloudByNameChallenge.data.challenge_id,
+  signature:to64(await sign(cloudKey.privateKey,
+    'VIS-CLOUD-AUTH-V2\nclouduser\n'+cloudByNameChallenge.data.challenge_id+
+    '\n'+cloudByNameChallenge.data.nonce))
+})).status,200);
+const cloudAccount=(await call('/v1/account',undefined,cloudLogin.data.token)).data.account;
+assert.equal(cloudAccount.role,'user');
+assert.equal(cloudAccount.cloud_login_enabled,true);
 assert.equal((await call('/v1/admin/projects/upsert',{
   id:'cloud-super',title:'No permissions',visibility:'published'
 },cloudLogin.data.token)).status,403);
-
 assert.equal((await call('/v1/avatar/get',{username:'alice'},cloudLogin.data.token)).status,403,
  'only friends may retrieve protected avatars');
-
 const stored=DB.sqlite.prepare("SELECT password_hash,password_salt FROM social_users WHERE username='clouduser'").get();
-assert(!stored.password_hash.includes(cloudPassword));
-assert.equal(stored.password_salt.length,24);
+assert.equal(stored.password_hash,'ed25519:'+cloudPub);
+assert.equal(stored.password_salt,cloudSalt);
 
 DB.sqlite.exec("UPDATE auth_sessions SET expires_at=1");
 DB.sqlite.exec("UPDATE auth_challenges SET expires_at=1");
