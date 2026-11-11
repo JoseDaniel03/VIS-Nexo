@@ -131,7 +131,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     const fingerprint = JSON.stringify({
       friends: state.friends, incoming: state.incoming_requests,
       outgoing: state.outgoing_requests, messages: messages.map(m => m.id),
-      status: state.presence
+      status: state.presence, role: state.role,
+      projects: state.projects
     });
     if (force || fingerprint !== lastFingerprint) {
       lastFingerprint = fingerprint;
@@ -252,6 +253,33 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     messages = await localHistory();
     notify(true);
   }
+  async function subscribeProject(projectId, subscribe = true) {
+    if (!connected()) throw Error('VIS Social no está conectado');
+    await rpc(subscribe?'/v1/projects/subscribe':'/v1/projects/unsubscribe','POST',
+      { project_id: projectId });
+    await sync();
+  }
+  async function manageProject(project) {
+    if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
+    await rpc('/v1/admin/projects/upsert','POST',project);
+    await sync();
+  }
+  async function grantStaff(projectId, username, staffRole) {
+    if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
+    await rpc('/v1/admin/projects/staff','POST',{
+      project_id:projectId, username, staff_role:staffRole
+    });
+    await sync();
+  }
+  async function setAccountRole(username, role) {
+    if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
+    return rpc('/v1/admin/accounts/role','POST',{username,role});
+  }
+  async function setAccountDisabled(username, disabled) {
+    if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
+    return rpc('/v1/admin/accounts/disable','POST',{username,disabled});
+  }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
-    setPresence, sendMessage, state: () => state };
+    setPresence, sendMessage, subscribeProject, manageProject, grantStaff,
+    setAccountRole, setAccountDisabled, state: () => state };
 }
