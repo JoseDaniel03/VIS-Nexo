@@ -179,6 +179,23 @@ async function main() {
   assert.equal(nicknameCount.friends.length, 0);
   await call("/v1/friends/requests", "POST", { username: "bobby" }, alice.token, 403);
   await call("/v1/blocks/" + alice.account.id, "DELETE", undefined, bob.token);
+  // Re-establish friendship and ensure that the old private alias was destroyed.
+  await call("/v1/friends/requests", "POST", { username: "bobby" }, alice.token, 201);
+  const again = await call("/v1/social", "GET", undefined, bob.token);
+  await call("/v1/friends/answer", "POST",
+    { id: again.incoming[0].id, action: "accept" }, bob.token);
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].nickname,
+    null, "Blocking must erase old aliases when users later become friends again");
+  // Removing a friend must erase the viewer's nickname in both directions.
+  await call("/v1/friends/" + bob.account.id + "/nickname", "PUT",
+    { nickname: "Alias temporal" }, alice.token);
+  await call("/v1/friends/" + bob.account.id, "DELETE", undefined, alice.token);
+  await call("/v1/friends/requests", "POST", { username: "bobby" }, alice.token, 201);
+  const finalInvite = await call("/v1/social", "GET", undefined, bob.token);
+  await call("/v1/friends/answer", "POST",
+    { id: finalInvite.incoming[0].id, action: "accept" }, bob.token);
+  assert.equal((await call("/v1/social", "GET", undefined, alice.token)).friends[0].nickname,
+    null, "Unfriending must erase nicknames before re-adding");
   const me = await call("/v1/me", "GET", undefined, bob.token);
   assert.equal(me.username, "bobby");
   console.log("PASS local Worker + D1 + Durable Objects (friends, private nicknames, DM/groups, custom status, game activity, privacy, websocket)");
