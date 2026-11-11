@@ -63,3 +63,6 @@
 .vis-cloud-pane .vis-cloud-custom{color:#d8c8f2;font-style:italic;line-height:1.4;max-width:100%;overflow-wrap:anywhere}
 .vis-cloud-pane .vis-social-row button small{display:block;text-align:left;overflow-wrap:anywhere;line-height:1.45}
 .vis-cloud-pane .vis-cloud-custom-form :focus-visible,.vis-cloud-pane .vis-cloud-share-game :focus-visible{outline:2px solid #b69df9;outline-offset:2px}
+
+.vis-cloud-pane .vis-presence-dot.is-away{background:#f0c569;box-shadow:0 0 0 2px #f0c56922}
+.vis-cloud-pane .vis-presence-dot.is-busy{background:#ec8390;box-shadow:0 0 0 2px #ec839022}
