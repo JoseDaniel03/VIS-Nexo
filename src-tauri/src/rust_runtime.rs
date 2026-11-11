@@ -115,7 +115,7 @@ fn verify_files(root:&Path,info:&Descriptor)->Result<(),String>{
         &fs::read(root.join("vis-horizon-source.json")).map_err(|e|e.to_string())?)
         .map_err(|e|e.to_string())?;
     if source["source_repo"].as_str()!=Some(OFFICIAL)||
-        source["source_commit"].as_str()!=Some(&info.source_commit){
+        source["source_commit"].as_str()!=Some(info.source_commit.as_str()){
         return Err("Origen o commit del juego no coincide con la versión firmada".into());
     }
     Ok(())
@@ -152,7 +152,8 @@ fn extract(path:&Path,root:&Path,info:&Descriptor)->Result<(),String>{
             }
             unpacked=unpacked.checked_add(member.size()).ok_or("Desborde de tamaño")?;
             if unpacked>MAX_UNPACKED{return Err("El motor supera el espacio permitido".into())}
-            write_file(&mut member,root,&name,member.size())?;
+            let size=member.size();
+            write_file(&mut member,root,&name,size)?;
         }
     }else{
         let file=File::open(path).map_err(|e|e.to_string())?;
