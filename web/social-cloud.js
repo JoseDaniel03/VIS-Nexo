@@ -202,7 +202,8 @@ function thread() {
   const chat = snapshot?.chats?.find(item => item.id === chatId);
   let markup = '<section class="vis-cloud-thread"><div class="vis-cloud-thread-head"><b>' +
     esc(chat?.kind === "group" ? chat.title : "Conversación") +
-    '</b><button data-cloud="close-chat" aria-label="Cerrar conversación">×</button></div>' +
+    '</b>' + (chat?.kind === "group" ? '<button class="vis-cloud-mini" data-cloud="leave-group" title="Salir del grupo">Salir del grupo</button>' : '') +
+    '<button data-cloud="close-chat" aria-label="Cerrar conversación">×</button></div>' +
     '<div class="vis-cloud-messages">';
   if (chatBefore) markup += '<button data-cloud="older">Ver mensajes anteriores</button>';
   if (!chatMessages.length) markup += '<p class="vis-social-note">Todavía no hay mensajes.</p>';
@@ -301,6 +302,14 @@ async function onClick(event) {
   }
   if (action === "reset-endpoint") { endpoint = ""; signOut(); return; }
   if (action === "close-chat") { chatId = ""; chatMessages = []; chatBefore = null; draw(); return; }
+  if (action === "leave-group") {
+    if (!chatId || !confirm("¿Querés salir de este grupo?")) return;
+    await perform(async () => {
+      await api("/v1/chats/" + chatId + "/leave", "POST", {});
+      chatId = ""; chatMessages = []; chatBefore = null; await refresh();
+    });
+    return;
+  }
   await perform(async () => {
     if (action === "chat-friend") {
       const result = await api("/v1/chats/direct", "POST", { username: button.dataset.name });
