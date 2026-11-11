@@ -198,7 +198,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       busy = false;
     }
   }
-  async function start(username) {
+  async function start(username, reuseCloudSession=false) {
     await stop();
     if (!/^[a-z0-9_]{3,24}$/.test(username)) throw Error('Usuario VIS Social inválido');
     status('connecting');
@@ -206,7 +206,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     try {
       privateDb = await openPrivateDb();
       keys = await ecdhKeys(privateDb, username);
-      const remote = await command('social_connect');
+      const remote = reuseCloudSession ? await rpc('/v1/state') : await command('social_connect');
       await rpc('/v1/keys', 'POST', { public_key: keys.publicKey });
       state = remote;
       messages = await localHistory();
