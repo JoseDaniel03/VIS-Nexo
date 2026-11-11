@@ -318,6 +318,25 @@ async function createGroup(request, env, me) {
   await Promise.all(members.map(other => notify(env, other, { type: "social:update" })));
   return response(request, env, { id }, 201);
 }
+async function leaveGroup(request, env, me, chatId) {
+  const group = await chatAccess(env.DB, me, chatId);
+  if (group.kind !== "group") fail(400, "Solo se puede abandonar un grupo");
+  const db = env.DB;
+  const members = await db.prepare("SELECT account_id FROM humile_chat_members WHERE chat_id=? AND account_id<>?")
+    .bind(chatId, me.id).all();
+  await db.batch([
+    db.prepare("UPDATE humile_chats SET owner_id=(" +
+      "SELECT account_id FROM humile_chat_members WHERE chat_id=? AND account_id<>? " +
+      "ORDER BY joined_at,account_id LIMIT 1) WHERE id=? AND owner_id=?")
+      .bind(chatId, me.id, chatId, me.id),
+    db.prepare("DELETE FROM humile_chat_members WHERE chat_id=? AND account_id=?")
+      .bind(chatId, me.id),
+    db.prepare("DELETE FROM humile_chats WHERE id=? AND NOT EXISTS (" +
+      "SELECT 1 FROM humile_chat_members WHERE chat_id=?)").bind(chatId, chatId)
+  ]);
+  await Promise.all(members.results.map(row => notify(env, row.account_id, { type: "social:update" })));
+  return response(request, env, { ok: true });
+}
 async function chatAccess(db, me, id, writing = false) {
   if (!ID.test(id)) fail(404, "Chat no encontrado");
   const chat = await db.prepare(
@@ -449,6 +468,8 @@ export default {
       if (path === "/v1/chats/direct" && method === "POST") return await createDirect(request, env, me);
       if (path === "/v1/chats/groups" && method === "POST") return await createGroup(request, env, me);
       if (path === "/v1/rt/ticket" && method === "POST") return await ticket(request, env, me);
+      const groupLeave = /^\/v1\/chats\/([a-f0-9-]{36})\/leave$/i.exec(path);
+      if (groupLeave && method === "POST") return await leaveGroup(request, env, me, groupLeave[1]);
       const chat = /^\/v1\/chats\/([a-f0-9-]{36})\/(messages|read)$/i.exec(path);
       if (chat && chat[2] === "messages" && method === "GET") return await messages(request, env, me, chat[1]);
       if (chat && chat[2] === "messages" && method === "POST") return await sendMessage(request, env, me, chat[1]);
