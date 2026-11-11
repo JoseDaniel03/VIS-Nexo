@@ -7,13 +7,13 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "preview": "node tools/dev.mjs",
-    "validate": "node --check web/app.js && node --check web/effects.js && node --check tools/dev.mjs && node tools/check.mjs && npm run typecheck && npm run verify:bridge",
+    "validate": "node --check web/app.js && node --check web/social-remote.js && node --check web/effects.js && node --check tools/dev.mjs && node tools/check.mjs && npm run typecheck && npm run verify:bridge",
     "tauri": "tauri",
     "typecheck": "tsc --project types/tsconfig.json",
     "verify:bridge": "python3 tools/verify_bridge.py",
     "check:performance": "python3 tools/check_vis210.py",
     "test:ui:vis210": "python3 tools/test_vis210.py",
-    "check:release": "python3 tools/check_vis211.py && python3 tools/check_vis212.py && python3 tools/check_vis213.py && python3 tools/check_vis214.py && python3 tools/check_vis215.py && python3 tools/check_vis216.py && python3 tools/check_vis217.py && python3 tools/check_vis218.py && python3 tools/test_horizon_from_source.py && node tools/test_universe_worker.mjs",
+    "check:release": "python3 tools/check_vis211.py && python3 tools/check_vis212.py && python3 tools/check_vis213.py && python3 tools/check_vis214.py && python3 tools/check_vis215.py && python3 tools/check_vis216.py && python3 tools/check_vis217.py && python3 tools/check_vis218.py && python3 tools/test_horizon_from_source.py && node tools/test_universe_worker.mjs && node tools/test_social_worker.mjs",
     "test:ui:vis211": "python3 tools/test_vis211.py",
     "test:ui:vis212": "python3 tools/test_vis212.py",
     "test:ceibo:local": "python3 tools/test_vis_admin_local.py",
@@ -27,7 +27,8 @@
     "horizon:verify": "node tools/prepare_horizon.mjs verify",
     "test:horizon:source": "python3 tools/test_horizon_from_source.py",
     "test:ui:vis218": "python3 tools/test_vis218.py",
-    "test:universe": "node tools/test_universe_worker.mjs"
+    "test:universe": "node tools/test_universe_worker.mjs",
+    "test:social": "node tools/test_social_worker.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
