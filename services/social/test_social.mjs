@@ -10,7 +10,8 @@ test("Ceibo usernames are canonical and reject unsafe names", () => {
 test("Humile messages enforce content limits", () => {
   assert.equal(validMessage("Hola"), true);
   assert.equal(validMessage("<script>"), true); // Client escapes text on render.
-  for (const value of ["", " ", "x".repeat(1537), "🔥".repeat(400), null, {}])
+  for (const value of ["", " ", "x".repeat(1537), "🔥".repeat(400),
+    "a" + "\\n".repeat(950) + "b", null, {}])
     assert.equal(validMessage(value), false);
 });
 test("Canonical friendship pair prevents reversed duplicates", () => {
