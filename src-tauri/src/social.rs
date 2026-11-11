@@ -23,7 +23,8 @@ pub(crate) struct SocialSession {
 }
 
 fn base_url() -> Result<String, String> {
-    let raw = option_env!("VIS_SOCIAL_URL").unwrap_or(DEFAULT_URL).trim_end_matches('/');
+    let raw = option_env!("VIS_SOCIAL_URL").filter(|s| !s.trim().is_empty())
+        .unwrap_or(DEFAULT_URL).trim_end_matches('/');
     let url = url::Url::parse(raw).map_err(|_| "VIS Social URL incorrecta".to_owned())?;
     if url.scheme() != "https" || url.host_str().is_none()
         || !url.username().is_empty() || url.password().is_some()
