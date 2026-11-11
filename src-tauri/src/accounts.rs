@@ -11,6 +11,13 @@ use std::{collections::BTreeMap, fs, path::{Path, PathBuf}};
 #[serde(rename_all = "snake_case")]
 pub enum Role { User, Admin }
 
+#[derive(Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+struct LoginThrottle { attempts: BTreeMap<String, LoginFailure> }
+#[derive(Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+struct LoginFailure { count: u32, last_failed: u64, blocked_until: u64 }
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Account {
     pub username: String,
@@ -172,11 +179,38 @@ impl LocalStore {
     pub fn login(&self, name: &str, password: &str) -> Result<String, String> {
         if let Some(error)=&self.load_error {return Err(error.clone());}
         let normalized = name.trim().to_ascii_lowercase();
-        let account = self.get(&normalized).ok_or("Usuario o contraseña incorrectos.")?;
-        let hash = PasswordHash::new(&account.password_hash)
-            .map_err(|_| "No se pudo verificar la cuenta.")?;
-        Argon2::default().verify_password(password.as_bytes(), &hash)
-            .map_err(|_| "Usuario o contraseña incorrectos.")?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_secs();
+        let throttle_path = self.root.join("login-throttle.json");
+        let mut throttle: LoginThrottle = if throttle_path.is_file() {
+            serde_json::from_slice(&fs::read(&throttle_path).map_err(|e|e.to_string())?)
+                .map_err(|_| "No se pudo verificar la protección de acceso local.")?
+        } else { LoginThrottle::default() };
+        throttle.attempts.retain(|_, entry|
+            now.saturating_sub(entry.last_failed) < 24*60*60);
+        if throttle.attempts.get(&normalized).is_some_and(|entry|
+            entry.blocked_until > now) {
+            return Err("Demasiados intentos. Probá nuevamente más tarde.".into());
+        }
+        let verified = self.get(&normalized).and_then(|account|
+            PasswordHash::new(&account.password_hash).ok().map(|hash|
+                Argon2::default().verify_password(password.as_bytes(), &hash).is_ok()
+            )).unwrap_or(false);
+        if !verified {
+            let failed=throttle.attempts.entry(normalized).or_default();
+            failed.count=failed.count.saturating_add(1);
+            failed.last_failed=now;
+            if failed.count >= 5 {
+                let step=(failed.count-5).min(7);
+                failed.blocked_until=now.saturating_add((30u64 << step).min(3600));
+            }
+            // The file is stored with 0600 on Unix and remains private to the
+            // user's OS profile. Prevent unlimited login attempts with a 4-digit PIN.
+            atomic_json(&throttle_path,&throttle)?;
+            return Err("Usuario o contraseña incorrectos.".into());
+        }
+        throttle.attempts.remove(&normalized);
+        atomic_json(&throttle_path,&throttle)?;
         Ok(normalized)
     }
     pub fn prefs(&self, name: &str) -> PlayerPrefs {
@@ -234,6 +268,10 @@ mod tests {
         assert_eq!(store.get("player").unwrap().role,Role::User);
         assert!(store.login("admin", "bad-password").is_err());
         assert!(store.login("ADMIN", "password-123").is_ok());
+        // Enforce a persistent cooldown after repeated incorrect PINs.
+        for _ in 0..5 { assert!(store.login("player","0000").is_err()); }
+        assert!(store.login("player","1234").is_err());
+        assert!(root.join("login-throttle.json").is_file());
         store.request_friend("admin","player").unwrap();
         assert!(store.send_message("admin","player","Antes de aceptar").is_err());
         store.accept_friend("player","admin").unwrap();
