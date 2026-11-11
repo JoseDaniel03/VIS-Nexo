@@ -27,4 +27,27 @@ response=await worker.fetch(new Request(base+"/publish",{method:"POST",
 assert.equal(response.status,400);
 response=await worker.fetch(new Request(base+"/catalog.json"),env);
 assert.equal((await response.json()).projects.length,1);
+// Publish a Fabric project with a bounded declarative Modrinth content list.
+const fabric={...project,id:"fabric-world",engine:"java",loader:"fabric",mc_version:"1.21.4",
+  required_mods:["fabric-api","sodium"],required_resourcepacks:["faithful"],required_shaders:[]};
+const headers={Authorization:"Bearer "+env.VIS_PUBLISH_TOKEN};
+response=await worker.fetch(new Request(base+"/publish",{method:"POST",headers,
+  body:JSON.stringify({format_version:1,projects:[fabric]})}),env);
+assert.equal(response.status,200);
+response=await worker.fetch(new Request(base+"/catalog.json"),env);
+assert.deepEqual((await response.json()).projects[0].project.required_mods,["fabric-api","sodium"]);
+// Reject incompatible, duplicate and excessive manifests before any R2 write.
+for(const bad of [
+  {...fabric,loader:"vanilla"},
+  {...fabric,required_mods:["sodium","SODIUM"]},
+  {...fabric,required_mods:["../evil"]},
+  {...fabric,required_mods:Array.from({length:33},(_,i)=>"mod"+i)},
+  {...fabric,engine:"horizon",loader:"horizon",mc_version:"26.3"}
+]){
+  response=await worker.fetch(new Request(base+"/publish",{method:"POST",headers,
+    body:JSON.stringify({format_version:1,projects:[bad]})}),env);
+  assert.equal(response.status,400);
+}
+response=await worker.fetch(new Request(base+"/catalog.json"),env);
+assert.equal((await response.json()).projects[0].project.engine,"java");
 console.log("VIS Universe Worker tests passed");
