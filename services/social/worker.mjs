@@ -22,8 +22,8 @@ class HttpFailure extends Error {
 const bad = (status, message) => { throw new HttpFailure(status, message); };
 const now = () => Math.floor(Date.now() / 1000);
 const base64 = bytes => btoa(String.fromCharCode(...bytes));
-function unbase64(value, size) {
-  if (typeof value !== "string" || value.length > 512 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) bad(400, "Invalid encoded key");
+function unbase64(value, size, maxEncodedLength = 512) {
+  if (typeof value !== "string" || value.length > maxEncodedLength || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) bad(400, "Invalid encoded key");
   try {
     const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0));
     if (size !== undefined && bytes.length !== size) bad(400, "Invalid key length");
@@ -596,7 +596,7 @@ async function uploadAvatar(request, db, user) {
       !/^[A-Za-z0-9+/]*={0,2}$/.test(body.data) || body.data.length > 32768) {
     bad(400,"Only WebP thumbnails up to 24 KiB are accepted");
   }
-  const bytes=unbase64(body.data);
+  const bytes=unbase64(body.data,undefined,32768);
   if (bytes.length<24 || bytes.length>24576 ||
       String.fromCharCode(...bytes.slice(0,4))!=="RIFF" ||
       String.fromCharCode(...bytes.slice(8,12))!=="WEBP") {
