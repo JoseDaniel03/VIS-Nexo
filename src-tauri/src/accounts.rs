@@ -39,6 +39,26 @@ pub struct LocalMessage {
     pub created: String,
 }
 
+pub const LOCAL_CHAT_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+pub const LOCAL_CHAT_MAX_BYTES: usize = 2048;
+const LOCAL_MESSAGE_MAX_BYTES: usize = 1536;
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_millis().min(u64::MAX as u128) as u64
+}
+fn message_time_ms(raw: &str) -> Option<u64> {
+    if let Ok(ms) = raw.parse::<u64>() { return Some(ms); }
+    // Backwards compatibility for the original LocalMessage created format.
+    let sec = raw.split("tv_sec: ").nth(1)?.split(',').next()?.trim().parse::<u64>().ok()?;
+    let nanos = raw.split("tv_nsec: ").nth(1)?.split('}').next()?.trim().parse::<u64>().ok()?;
+    Some(sec.saturating_mul(1000).saturating_add(nanos / 1_000_000))
+}
+pub fn recent_local_message(message: &LocalMessage, now: u64) -> bool {
+    message_time_ms(&message.created).is_some_and(|time|
+        time > now.saturating_sub(LOCAL_CHAT_RETENTION_MS) &&
+        time <= now.saturating_add(60_000))
+}
+
 #[derive(Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AccountsFile {
@@ -149,7 +169,40 @@ impl LocalStore {
                 Err(error)=>(AccountsFile::default(),Some(format!("No se pudo leer la base de cuentas: {error}"))),
             }
         };
-        Self { root, data, load_error }
+        let mut store = Self { root, data, load_error };
+        if store.load_error.is_none() && store.prune_local_chat_messages() {
+            // Expiration and size cleanup also happens when VIS starts, even
+            // if nobody opens the old local chat.
+            if let Err(error) = store.save() {
+                store.load_error = Some(format!("No se pudo limpiar el historial local: {error}"));
+            }
+        }
+        store
+    }
+    /// Prune offline-prototype chat without touching friendships/accounts.
+    /// 2048 bytes is the complete serialized JSON array for each conversation.
+    pub fn prune_local_chat_messages(&mut self) -> bool {
+        let before = self.data.messages.clone();
+        let now = now_ms();
+        self.data.messages.retain(|m| recent_local_message(m, now) && !m.body.trim().is_empty());
+        self.data.messages.sort_by_key(|m| message_time_ms(&m.created).unwrap_or_default());
+        let mut usage = BTreeMap::<(String, String), usize>::new();
+        self.data.messages = self.data.messages.drain(..).rev().filter(|m| {
+            let pair = if m.from <= m.to {
+                (m.from.clone(), m.to.clone())
+            } else {
+                (m.to.clone(), m.from.clone())
+            };
+            let size = serde_json::to_vec(m).map(|json| json.len()).unwrap_or(usize::MAX);
+            let used = usage.entry(pair).or_insert(2); // JSON array brackets.
+            if used.saturating_add(size).saturating_add(usize::from(*used > 2)) > LOCAL_CHAT_MAX_BYTES {
+                return false;
+            }
+            *used += size + usize::from(*used > 2);
+            true
+        }).collect();
+        self.data.messages.reverse();
+        self.data.messages != before
     }
     pub fn save(&self) -> Result<(), String> {
         if let Some(error)=&self.load_error {return Err(error.clone());}
@@ -232,10 +285,18 @@ impl LocalStore {
     }
     pub fn send_message(&mut self, from: &str, to: &str, text: &str) -> Result<(), String> {
         let body = text.trim();
-        if body.is_empty() || body.chars().count() > 2000 {return Err("Mensaje vacío o demasiado largo.".into());}
+        if body.is_empty() || body.chars().count() > 1500 || body.len() > LOCAL_MESSAGE_MAX_BYTES ||
+            serde_json::to_vec(body).map(|json|json.len()>1750).unwrap_or(true) {
+            return Err("El mensaje excede el límite del chat ligero de 2 KB.".into());
+        }
         if !self.friends(from).iter().any(|friend| friend == to) {return Err("Ese usuario todavía no es tu amigo.".into());}
-        self.data.messages.push(LocalMessage {from: from.into(), to: to.into(), body: body.into(),
-            created: format!("{:?}", std::time::SystemTime::now())});
+        let message = LocalMessage { from: from.into(), to: to.into(), body: body.into(),
+            created: now_ms().to_string() };
+        if serde_json::to_vec(&[&message]).map(|json|json.len()>LOCAL_CHAT_MAX_BYTES).unwrap_or(true) {
+            return Err("El mensaje no cabe en el log de 2 KB.".into());
+        }
+        self.data.messages.push(message);
+        self.prune_local_chat_messages();
         self.save()
     }
 }
@@ -278,6 +339,32 @@ mod tests {
         assert!(!store.prefs("owner").disabled_projects.contains("survival"));
         let _=fs::remove_dir_all(root);
     }
+    #[test]
+    fn local_chat_caps_each_pair_at_2kb_and_prunes_old_messages() {
+        let root = std::env::temp_dir().join(format!("vis-chat-ttl-{}-{}",
+            std::process::id(), now_ms()));
+        let mut store = LocalStore::load(root.clone());
+        store.register("alice", "password-123", "password-123").unwrap();
+        store.register("bobby", "password-123", "password-123").unwrap();
+        store.request_friend("alice", "bobby").unwrap();
+        store.accept_friend("bobby", "alice").unwrap();
+        for _ in 0..70 {
+            store.send_message("alice", "bobby", "Hola mundo de VIS Nexo!").unwrap();
+        }
+        let conversation: Vec<_> = store.data.messages.iter()
+            .filter(|m|m.from=="alice" && m.to=="bobby").collect();
+        assert!(!conversation.is_empty() && conversation.len() < 70);
+        assert!(serde_json::to_vec(&conversation).unwrap().len() <= LOCAL_CHAT_MAX_BYTES);
+        assert!(store.send_message("alice", "bobby", &"🔥".repeat(500)).is_err());
+        store.data.messages.push(LocalMessage {from:"alice".into(),to:"bobby".into(),
+            body:"Expirado".into(),created:(now_ms()-LOCAL_CHAT_RETENTION_MS-1000).to_string()});
+        store.save().unwrap();
+        let reloaded=LocalStore::load(root.clone());
+        assert!(reloaded.data.messages.iter().all(|m|m.body!="Expirado"));
+        assert!(reloaded.data.messages.iter().all(|m|recent_local_message(m,now_ms())));
+        let _=fs::remove_dir_all(root);
+    }
+
     #[test]
     fn accounts_roles_password_and_chat() {
         let root = std::env::temp_dir().join(format!("vslauncher-account-{}-{}",std::process::id(),
