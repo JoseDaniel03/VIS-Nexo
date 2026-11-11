@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: false
+      confirm_chat_history_backup:
+        description: "Confirmo que exporté el historial D1 existente; la migración 0005 lo borrará"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -18,7 +23,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == true }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == true && inputs.confirm_chat_history_backup == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: vis-social-production
@@ -59,7 +64,7 @@ jobs:
           node --check worker.mjs
           python3 test_schema.py
           npx --no-install wrangler d1 migrations apply vis-social --local
-      - name: Apply production D1 migrations (Cloudflare backup enabled)
+      - name: Apply production D1 migrations (requires confirmed prior history export)
         run: npx --no-install wrangler d1 migrations apply vis-social --remote
       - name: Publish Social Worker and Durable Object
         run: npx --no-install wrangler deploy
