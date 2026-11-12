@@ -223,9 +223,19 @@ pub fn diagnostics(dir:&Path,ins:&Instance)->Vec<HorizonCheck>{
         Err(err)=>{results.push(check("Launch API","missing",err));return results;}
     };
     let mc=Path::new(&ins.horizon_minecraft_dir);
-    let version=mc.join("versions").join(&ins.version).join(format!("{}.json",ins.version));
-    let clientjar=mc.join("versions").join(&ins.version).join(format!("{}.jar",ins.version));
-    let is_mc=mc.is_absolute() && version.is_file() && clientjar.is_file() && mc.join("assets/indexes").is_dir();
+    // VIS installs the verified Mojang base in .vis/runtime, never in the
+    // global .minecraft directory. Legacy imports keep the old fallback.
+    let runtime=mc.join(".vis/runtime");
+    let (version,clientjar,assets)=if runtime.is_dir() {
+        (mc.join(".vslauncher/version.json"),
+         runtime.join("versions").join(&ins.version).join(format!("{}.jar",ins.version)),
+         runtime.join("assets/indexes"))
+    } else {
+        (mc.join("versions").join(&ins.version).join(format!("{}.json",ins.version)),
+         mc.join("versions").join(&ins.version).join(format!("{}.jar",ins.version)),
+         mc.join("assets/indexes"))
+    };
+    let is_mc=mc.is_absolute() && version.is_file() && clientjar.is_file() && assets.is_dir();
     results.push(check("Minecraft Java del propietario",if is_mc{"ok"}else{"missing"},
         if is_mc{"Metadatos, JAR y assets encontrados".into()}else{format!("Falta Minecraft {} completo en {}",ins.version,mc.display())}));
     let jar=Path::new(&ins.horizon_server_jar);
