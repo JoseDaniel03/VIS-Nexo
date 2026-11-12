@@ -62,6 +62,7 @@ https://github.com/JoseDaniel03/VIS-Nexo/actions/workflows/vis-nexo-build.yml
 
 - Horizon se recompila si cambian `crates/`, `game/`, `third_party/`, el lockfile, los exportadores, el empaquetador o los workflows; se aceptan disparos manuales.
 - Antes de publicar un build de Horizon, CI inspecciona su archive sin extraer, exige `game_binary: horizon-official`, revisa el commit, sistema operativo, archivos requeridos y hashes SHA-256 de **todos** los componentes, y rechaza JAR/class, entradas duplicadas, enlaces simbólicos y rutas maliciosas.
+- VIS Nexo también verifica localmente que **todos** los archivos extraídos estén declarados en el manifiesto y rechaza archivos no esperados, enlaces simbólicos y tipos de archivo no regulares, incluso si sus hashes declarados coinciden. Solo admite su comprobante de integridad local adicional.
 - El digest de GitHub más `SHA256SUMS` demuestra integridad según esa publicación. **No sustituye la firma independiente del editor**.
 
 ## Seguridad
