@@ -374,7 +374,7 @@ pub fn install(app:&AppHandle,data_root:&Path,expected_tag:&str)->Result<Install
 const VIS_FORK: &str = "JoseDaniel03/horizon-VISNEXO";
 const VIS_FORK_API: &str =
     "https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/releases?per_page=15";
-#[derive(Deserialize)]
+#[derive(Deserialize,Clone)]
 struct ForkAsset {
     name:String,
     browser_download_url:String,
@@ -419,7 +419,7 @@ fn fork_release<'a>(releases:&'a [ForkRelease],asset_name:&str)->Result<&'a Fork
                 "https://github.com/{VIS_FORK}/releases/download/{}/{}",
                 r.tag_name,asset_name) &&
             a.size>0 && a.size<=MAX_ARCHIVE && fork_digest(a).is_ok()))
-        .ok_or("El fork todavía no publicó el motor Horizon para este sistema. Comprobá GitHub Actions del fork.")
+        .ok_or_else(||"El fork todavía no publicó el motor Horizon para este sistema. Comprobá GitHub Actions del fork.".to_string())
 }
 fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
     let raw=fs::read(build.join("vis-horizon-source.json"))
