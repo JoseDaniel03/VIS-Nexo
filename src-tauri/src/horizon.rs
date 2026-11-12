@@ -567,6 +567,8 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
             .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir);
         if !ins.player_name.is_empty(){cmd.arg("--name").arg(&ins.player_name);}
         if ins.fullscreen{cmd.arg("--fullscreen");}
+        // Horizon must retain its game lock if VIS closes while Rust is running.
+        crate::minecraft::inherit_game_lock(&mut cmd,&game_run);
         let mut child=cmd.stdin(Stdio::null()).stdout(log.try_clone().map_err(|e|e.to_string())?)
             .stderr(log).spawn().map_err(|e|format!("Horizon no pudo iniciar: {e}"))?;
         let pid=child.id();let log_file=log_path.to_string_lossy().into_owned();
@@ -617,6 +619,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
         .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir).arg("--session-stdin");
     if ins.fullscreen{cmd.arg("--fullscreen");}
+    crate::minecraft::inherit_game_lock(&mut cmd,&game_run);
     let mut child=cmd.stdin(Stdio::piped()).stdout(Stdio::from(log.try_clone().map_err(|e|e.to_string())?))
         .stderr(Stdio::from(log)).spawn().map_err(|e|format!("Horizon no pudo iniciar: {e}"))?;
     if let Some(mut stdin)=child.stdin.take(){
