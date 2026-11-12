@@ -17,10 +17,10 @@ mod platform {
 mod platform {
     use std::{ffi::c_void,fs::File,os::windows::io::AsRawHandle};
     #[repr(C)]
-    #[derive(Default)]
     struct Overlapped {
         internal:usize,internal_high:usize,offset:u32,offset_high:u32,event:*mut c_void
     }
+    #[link(name="kernel32")]
     unsafe extern "system" {
         fn LockFileEx(handle:*mut c_void,flags:u32,reserved:u32,
             bytes_low:u32,bytes_high:u32,overlapped:*mut Overlapped)->i32;
@@ -28,7 +28,10 @@ mod platform {
     const EXCLUSIVE:u32=0x00000002;
     const NOWAIT:u32=0x00000001;
     pub fn lock(file:&File)->Result<(),String>{
-        let mut overlap=Overlapped::default();
+        let mut overlap=Overlapped{
+            internal:0,internal_high:0,offset:0,offset_high:0,
+            event:std::ptr::null_mut()
+        };
         // SAFETY: a synchronous lock on a 1-byte range of an open File.
         let ok=unsafe{LockFileEx(file.as_raw_handle(),EXCLUSIVE|NOWAIT,0,1,0,&mut overlap)}!=0;
         if ok{Ok(())}else{Err("La instancia ya está abierta en otra ejecución de VIS Nexo".into())}
