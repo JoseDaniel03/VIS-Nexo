@@ -687,34 +687,144 @@ fn set_shared_hidden(
     s.storage.save_prefs(&viewer,&prefs)?;
     Ok(s.snapshot())
 }
-/// Resolve the actual per-player game directory without exposing arbitrary paths.
-#[tauri::command]
-fn instance_folder(state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>)->Result<String,String>{
- let s=locked(&state)?;
+/// Resolve the actual per-player game directory from an authorized instance.
+/// A shared engine's owner folder is NEVER returned to the visiting player.
+fn resolve_player_game_dir(
+    s:&Backend, project_id:&str, name:&str, source_owner:Option<&str>
+)->Result<PathBuf,String>{
  let (owner,instance,visitor)=if let Some(guest)=s.guest_name.as_ref(){
-   let from=source_owner.as_deref().filter(|v|!v.is_empty()).ok_or("Elegí la instalación compartida")?;
+   let from=source_owner.filter(|v|!v.is_empty())
+       .ok_or("Elegí la instalación compartida")?;
    let ins=s.guest_instances().into_iter().find(|i|
      i.source_owner==from&&i.project_id==project_id&&i.name==name)
      .ok_or("La instancia ya no está disponible")?;
    (from.to_owned(),ins,Some(guest.clone()))
  }else{
    let user=s.username()?.to_owned();
-   if let Some(from)=source_owner.as_deref().filter(|v|*v!=user){
+   if let Some(from)=source_owner.filter(|v|*v!=user){
      let ins=s.machine_instances(Some(&user)).into_iter().find(|i|
        i.source_owner==from&&i.project_id==project_id&&i.name==name)
        .ok_or("La instancia compartida no está disponible")?;
      (from.to_owned(),ins,Some(user))
    }else{
-     let (owner,ins)=checked_instance(&s,&project_id,&name,false)?;
+     let (owner,ins)=checked_instance(s,project_id,name,false)?;
      (owner,ins,None)
    }
  };
- let dir=if let Some(visitor)=visitor{
-   minecraft::shared_game_directory(&s.data_root,&owner,&instance,&visitor)?
- }else{minecraft::instance_dir(&s.data_root,&owner,&instance)?};
- if !dir.is_dir(){return Err("La carpeta todavía no existe. Instalá o iniciá la instancia primero.".into());}
+ if let Some(visitor)=visitor {
+   minecraft::shared_game_directory(&s.data_root,&owner,&instance,&visitor)
+ }else {
+   minecraft::instance_dir(&s.data_root,&owner,&instance)
+ }
+}
+/// Return the precise save/resource directory for the current player, not the
+/// installation owner's location. Useful for copy-path and file import flows.
+#[tauri::command]
+fn instance_folder(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
+)->Result<String,String>{
+ let dir=resolve_player_game_dir(&locked(&state)?,&project_id,&name,source_owner.as_deref())?;
+ minecraft::prepare_player_directory(&dir)?;
  Ok(dir.to_string_lossy().into_owned())
 }
+/// AppImage libraries can poison gio/xdg-open, so the system file manager is
+/// started using the host binaries and a sanitized desktop environment.
+/// Never use a shell or arbitrary frontend path: the caller picks only a
+/// verified game instance and an explicit folder kind.
+fn open_host_folder(target:&Path)->Result<(),String>{
+ if !target.is_dir(){return Err("La carpeta de Minecraft no existe".into());}
+ #[cfg(target_os="windows")] {
+   std::process::Command::new("explorer.exe").arg(target)
+       .spawn().map_err(|e|format!("No se pudo iniciar Explorer: {e}"))?;
+   return Ok(());
+ }
+ #[cfg(target_os="macos")] {
+   std::process::Command::new("/usr/bin/open").arg(target)
+       .spawn().map_err(|e|format!("No se pudo iniciar Finder: {e}"))?;
+   return Ok(());
+ }
+ #[cfg(target_os="linux")] {
+   use std::{process::{Command,Stdio},thread,time::{Duration,Instant}};
+   let appdir=std::env::var("APPDIR").unwrap_or_default();
+   let clean_list=|value:String|{
+      value.split(':').filter(|segment|
+          !segment.is_empty() && !segment.starts_with("/tmp/.mount_")
+          && (appdir.is_empty() || !segment.starts_with(&appdir))
+      ).collect::<Vec<_>>().join(":")
+   };
+   let mut failure="No hay un gestor de archivos disponible".to_owned();
+   for (binary,gio) in [("/usr/bin/gio",true),("/usr/bin/xdg-open",false)]{
+      if !Path::new(binary).is_file(){continue;}
+      let mut command=Command::new(binary);
+      if gio{command.arg("open");}
+      command.arg(target).stdin(Stdio::null())
+          .stdout(Stdio::null()).stderr(Stdio::null());
+      for key in ["APPDIR","APPIMAGE","ARGV0","LD_LIBRARY_PATH","LD_PRELOAD",
+          "LD_AUDIT","GIO_EXTRA_MODULES","GIO_MODULE_DIR","GTK_PATH",
+          "GTK_EXE_PREFIX","GTK_DATA_PREFIX","QT_PLUGIN_PATH",
+          "QT_QPA_PLATFORM_PLUGIN_PATH","GDK_PIXBUF_MODULE_FILE","GDK_PIXBUF_MODULEDIR"]{
+           command.env_remove(key);
+      }
+      let path=clean_list(std::env::var("PATH").unwrap_or_default());
+      command.env("PATH",if path.is_empty(){"/usr/local/bin:/usr/bin:/bin"}else{&path});
+      if let Ok(dirs)=std::env::var("XDG_DATA_DIRS"){
+          let clean=clean_list(dirs);
+          command.env("XDG_DATA_DIRS",if clean.is_empty(){"/usr/local/share:/usr/share"}else{&clean});
+      }
+      match command.spawn(){
+       Ok(mut child)=>{
+         let deadline=Instant::now()+Duration::from_secs(3);
+         loop {
+           match child.try_wait(){
+             Ok(Some(status)) if status.success()=>return Ok(()),
+             Ok(Some(status))=>{
+                failure=format!("El gestor de archivos salió con estado {}",status.code().unwrap_or(-1));
+                break;
+             },
+             Ok(None) if Instant::now()>=deadline=>return Ok(()),
+             Ok(None)=>thread::sleep(Duration::from_millis(75)),
+             Err(error)=>{failure=error.to_string();break;}
+           }
+         }
+       },
+       Err(error)=>failure=error.to_string()
+      }
+   }
+   Err(format!("{failure}. Podés abrir manualmente: {}",target.display()))
+ }
+ #[cfg(not(any(target_os="windows",target_os="linux",target_os="macos")))]
+ {
+    Err("Este sistema no tiene un gestor de archivos compatible".into())
+ }
+}
+#[tauri::command]
+async fn open_instance_location(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    source_owner:Option<String>,kind:String
+)->Result<String,String>{
+ let target_dir={
+   let s=locked(&state)?;
+   resolve_player_game_dir(&s,&project_id,&name,source_owner.as_deref())?
+ };
+ let sub=match kind.as_str(){
+   "game"=>"",
+   "resourcepacks"=>"resourcepacks",
+   "shaderpacks"=>"shaderpacks",
+   "saves"=>"saves",
+   "screenshots"=>"screenshots",
+   "logs"=>"logs",
+   "mods"=>"mods",
+   "config"=>"config",
+   _=>return Err("Tipo de carpeta no permitido".into())
+ };
+ tauri::async_runtime::spawn_blocking(move||{
+     minecraft::prepare_player_directory(&target_dir)?;
+     let target=if sub.is_empty(){target_dir}else{target_dir.join(sub)};
+     open_host_folder(&target)?;
+     Ok(target.to_string_lossy().into_owned())
+ }).await.map_err(|_|"El explorador de archivos se interrumpió".to_string())?
+}
+
 #[tauri::command]
 fn delete_instance(
     state: State<'_, Mutex<Backend>>, project_id: String, name: String,
@@ -1495,7 +1605,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
