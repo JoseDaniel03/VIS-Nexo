@@ -139,6 +139,8 @@ pub fn sync(root:&Path,username:&str,ins:&Instance,ids:&[String])
             else {Err("Los mods de proyecto requieren Java con Fabric".into())};
     }
     let dir=minecraft::instance_dir(root,username,ins)?;
+    crate::instance_guard::private_paths(&dir,&[".vslauncher","mods",
+      ".vslauncher/retired-mods"])?;
     // Bounded cleanup runs only when the player explicitly installs or
     // launches the project, never as an always-on background process.
     cleanup_abandoned_stages(&dir)?;
