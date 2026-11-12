@@ -422,6 +422,83 @@ pub(crate) async fn microsoft_upload_skin(
     }).await.map_err(|_|"Carga de skin interrumpida".to_string())?
 }
 
+/// Open only the fixed Microsoft device login URL. On Linux/AppImage the
+/// bundled xdg-open and inherited library paths can break Flatpak browsers
+/// (including Zen), even though xdg-open succeeds from a terminal.
+///
+/// Keep the OAuth polling independent of this optional convenience action.
+#[cfg(target_os="linux")]
+fn open_microsoft_on_host()->Result<bool,String>{
+    use std::{env,process::{Command,Stdio},time::{Duration,Instant},thread};
+    let appdir=env::var("APPDIR").unwrap_or_default();
+    let host_path=|value:String|{
+        value.split(':').filter(|part|
+            !part.is_empty() && !part.starts_with("/tmp/.mount_")
+            && (appdir.is_empty() || !part.starts_with(&appdir))
+        ).collect::<Vec<_>>().join(":")
+    };
+    let mut reason=String::new();
+    // System gio is preferable for desktop/Flatpak handlers. If absent or
+    // unsuccessful, use host xdg-open with the same scrubbed environment.
+    for (bin,args) in [("/usr/bin/gio",vec!["open","https://www.microsoft.com/link"]),
+                       ("/usr/bin/xdg-open",vec!["https://www.microsoft.com/link"])]{
+        if !std::path::Path::new(bin).is_file(){continue;}
+        let mut command=Command::new(bin);
+        command.args(args)
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        for key in ["LD_LIBRARY_PATH","LD_PRELOAD","LD_AUDIT",
+                    "GIO_EXTRA_MODULES","GIO_MODULE_DIR",
+                    "GTK_PATH","GTK_EXE_PREFIX","GTK_DATA_PREFIX",
+                    "QT_PLUGIN_PATH","QT_QPA_PLATFORM_PLUGIN_PATH",
+                    "GDK_PIXBUF_MODULE_FILE","GDK_PIXBUF_MODULEDIR",
+                    "APPDIR","APPIMAGE","ARGV0"]{
+            command.env_remove(key);
+        }
+        let path=host_path(env::var("PATH").unwrap_or_default());
+        command.env("PATH",if path.is_empty(){"/usr/local/bin:/usr/bin:/bin"}else{&path});
+        if let Ok(dirs)=env::var("XDG_DATA_DIRS"){
+            let filtered=host_path(dirs);
+            command.env("XDG_DATA_DIRS",if filtered.is_empty(){"/usr/local/share:/usr/share"}else{&filtered});
+        }
+        match command.spawn(){
+            Ok(mut child)=>{
+                let until=Instant::now()+Duration::from_secs(3);
+                loop {
+                    match child.try_wait(){
+                        Ok(Some(status)) if status.success()=>return Ok(true),
+                        Ok(Some(status))=>{
+                            reason=format!("El navegador devolvió estado {}",status.code().unwrap_or(-1));
+                            break;
+                        },
+                        Ok(None) if Instant::now()>=until=>{
+                            // xdg-open may intentionally remain attached to the
+                            // desktop browser process; do not block OAuth.
+                            return Ok(true);
+                        },
+                        Ok(None)=>thread::sleep(Duration::from_millis(100)),
+                        Err(_)=>{reason="No se pudo verificar el navegador".into();break;}
+                    }
+                }
+            }
+            Err(_)=>{reason="No se pudo iniciar el abridor del sistema".into();}
+        }
+    }
+    if reason.is_empty(){reason="No se encontraron abridores de enlaces en Linux".into();}
+    Err(format!("{reason}. Abrí https://www.microsoft.com/link manualmente."))
+}
+#[tauri::command]
+pub(crate) async fn microsoft_open_verification()->Result<bool,String>{
+    #[cfg(target_os="linux")]
+    {
+        return tauri::async_runtime::spawn_blocking(open_microsoft_on_host)
+            .await.map_err(|_|"No se pudo iniciar el navegador".to_string())?;
+    }
+    #[cfg(not(target_os="linux"))]
+    {
+        Err("Apertura del navegador del sistema no disponible".into())
+    }
+}
+
 /// Experimental Horizon Launch API 0.1 accepts the session via a one-time
 /// local JSON file that horizon.rs sends to the game via stdin. Never persist
 /// this file or expose the access token to JavaScript, console or game args.
