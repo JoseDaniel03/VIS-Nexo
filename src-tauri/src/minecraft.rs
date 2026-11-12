@@ -1490,6 +1490,23 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
   let _=fs::remove_dir_all(dir);
  }
  #[cfg(unix)]
+ #[test]fn inherited_lock_survives_launcher_exit_until_game_exits(){
+  let dir=std::env::temp_dir().join(format!("vis-inherited-lock-{}-{}",
+      std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
+  prepare_player_directory(&dir).unwrap();
+  let held=acquire_game_run(&dir).unwrap();
+  let mut cmd=Command::new("sh");
+  cmd.args(["-c","sleep 1"]);
+  inherit_game_lock(&mut cmd,&held);
+  let mut child=cmd.spawn().unwrap();
+  drop(held); // Simulate launcher crash: no VIS file handles remain.
+  assert!(crate::instance_lock::try_lock(&dir).is_err());
+  assert!(child.wait().unwrap().success());
+  let released=crate::instance_lock::try_lock(&dir).unwrap();
+  drop(released);
+  fs::remove_dir_all(dir).unwrap();
+ }
+ #[cfg(unix)]
  #[test]fn resourcepacks_cannot_redirect_to_another_users_files(){
   use std::os::unix::fs::symlink;
   let root=std::env::temp_dir().join(format!("vis-unsafe-packs-{}-{}",
