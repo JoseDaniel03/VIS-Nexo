@@ -98,7 +98,7 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
+    "SELECT u.id,u.username,u.display_name,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
     "CASE WHEN u.password_hash!=\'\' THEN 1 ELSE 0 END AS cloud_login_enabled " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
