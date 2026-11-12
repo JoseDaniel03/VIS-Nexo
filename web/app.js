@@ -935,12 +935,18 @@ function visSkinDialog(){
   '</div><footer class="modal-footer"><button class="primary-btn" data-action="close-modal">Cerrar</button></footer></div></div>';
 }
 function isExecutionEnabled(p){return p?.installable&&db.project_execution?.[p.id]!==false;}
-function selectedMcInstance(){return db.instances.find(i=>i.project_id===mcSelected?.projectId&&i.name===mcSelected?.name)||(libraryMode==='user'?personalInstances()[0]:officialInstances()[0])||null;}
+function selectedMcInstance(){
+ // Shared installs are read-only from a visiting profile; own resources have
+ // their own folder and the shared engine does not make them writable here.
+ return db.instances.find(i=>!i.source_owner&&i.project_id===mcSelected?.projectId&&i.name===mcSelected?.name)
+     ||(libraryMode==='user'?personalInstances():officialInstances()).find(i=>!i.source_owner)||null;
+}
 function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const allow=i.project_id===PERSONAL_PROJECT_ID || isExecutionEnabled(p);
  return `<article class="instance-card">${bulkInstanceMode&&!isGuest()&&!i.source_owner?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · partidas separadas para tu perfil</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
  <div class="mc-instance-actions">${isGuest()||i.source_owner?'':`<button class="outline-btn" data-action="manage-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('settings',16)} Mods y archivos</button>
  <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?'Reparar':'Instalar'}</button>`}
- <button class="icon-btn" data-action="open-instance-folder" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir carpeta de esta instancia" aria-label="Abrir carpeta de ${attr(i.name)}">${I('folder',17)}</button>
+ <button class="icon-btn" data-action="open-instance-folder" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir carpeta privada de este jugador" aria-label="Abrir carpeta de ${attr(i.name)}">${I('folder',17)}</button>
+ <button class="icon-btn" data-action="open-instance-resource-folder" data-kind="resourcepacks" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir resourcepacks de este jugador" aria-label="Abrir resourcepacks de ${attr(i.name)}">${I('image',17)}</button>
  <button class="primary-btn" data-action="launch-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" ${!i.installed||!allow||minecraftBusy?'disabled':''}>${I('play',17)} Jugar</button>
  ${i.source_owner&&!isGuest()?`<button class="outline-btn" data-action="hide-shared-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}" title="Solo oculta de tu biblioteca, no borra los mundos">${I('x',15)} Ocultar</button><button class="outline-btn" data-action="shared-ram" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}">${I('settings',16)} RAM</button>`:''}
  ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="export-worlds-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Exportar instancia completa a ZIP" aria-label="Exportar ${attr(i.name)}">${I('upload',16)}</button>`}
@@ -994,7 +1000,7 @@ function bulkInstanceDeleteDialog(){
 function minecraftPage(){if(isGuest())return `<div class="content-inner"><div class="page-heading"><h1>Minecraft offline</h1><p>Solo inicio de instancias ya instaladas, sin autenticación Microsoft.</p></div><button class="primary-btn" data-action="go-instances">Ver instancias disponibles</button></div>`;const i=selectedMcInstance();const p=db.projects.find(x=>x.id===i?.project_id);
  return `<div class="content-inner mc-manager"><div class="page-heading"><div><span class="page-eyebrow">VIS WORLDS · MOTORES</span><h1>Centro de Minecraft</h1><p>Buscá mods compatibles, importá tus JARs y administrá recursos sin abrir carpetas a mano.</p></div><button class="outline-btn" data-action="go-instances">${I('layers',16)} Instancias</button></div>
  ${!i?quietEmpty('Primero creá una instancia','Desde Instancias elegí un proyecto, la versión oficial de Minecraft y Fabric o Vanilla.'):
- `<section class="surface-card mc-profile-card"><div><span class="page-eyebrow">PERFIL ACTIVO</span><h2>${esc(i.name)}</h2><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':'Proyecto'))} · Minecraft ${esc(i.version)} · ${esc(i.engine==='horizon'?'Horizon Rust':i.loader==='fabric'?'Fabric '+(i.loader_version||''):'Vanilla')}</p></div><select id="mc-active-instance" aria-label="Seleccionar instancia">${db.instances.map(x=>`<option value="${attr(x.project_id+'|'+x.name)}" ${x===i?'selected':''}>${esc(x.name)} · ${esc(x.version)}</option>`).join('')}</select></section>
+ `<section class="surface-card mc-profile-card"><div><span class="page-eyebrow">PERFIL ACTIVO</span><h2>${esc(i.name)}</h2><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':'Proyecto'))} · Minecraft ${esc(i.version)} · ${esc(i.engine==='horizon'?'Horizon Rust':i.loader==='fabric'?'Fabric '+(i.loader_version||''):'Vanilla')}</p></div><select id="mc-active-instance" aria-label="Seleccionar instancia">${db.instances.filter(x=>!x.source_owner).map(x=>`<option value="${attr(x.project_id+'|'+x.name)}" ${x===i?'selected':''}>${esc(x.name)} · ${esc(x.version)}</option>`).join('')}</select></section>
  ${i.engine==='horizon'?`<section class="surface-card vis-horizon-diagnostic"><div class="card-heading">${I('info',20)} Diagnóstico de Horizon</div><p>Este motor usa <strong>horizon-client</strong> directamente. Los mods .hmod/.hnmod no funcionan como JARs Fabric; su instalador especializado está pendiente.</p><button class="outline-btn" data-action="horizon-check" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('check',17)} Comprobar requisitos y recursos</button>
  ${horizonChecks.length?`<ul class="vis-horizon-check-list">${horizonChecks.map(c=>`<li class="vis-horizon-check-item ${c.status==='ok'?'vis-horizon-success':c.status==='missing'?'vis-horizon-missing':'vis-horizon-manual'}"><strong>${esc(c.label)}</strong><small>${esc(c.detail)}</small></li>`).join('')}</ul>`:''}</section>`:''}
  ${i.engine==='horizon'?'':`<div class="mc-manager-grid"><section class="surface-card"><div class="card-heading">${I('search',20)} Explorar Modrinth</div>
@@ -1002,6 +1008,11 @@ function minecraftPage(){if(isGuest())return `<div class="content-inner"><div cl
  <div class="mc-results">${modResults.length?modResults.map(m=>`<article class="mc-result"><div class="mc-result-icon">${I('package',22)}</div><div><h3>${esc(m.title)}</h3><p>${esc(m.description)}</p><small>${Number(m.downloads||0).toLocaleString('es-AR')} descargas · compatible con MC ${esc(i.version)}</small></div><button data-action="install-modrinth" data-id="${attr(m.id)}" title="Instalar versión compatible">${I('plus',17)} Instalar</button></article>`).join(''):'<p class="muted">Resultados compatibles según versión y loader. Buscá para empezar.</p>'}</div></section>
  <section class="surface-card mc-files"><div class="card-heading">${I('folder',20)} Recursos instalados</div><p class="muted">Copias locales independientes por instancia; podés eliminar sin tocar el proyecto principal.</p><div class="mc-file-buttons"><button class="outline-btn" data-action="import-instance-resource" data-kind="mod" ${i.loader==='fabric'?'':'disabled'}>${I('upload',16)} Importar JAR</button><button class="outline-btn" data-action="import-instance-resource" data-kind="resourcepack">${I('upload',16)} Texture pack ZIP</button><button class="outline-btn" data-action="import-instance-resource" data-kind="shader">${I('upload',16)} Shader ZIP</button></div>
  <div class="mc-local-files">${installedFiles.length?installedFiles.map(f=>`<div class="mc-file-entry"><span>${I('package',15)} ${esc(f.file)} <small>${esc(f.kind)} · ${f.enabled===false?'Desactivado':'Activo'}</small></span><div class="mc-file-actions"><button data-action="toggle-instance-file" data-kind="${attr(f.kind)}" data-file="${attr(f.file)}" aria-label="${f.enabled===false?'Activar':'Desactivar'} ${attr(f.file)}" title="${f.enabled===false?'Activar':'Desactivar'} sin eliminar">${I(f.enabled===false?'play':'pause',16)}</button><button data-action="remove-instance-file" data-kind="${attr(f.kind)}" data-file="${attr(f.file)}" aria-label="Eliminar ${attr(f.file)}">${I('trash',16)}</button></div></div>`).join(''):'<p class="muted">Sin mods ni packs importados.</p>'}</div></section></div>`}
+ <section class="surface-card mc-player-folders"><div class="card-heading">${I('folder',20)} Mis carpetas de juego</div>
+ <p class="muted">Estas carpetas pertenecen a tu perfil. Si compartís una instalación, tus mundos, opciones, capturas y packs permanecen separados.</p>
+ <div class="mc-file-buttons">
+ ${['resourcepacks','saves','shaderpacks','mods','screenshots','logs'].map(kind=>`<button class="outline-btn" type="button" data-action="open-instance-resource-folder" data-kind="${kind}" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" data-source="${attr(i.source_owner||'')}">${I('folder',15)} ${({resourcepacks:'Resource packs',saves:'Mundos',shaderpacks:'Shaders',mods:'Mods',screenshots:'Capturas',logs:'Logs'})[kind]}</button>`).join('')}
+ </div></section>
  ${minecraftExitNotice()}
  <div class="mc-disclaimer">${I('info',17)} Las cuentas locales ejecutan Minecraft en modo sin autenticación oficial (pruebas/singleplayer). Para acceder a servidores online-mode, skins y capas oficiales se requiere Microsoft OAuth.</div>`}</div>`;}
 function settingsPage(){if(isGuest())return `<div class="content-inner"><h1>Modo offline</h1><p>Para personalizar la cuenta, cerrá el modo offline e iniciá sesión.</p></div>`;return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">PREFERENCIAS</span><h1>Configuración</h1><p>Personalizá la experiencia del launcher.</p></div></div><div class="settings-grid">
@@ -1908,13 +1919,16 @@ root.addEventListener('click',async event=>{
    if(input)input.value=selected.build_dir;
    message(`Versión ${selected.tag} seleccionada. Guardá la instancia para fijarla y ejecutá el diagnóstico.`);
  }
- else if(act==='open-instance-folder'){
-   if(!native)return message('Esta acción requiere el launcher instalado.',true);
-   await onceOperation('folder:'+JSON.stringify([projectId,id,button.dataset.source||'']),async()=>{
+ else if(act==='open-instance-folder'||act==='open-instance-resource-folder'){
+   if(!native)return message('Esta acción requiere VIS Nexo instalado.',true);
+   const kind=act==='open-instance-folder'?'game':button.dataset.kind||'resourcepacks';
+   const sourceOwner=button.dataset.source||null;
+   await onceOperation('folder:'+JSON.stringify([projectId,id,sourceOwner,kind]),async()=>{
      try{
-       const path=await command('instance_folder',{projectId,name:id,sourceOwner:button.dataset.source||null});
-       await T.opener.openPath(path);
-     }catch(error){message('No se pudo abrir la carpeta: '+String(error),true);}
+       await command('open_instance_location',{projectId,name:id,sourceOwner,kind});
+     }catch(error){
+       message('No se pudo abrir '+(kind==='game'?'la carpeta de la instancia':kind)+': '+String(error),true);
+     }
    });
  }
  else if(act==='launch-minecraft'){await performLaunch(projectId,id,button.dataset.source||'');}
