@@ -1,0 +1,58 @@
+name: VIS Social - Super Developer
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'Existing VIS cloud username (not a local-only account)'
+        required: true
+        type: string
+      public_key:
+        description: 'Cloud password PUBLIC verifier from VIS Portals; not a password'
+        required: true
+        type: string
+      operation:
+        description: 'Grant or revoke project development permissions'
+        required: true
+        default: grant
+        type: choice
+        options: [grant, revoke]
+      confirmed:
+        description: 'I verified account ownership and authorized this production change'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+concurrency:
+  group: vis-social-production
+  cancel-in-progress: false
+jobs:
+  provision:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirmed == true }}
+    runs-on: ubuntu-24.04
+    environment: vis-social-production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      VIS_DEV_USERNAME: ${{ inputs.username }}
+      VIS_DEV_PUBLIC_KEY: ${{ inputs.public_key }}
+      VIS_DEV_ACTION: ${{ inputs.operation }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate intended identity and create parameter-constrained SQL
+        run: python3 tools/prepare_social_developer.py
+      - name: Apply developer grant or revocation to D1
+        working-directory: services/social
+        run: npx --yes wrangler@4 d1 execute DB --remote --file=.vis-developer-mutate.sql
+      - name: Confirm database user and grant
+        working-directory: services/social
+        run: |
+          npx --yes wrangler@4 d1 execute DB --remote --file=.vis-developer-verify.sql --json > .vis-developer-result.json
+          node --input-type=module -e "import fs from 'node:fs'; const raw=JSON.parse(fs.readFileSync('.vis-developer-result.json','utf8'));const rows=Array.isArray(raw)?raw.flatMap(r=>r.results||[]):raw.results||[];const expected=process.env.VIS_DEV_ACTION==='grant'?1:0;if(rows.length!==1||rows[0].username!==process.env.VIS_DEV_USERNAME.toLowerCase()||Number(rows[0].developer)!==expected){throw Error('Developer change not verified')};console.log('VIS Super Developer operation verified');"
+      - name: Delete generated SQL and query results
+        if: always()
+        run: rm -f services/social/.vis-developer-mutate.sql services/social/.vis-developer-verify.sql services/social/.vis-developer-result.json
