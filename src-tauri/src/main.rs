@@ -288,6 +288,58 @@ fn locked<'a>(state: &'a State<'_, Mutex<Backend>>) -> Result<std::sync::MutexGu
 fn get_state(state: State<'_, Mutex<Backend>>) -> Result<Snapshot, String> {
     Ok(locked(&state)?.snapshot())
 }
+#[derive(Serialize)]
+struct LegacyCleanupReport {
+    recent_accounts:usize,
+    hidden_shared:usize,
+    shared_ram:usize,
+    cleaned:bool
+}
+fn legacy_keys_healthy(store:&LocalStore,key:&str)->bool{
+    let Ok((owner,project,name))=serde_json::from_str::<(String,String,String)>(key) else {return false};
+    store.get(&owner).is_some() &&
+        store.prefs(&owner).instances.iter().any(|ins|
+            ins.project_id==project && ins.name==name)
+}
+#[tauri::command]
+fn legacy_cleanup_preview(state:State<'_,Mutex<Backend>>)->Result<LegacyCleanupReport,String>{
+    let s=locked(&state)?;
+    let user=s.username()?;
+    let prefs=s.storage.prefs(user);
+    Ok(LegacyCleanupReport{
+        recent_accounts:s.recent_accounts.iter()
+            .filter(|a|s.storage.get(&a.username).is_none()).count(),
+        hidden_shared:prefs.hidden_shared.iter()
+            .filter(|key|!legacy_keys_healthy(&s.storage,key)).count(),
+        shared_ram:prefs.shared_ram.keys()
+            .filter(|key|!legacy_keys_healthy(&s.storage,key)).count(),
+        cleaned:false
+    })
+}
+#[tauri::command]
+fn legacy_cleanup_apply(state:State<'_,Mutex<Backend>>,confirmed:bool)->Result<LegacyCleanupReport,String>{
+    if !confirmed{return Err("Confirmá la limpieza de referencias antiguas".into());}
+    let mut s=locked(&state)?;
+    let user=s.username()?.to_owned();
+    let report=LegacyCleanupReport{
+        recent_accounts:s.recent_accounts.iter()
+            .filter(|a|s.storage.get(&a.username).is_none()).count(),
+        hidden_shared:s.storage.prefs(&user).hidden_shared.iter()
+            .filter(|key|!legacy_keys_healthy(&s.storage,key)).count(),
+        shared_ram:s.storage.prefs(&user).shared_ram.keys()
+            .filter(|key|!legacy_keys_healthy(&s.storage,key)).count(),
+        cleaned:true
+    };
+    let known=s.storage.data.accounts.iter()
+        .map(|a|a.username.clone()).collect::<std::collections::BTreeSet<_>>();
+    s.recent_accounts.retain(|a|known.contains(&a.username));
+    atomic_json(&s.recent_path,&RecentList{accounts:s.recent_accounts.clone()})?;
+    let mut prefs=s.storage.prefs(&user);
+    prefs.hidden_shared.retain(|key|legacy_keys_healthy(&s.storage,key));
+    prefs.shared_ram.retain(|key,_|legacy_keys_healthy(&s.storage,key));
+    s.storage.save_prefs(&user,&prefs)?;
+    Ok(report)
+}
 #[tauri::command]
 fn register(state: State<'_, Mutex<Backend>>, username: String, password: String, confirm: String) -> Result<Snapshot, String> {
     let mut s = locked(&state)?;
@@ -1374,7 +1426,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
+            get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
             save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
