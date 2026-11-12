@@ -53,7 +53,10 @@ struct Snapshot {
     recent_accounts: Vec<RecentIdentity>,
     mode: &'static str,
     catalog_source: String,
+    hidden_shared_instances: Vec<HiddenShared>,
 }
+#[derive(Clone, Serialize)]
+struct HiddenShared { source_owner:String,project_id:String,name:String }
 #[derive(Serialize)]
 struct AssetReply { path: String, data_url: String }
 #[derive(Serialize)]
@@ -176,9 +179,12 @@ impl Backend {
     }
     fn machine_instances(&self, for_user: Option<&str>) -> Vec<Instance> {
         let mut available = Vec::new();
+        let hidden=for_user.map(|user|self.storage.prefs(user).hidden_shared)
+            .unwrap_or_default();
         for account in &self.storage.data.accounts {
             if for_user == Some(account.username.as_str()) {continue}
             for mut instance in self.storage.prefs(&account.username).instances {
+                if hidden.contains(&Self::shared_key(&account.username,&instance.project_id,&instance.name)){continue;}
                 if instance.engine != "java" && for_user.is_none() {continue}
                 let allowed = instance.project_id == PERSONAL_PROJECT_ID ||
                     self.project(&instance.project_id).is_some();
@@ -263,7 +269,11 @@ impl Backend {
             friends, incoming_requests, outgoing_requests, messages,
             branding: self.branding.clone(), project_execution: self.project_execution.clone(),
             recent_accounts: self.recent_accounts.clone(), mode: if is_guest {"offline"} else {"local"},
-            catalog_source: cloud::catalog_url(&self.data_root).unwrap_or_default() }
+            catalog_source: cloud::catalog_url(&self.data_root).unwrap_or_default(),
+            hidden_shared_instances: username.map(|user|self.storage.prefs(user).hidden_shared
+                .iter().filter_map(|key|serde_json::from_str::<(String,String,String)>(key).ok())
+                .map(|(source_owner,project_id,name)|HiddenShared{source_owner,project_id,name})
+                .collect()).unwrap_or_default() }
     }
     fn save_catalog(&mut self, next: DesignDocument) -> Result<(), String> {
         next.save(&self.catalog_path)?;
@@ -598,6 +608,25 @@ fn configure_shared_ram(state:State<'_,Mutex<Backend>>,source_owner:String,proje
     let mut prefs=s.storage.prefs(&username);
     prefs.shared_ram.insert(Backend::shared_key(&source_owner,&project_id,&name),ram_mb);
     s.storage.save_prefs(&username,&prefs)?;
+    Ok(s.snapshot())
+}
+/// Hide another VIS profile's installation in the current user's library.
+/// No deletion or relocation of the owner's files or Minecraft worlds.
+#[tauri::command]
+fn set_shared_hidden(
+    state:State<'_,Mutex<Backend>>,source_owner:String,project_id:String,name:String,hidden:bool
+)->Result<Snapshot,String>{
+    let s=locked(&state)?;
+    let viewer=s.username()?.to_string();
+    if source_owner==viewer{return Err("Las instancias propias se quitan desde su configuración".into());}
+    let owner=s.storage.get(&source_owner).ok_or("El propietario ya no existe")?;
+    let exists=s.storage.prefs(&owner.username).instances.iter().any(|i|
+        i.project_id==project_id&&i.name==name);
+    if !exists{return Err("La instalación compartida ya no existe".into());}
+    let key=Backend::shared_key(&source_owner,&project_id,&name);
+    let mut prefs=s.storage.prefs(&viewer);
+    if hidden{prefs.hidden_shared.insert(key);}else{prefs.hidden_shared.remove(&key);}
+    s.storage.save_prefs(&viewer,&prefs)?;
     Ok(s.snapshot())
 }
 #[tauri::command]
@@ -1261,7 +1290,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
