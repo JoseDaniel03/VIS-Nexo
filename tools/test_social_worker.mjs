@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import {deflateSync} from 'node:zlib';
 import worker from '../services/social/worker.mjs';
 
 class D1Database {
@@ -116,6 +117,43 @@ assert.equal(avatarRead.status,200);
 assert.equal(avatarRead.data.avatar,'data:image/webp;base64,'+avatarEncoded);
 assert.equal(avatarRead.data.avatar_version,1);
 
+// Real 64x64 PNG texture, not a mock header; any authenticated VIS account
+// can view the uploaded skin, even when the two users are not friends.
+function pngChunk(type,data) {
+  const payload=Buffer.concat([Buffer.from(type,'ascii'),data]);
+  let crc=0xffffffff;
+  for(const byte of payload) {
+    crc^=byte;
+    for(let i=0;i<8;i++) crc=(crc>>>1)^((crc&1)?0xedb88320:0);
+  }
+  const chunk=Buffer.alloc(payload.length+8);
+  chunk.writeUInt32BE(data.length,0);
+  payload.copy(chunk,4);
+  chunk.writeUInt32BE((crc^0xffffffff)>>>0,chunk.length-4);
+  return chunk;
+}
+const ihdr=Buffer.alloc(13);
+ihdr.writeUInt32BE(64,0);ihdr.writeUInt32BE(64,4);ihdr[8]=8;ihdr[9]=6;
+const png=Buffer.concat([
+  Buffer.from('89504e470d0a1a0a','hex'),
+  pngChunk('IHDR',ihdr),
+  pngChunk('IDAT',deflateSync(Buffer.alloc(64*(1+64*4)))),
+  pngChunk('IEND',Buffer.alloc(0))
+]);
+const png64=png.toString('base64');
+assert.equal((await call('/v1/skins/upload',{mime:'image/webp',data:png64},bob.token)).status,400);
+assert.equal((await call('/v1/skins/upload',{mime:'image/png',data:png64},bob.token)).status,200);
+const charlie=await account('charlie');
+const publicSkin=await call('/v1/skins/get',{username:'bob'},charlie.token);
+assert.equal(publicSkin.status,200,'public to authenticated non-friend');
+assert.equal(publicSkin.data.skin,'data:image/png;base64,'+png64);
+assert.equal(publicSkin.data.skin_version,1);
+const visibleSkinState=await call('/v1/state',undefined,alice.token);
+assert.equal(visibleSkinState.data.friends[0].skin_version,1);
+assert.equal((await call('/v1/skins/get',{username:'bob'})).status,401,'reject anonymous lookup');
+assert.equal((await call('/v1/skins/delete',{},bob.token)).status,200);
+assert.equal((await call('/v1/skins/get',{username:'bob'},charlie.token)).data.skin,null);
+assert.equal((await call('/v1/skins/get',{username:'bob'},charlie.token)).data.skin_version,2);
 response = await call('/v1/state', undefined, alice.token);
 assert.equal(response.data.friends[0].username, 'bob');
 assert.equal(response.data.friends[0].public_key, bob.encryptionPublic);
