@@ -149,7 +149,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     const fingerprint = JSON.stringify({
       friends: state.friends, incoming: state.incoming_requests,
       outgoing: state.outgoing_requests, messages: messages.map(m => m.id),
-      status: state.presence, role: state.role, developer: state.developer,
+      status: state.presence, role: state.role, developer: state.developer,display_name:state.display_name,
       projects: state.projects
     });
     if (force || fingerprint !== lastFingerprint) {
