@@ -51,8 +51,18 @@ jobs:
           VIS_SOCIAL_HEALTH_URL: ${{ vars.VIS_SOCIAL_URL }}
         run: |
           base="${VIS_SOCIAL_HEALTH_URL:-https://vis-social.defreitascarranza-845.workers.dev}"
-          curl --fail --silent --show-error --retry 5 --retry-delay 3 "${base%/}/health" > /tmp/vis-social-health.json
-          node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/vis-social-health.json','utf8'));if(d.service!=='vis-social'||d.status!=='ready'||d.schema!==8)process.exit(1); console.log('VIS Social production health: ready, schema 8')"
+          for attempt in $(seq 1 15); do
+            if curl --fail --silent --show-error "${base%/}/health" > /tmp/vis-social-health.json &&
+              node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/vis-social-health.json','utf8'));if(d.service!=='vis-social'||d.status!=='ready'||d.schema!==8)process.exit(1)"; then
+              echo "VIS Social production health: ready, schema 8"
+              exit 0
+            fi
+            # Cloudflare edge rollout can briefly answer with the prior schema.
+            echo "Waiting for VIS Social schema 8 propagation (${attempt}/15)"
+            sleep 2
+          done
+          node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/vis-social-health.json','utf8'));console.error('Health mismatch:',JSON.stringify({service:d.service,status:d.status,schema:d.schema}));"
+          exit 1
 
       - name: Exercise two independent clients over live Cloudflare D1
         env:
