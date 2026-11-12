@@ -149,7 +149,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     const fingerprint = JSON.stringify({
       friends: state.friends, incoming: state.incoming_requests,
       outgoing: state.outgoing_requests, messages: messages.map(m => m.id),
-      status: state.presence, role: state.role,
+      status: state.presence, role: state.role, developer: state.developer,
       projects: state.projects
     });
     if (force || fingerprint !== lastFingerprint) {
@@ -298,6 +298,10 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     await sync();
     return result;
   }
+  async function accountInfo() {
+    if (!connected()) throw Error('Primero iniciá sesión en VIS Social');
+    return rpc('/v1/account');
+  }
   async function subscribeProject(projectId, subscribe = true) {
     if (!connected()) throw Error('VIS Social no está conectado');
     await rpc(subscribe?'/v1/projects/subscribe':'/v1/projects/unsubscribe','POST',
@@ -305,12 +309,12 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     await sync();
   }
   async function manageProject(project) {
-    if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
+    if (!connected() || !state.developer) throw Error('Permiso de desarrollador requerido');
     await rpc('/v1/admin/projects/upsert','POST',project);
     await sync();
   }
   async function grantStaff(projectId, username, staffRole) {
-    if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
+    if (!connected() || !state.developer) throw Error('Permiso de desarrollador requerido');
     await rpc('/v1/admin/projects/staff','POST',{
       project_id:projectId, username, staff_role:staffRole
     });
@@ -326,5 +330,5 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
-    setAccountRole, setAccountDisabled, getAvatar, uploadAvatar, state: () => state };
+    setAccountRole, setAccountDisabled, accountInfo, getAvatar, uploadAvatar, state: () => state };
 }
