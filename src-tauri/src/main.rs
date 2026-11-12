@@ -171,8 +171,9 @@ impl Backend {
     }
     /// Installed games are shared between VIS profiles on the SAME operating-system
     /// account. We never copy account credentials or expose uninstalled private drafts.
-    /// The original installer remains the source of truth for the runtime; every
-    /// other player gets their own isolated save/config/log directory on launch.
+    /// Game binaries belong to the original installer. By default, all VIS
+    /// profiles using the SAME instance see its same worlds, options, servers
+    /// and resource packs. Account authentication remains independent.
     fn shared_key(owner:&str,project:&str,name:&str)->String{
         // Fully qualified keys avoid ambiguous names across VIS profiles.
         serde_json::to_string(&(owner,project,name)).unwrap_or_default()
@@ -185,9 +186,9 @@ impl Backend {
             if for_user == Some(account.username.as_str()) {continue}
             for mut instance in self.storage.prefs(&account.username).instances {
                 if hidden.contains(&Self::shared_key(&account.username,&instance.project_id,&instance.name)){continue;}
-                // Guest mode can start any already-installed engine, including
-                // Horizon. It receives no Microsoft credentials and uses its
-                // own isolated files; online-mode servers still require Premium.
+                // Offline users can start an installed engine, including Horizon.
+                // They share the instance's data by default but never inherit
+                // another user's Microsoft credentials or online-mode access.
                 let allowed = instance.project_id == PERSONAL_PROJECT_ID ||
                     self.project(&instance.project_id).is_some();
                 if !allowed {continue}
@@ -723,7 +724,10 @@ fn resolve_player_game_dir(
 fn instance_folder(
     state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
 )->Result<String,String>{
- let dir=resolve_player_game_dir(&locked(&state)?,&project_id,&name,source_owner.as_deref())?;
+ let dir={
+   let backend=locked(&state)?;
+   resolve_player_game_dir(&backend,&project_id,&name,source_owner.as_deref())?
+ };
  minecraft::prepare_player_directory(&dir)?;
  Ok(dir.to_string_lossy().into_owned())
 }
