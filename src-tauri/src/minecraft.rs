@@ -14,6 +14,27 @@ use crate::accounts::Instance;
 
 static INSTALL_GUARD: Mutex<()> = Mutex::new(());
 static SHARED_PLAYER_LAYOUT_GUARD: Mutex<()> = Mutex::new(());
+/// One running game per writable game directory inside this launcher process.
+/// Sharing the same saves with two live processes could corrupt a world.
+static ACTIVE_GAME_DIRS:OnceLock<Mutex<BTreeSet<PathBuf>>>=OnceLock::new();
+pub(crate) struct GameRunGuard{path:PathBuf}
+impl Drop for GameRunGuard {
+ fn drop(&mut self){
+    if let Some(registry)=ACTIVE_GAME_DIRS.get(){
+        if let Ok(mut active)=registry.lock(){active.remove(&self.path);}
+    }
+ }
+}
+pub(crate) fn acquire_game_run(dir:&Path)->Result<GameRunGuard,String>{
+    let path=fs::canonicalize(dir).map_err(|e|format!("No se pudo verificar la carpeta del juego: {e}"))?;
+    let registry=ACTIVE_GAME_DIRS.get_or_init(||Mutex::new(BTreeSet::new()));
+    let mut active=registry.lock().map_err(|_|"Gestor de partidas ocupado")?;
+    if !active.insert(path.clone()){
+        return Err("Esta instancia ya está abierta. Cerrá Minecraft antes de iniciar la misma partida con otra cuenta.".into());
+    }
+    Ok(GameRunGuard{path})
+}
+
 const MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const FABRIC: &str = "https://meta.fabricmc.net/v2";
 const MODRINTH: &str = "https://api.modrinth.com/v2";
@@ -1040,6 +1061,7 @@ fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&
  let game_dir=game_override.unwrap_or(&dir);
  if !installed(&dir,ins){return Err("Primero instalá la instancia".into())}
  prepare_player_directory(game_dir)?;
+ let game_run=acquire_game_run(game_dir)?;
  let meta_dir=dir.join(".vslauncher");
  let profile:Value=serde_json::from_slice(&fs::read(meta_dir.join("version.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
  let fabric:Value=if ins.loader=="fabric"{serde_json::from_slice(&fs::read(meta_dir.join("fabric.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?}else{Value::Null};
@@ -1117,6 +1139,7 @@ fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&
  // Wait outside the UI thread and publish an actionable exit/crash event.
  let emitter=app.clone();let exit_log=log_file.clone();
  std::thread::spawn(move||{
+    let _active_instance=game_run;
     let outcome=child.wait();
     let event=match outcome {
         Ok(status)=>LaunchExit{pid,success:status.success(),exit_code:status.code(),log_file:exit_log,error:String::new()},
