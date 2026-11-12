@@ -182,6 +182,41 @@ pub fn merge_from_old(game:&Path,legacy:&[PathBuf],apply:bool)->Result<MergeRepo
     let parsed=decode(&encoded).unwrap();
     assert!(parsed.entries.is_empty());
  }
+ fn entry(name:&str,address:&str)->Vec<u8>{
+    let mut out=Vec::new();
+    for (key,value) in [("name",name),("ip",address)]{
+      out.push(8);
+      out.extend_from_slice(&(key.len() as u16).to_be_bytes());
+      out.extend_from_slice(key.as_bytes());
+      out.extend_from_slice(&(value.len() as u16).to_be_bytes());
+      out.extend_from_slice(value.as_bytes());
+    }
+    out.push(0);out
+ }
+ fn file(servers:Vec<Vec<u8>>)->Vec<u8>{
+    encode(Parsed{prefix:vec![10,0,0],suffix:vec![0],entries:servers}).unwrap()
+ }
+ #[test]fn preview_merge_deduplicates_servers_and_preserves_the_original(){
+    let root=std::env::temp_dir().join(format!("vis-servers-merge-{}",std::process::id()));
+    let _=fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let old=root.join("legacy");
+    fs::create_dir_all(&old).unwrap();
+    let current=file(vec![entry("First","example.org:25565")]);
+    fs::write(root.join("servers.dat"),&current).unwrap();
+    fs::write(old.join("servers.dat"),file(vec![
+       entry("Duplicate","EXAMPLE.ORG:25565"),entry("Second","second.example:25565")
+    ])).unwrap();
+    let preview=merge_from_old(&root,&[old.clone()],false).unwrap();
+    assert_eq!(preview.additions,1);
+    assert_eq!(preview.duplicates,1);
+    assert_eq!(fs::read(root.join("servers.dat")).unwrap(),current);
+    let merged=merge_from_old(&root,&[old],true).unwrap();
+    assert!(merged.updated);
+    assert_eq!(decode(&fs::read(root.join("servers.dat")).unwrap()).unwrap().entries.len(),2);
+    assert_eq!(fs::read(&merged.backup).unwrap(),current);
+    let _=fs::remove_dir_all(root);
+ }
  #[test]fn refuses_pathological_nbt_lengths(){
     assert!(decode(&[10,0,0,9,0,7,b's',b'e',b'r',b'v',b'e',b'r',b's',10,127,255,255,255,0]).is_err());
  }
