@@ -250,6 +250,38 @@ pub(crate) async fn microsoft_poll(
       TokenPoll::Access(_)=>Err("Estado OAuth inesperado".into())
     }
 }
+/// Experimental Horizon Launch API 0.1 accepts the session via a one-time
+/// local JSON file that horizon.rs sends to the game via stdin. Never persist
+/// this file or expose the access token to JavaScript, console or game args.
+pub(crate) fn temporary_horizon_session(
+    dir:&std::path::Path,identity:&MinecraftIdentity
+)->Result<std::path::PathBuf,String>{
+    use std::fs::{self,OpenOptions};
+    use std::io::Write;
+    crate::instance_guard::private_paths(dir,&[".vis/tmp"])?;
+    let tmp=dir.join(".vis/tmp");
+    fs::create_dir_all(&tmp).map_err(|e|e.to_string())?;
+    let path=tmp.join(format!("msa-{}.json",uuid::Uuid::new_v4()));
+    let mut opts=OpenOptions::new();
+    opts.create_new(true).write(true);
+    #[cfg(unix)]{
+      use std::os::unix::fs::OpenOptionsExt;
+      opts.mode(0o600);
+    }
+    let mut file=opts.open(&path).map_err(|e|e.to_string())?;
+    let json=serde_json::to_vec(&json!({
+      "name":identity.name,
+      "uuid":identity.uuid,
+      "access_token":identity.access_token,
+      "user_type":"msa"
+    })).map_err(|_|"No se pudo crear el ticket Horizon")?;
+    if let Err(err)=file.write_all(&json){
+       drop(file);let _=fs::remove_file(&path);
+       return Err(format!("No se pudo preparar la sesión Horizon: {err}"))
+    }
+    Ok(path)
+}
+
 impl MicrosoftState{
     pub(crate) fn game_identity(&self,owner:&str)->Result<Option<MinecraftIdentity>,String>{
         let Some(s)=self.verified.as_ref().filter(|s|s.owner==owner) else{return Ok(None)};
