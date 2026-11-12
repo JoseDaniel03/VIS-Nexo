@@ -977,8 +977,13 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
             // Lite launcher: no Horizon game in AppImage or Windows installer.
             // Fetch only when a player installs the Rust instance; the fork
             // publishes both platform binaries and does not contain Mojang IP.
+            // A prior VIS release may refer to a removed build directory.
+            // Reinstall the immutable fork engine if the old *path* vanished,
+            // while preserving this instance's saves/configuration untouched.
+            // Existing files with invalid hashes are never silently trusted.
             if chosen.horizon_build_dir.is_empty()
-                || chosen.horizon_build_dir==horizon::SOURCE_BUILD_ID {
+                || chosen.horizon_build_dir==horizon::SOURCE_BUILD_ID
+                || !Path::new(&chosen.horizon_build_dir).is_dir() {
                 let game=horizon_download::install_fork(&cloned_app,&dir,&chosen.version)?;
                 chosen.horizon_build_dir=game.build_dir;
             }
