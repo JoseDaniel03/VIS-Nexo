@@ -130,6 +130,44 @@ fn valid_member(name:&str)->Result<PathBuf,String>{
     if path.components().count()>MAX_DEPTH+2{return Err("Ruta de copia demasiado profunda".into())}
     Ok(path.to_path_buf())
 }
+fn merge_restored_files(
+    stage:&Path,game:&Path,rollback:&Path,current:&Path,replace:bool,
+    restored:&mut usize,preserved:&mut usize,replaced:&mut usize,depth:usize
+)->Result<(),String>{
+    if depth>MAX_DEPTH{return Err("Restauración con carpetas demasiado profundas".into());}
+    for entry in fs::read_dir(current).map_err(|e|e.to_string())?{
+        let entry=entry.map_err(|e|e.to_string())?;
+        let relative=entry.path().strip_prefix(stage).map_err(|e|e.to_string())?.to_path_buf();
+        let target=game.join(&relative);
+        let kind=entry.file_type().map_err(|e|e.to_string())?;
+        if kind.is_dir(){
+            crate::instance_guard::private_paths(game,&[relative.to_string_lossy().as_ref()])?;
+            fs::create_dir_all(&target).map_err(|e|e.to_string())?;
+            merge_restored_files(stage,game,rollback,&entry.path(),replace,
+                restored,preserved,replaced,depth+1)?;
+        } else if kind.is_file(){
+            crate::instance_guard::private_paths(game,&[relative.to_string_lossy().as_ref()])?;
+            if let Some(parent)=target.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+            if target.exists(){
+                if !replace{*preserved+=1;continue;}
+                let prev=rollback.join(&relative);
+                if let Some(parent)=prev.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+                fs::rename(&target,&prev).map_err(|e|e.to_string())?;
+                *replaced+=1;
+                if let Err(e)=fs::rename(entry.path(),&target){
+                    let _=fs::rename(&prev,&target);
+                    return Err(format!("No se pudo restaurar archivo: {e}"));
+                }
+            }else{
+                fs::rename(entry.path(),&target).map_err(|e|e.to_string())?;
+            }
+            *restored+=1;
+        }else{
+            return Err("Archivo de respaldo inesperado".into());
+        }
+    }
+    Ok(())
+}
 /// Preview and extraction support archives created by VIS only. Restore never
 /// deletes a world. In replace mode old data is moved into a rollback directory.
 pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
@@ -179,27 +217,11 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
                 io::copy(&mut entry,&mut file).map_err(|e|e.to_string())?;
             }
         }
-        // Apply at the top-level. Existing sections are preserved by default,
-        // replacement moves them aside first, retaining a rollback copy.
-        for part in PARTS {
-            let extracted=stage.join(part);
-            if !extracted.exists(){continue;}
-            let target=game.join(part);
-            if target.exists(){
-                if !replace{preserved+=1;continue;}
-                fs::create_dir_all(&rollback).map_err(|e|e.to_string())?;
-                fs::rename(&target,rollback.join(part)).map_err(|e|e.to_string())?;
-                replaced+=1;
-            }
-            if let Err(e)=fs::rename(&extracted,&target){
-                if replace{
-                    let previous=rollback.join(part);
-                    if previous.exists(){let _=fs::rename(previous,target);}
-                }
-                return Err(format!("Restauración incompleta; revisá el respaldo de seguridad: {e}"));
-            }
-            restored+=1;
-        }
+        // Merge each file, not the directory: prepare_player_directory already
+        // created saves/ and resourcepacks/, so directory-level skipping would
+        // incorrectly restore nothing on a fresh instance.
+        merge_restored_files(&stage,game,&rollback,&stage,replace,
+            &mut restored,&mut preserved,&mut replaced,0)?;
         Ok(RestoreInfo{restored,preserved,replaced,
             safety_copy:if replaced>0{rollback.to_string_lossy().to_string()}else{String::new()}})
     })();
