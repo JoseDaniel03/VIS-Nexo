@@ -4,7 +4,7 @@ Rama: `feature/five-systems-no-builds`. Mantener separada de `main`; **no abrir 
 
 ## 1. Protección de mundos entre procesos
 
-`src-tauri/src/instance_lock.rs` usa bloqueos nativos del sistema (flock en Unix y LockFileEx en Windows) sobre `.vis/instance-running.lock`, además del bloqueo en memoria existente. Una sola instancia de juego puede escribir su carpeta de datos a la vez. El bloqueo se libera cuando Minecraft sale, se cierra el handle o el proceso termina. También cubre copias, restauraciones y recuperación de servidores. Una cuenta Premium mantiene sus propias credenciales aunque comparta mundos y lista de servidores.
+`src-tauri/src/instance_lock.rs` usa bloqueos nativos del sistema (flock en Unix y LockFileEx en Windows) sobre `.vis/instance-running.lock`, además del bloqueo en memoria existente. Una sola instancia de juego puede escribir su carpeta de datos a la vez. El bloqueo se libera cuando Minecraft termina normalmente. Si el launcher se cierra por un fallo mientras Minecraft sigue abierto, el kernel puede liberar el bloqueo del proceso VIS; esa situación requiere una protección adicional en una próxima validación. También cubre copias, restauraciones y recuperación de servidores. Una cuenta Premium mantiene sus propias credenciales aunque comparta mundos y lista de servidores.
 
 ## 2. Copias de seguridad y restauración
 
