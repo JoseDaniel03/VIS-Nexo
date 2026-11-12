@@ -217,9 +217,14 @@ fn obtain_or_reuse(c:&Client,task:&Task,destination_root:&Path,sources:&[PathBuf
  Ok(false)
 }
 fn java_home_instance(data_root:&Path,username:&str,ins:&Instance)->Result<PathBuf,String>{
- if !ins.game_dir.trim().is_empty(){return Ok(PathBuf::from(&ins.game_dir));}
- if !clean_segment(username)||!clean_segment(&ins.project_id)||!clean_segment(&ins.name.replace(' ',"-")) {return Err("Nombre de instancia o proyecto inválido".into())}
- Ok(data_root.join("minecraft-instances").join(username).join(&ins.project_id).join(ins.name.replace(' ',"-")))
+ if !ins.game_dir.trim().is_empty() {
+   return crate::instance_guard::destination(Path::new(&ins.game_dir));
+ }
+ if !clean_segment(username)||!clean_segment(&ins.project_id)||!clean_segment(&ins.name.replace(' ',"-")) {
+   return Err("Nombre de instancia o proyecto inválido".into())
+ }
+ crate::instance_guard::destination(&data_root.join("minecraft-instances")
+   .join(username).join(&ins.project_id).join(ins.name.replace(' ',"-")))
 }
 pub fn instance_dir(data_root:&Path,username:&str,ins:&Instance)->Result<PathBuf,String>{java_home_instance(data_root,username,ins)}
 fn installation_path(dir:&Path)->PathBuf{dir.join(".vslauncher").join("install.json")}
