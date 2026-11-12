@@ -55,7 +55,15 @@ fn entry_key(raw:&[u8])->Result<String,String>{
         else{skip(&mut c,tag,0)?;}
     }
     if c.pos!=raw.len(){return Err("Entrada NBT contiene bytes extra".into());}
-    Ok(key)
+    // Java uses port 25565 by default. Treat a hostname without a port and
+    // the same hostname with :25565 as the same server. Never strip an
+    // unbracketed IPv6 suffix (it may be part of the address itself).
+    let raw=key.trim().trim_end_matches('.').to_ascii_lowercase();
+    let colon_count=raw.bytes().filter(|b|*b==b':').count();
+    let no_default_port=if (colon_count==1||raw.starts_with('['))&&raw.ends_with(":25565"){
+        &raw[..raw.len()-6]
+    }else{raw.as_str()};
+    Ok(no_default_port.trim_end_matches('.').to_owned())
 }
 struct Parsed {
   prefix:Vec<u8>,suffix:Vec<u8>,entries:Vec<Vec<u8>>
@@ -217,6 +225,17 @@ pub fn merge_from_old(game:&Path,legacy:&[PathBuf],apply:bool)->Result<MergeRepo
     assert_eq!(decode(&fs::read(root.join("servers.dat")).unwrap()).unwrap().entries.len(),2);
     assert_eq!(fs::read(&merged.backup).unwrap(),current);
     let _=fs::remove_dir_all(root);
+ }
+ #[test]fn default_server_port_is_deduplicated(){
+    assert_eq!(entry_key(&entry("A","EXAMPLE.ORG")).unwrap(),
+               entry_key(&entry("B","example.org:25565")).unwrap());
+    assert_eq!(entry_key(&entry("A","[::1]")).unwrap(),
+               entry_key(&entry("B","[::1]:25565")).unwrap());
+    assert_ne!(entry_key(&entry("A","example.org:25566")).unwrap(),
+               entry_key(&entry("B","example.org")).unwrap());
+    // An unbracketed IPv6 literal ending in 25565 is not a port.
+    assert_eq!(entry_key(&entry("A","2001:db8::25565")).unwrap(),
+               "2001:db8::25565");
  }
  #[test]fn refuses_pathological_nbt_lengths(){
     assert!(decode(&[10,0,0,9,0,7,b's',b'e',b'r',b'v',b'e',b'r',b's',10,127,255,255,255,0]).is_err());
