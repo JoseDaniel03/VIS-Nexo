@@ -52,6 +52,7 @@ struct Snapshot {
     project_execution: BTreeMap<String,bool>,
     recent_accounts: Vec<RecentIdentity>,
     mode: &'static str,
+    catalog_source: String,
 }
 #[derive(Serialize)]
 struct AssetReply { path: String, data_url: String }
@@ -261,7 +262,8 @@ impl Backend {
         Snapshot { user, projects, instances,
             friends, incoming_requests, outgoing_requests, messages,
             branding: self.branding.clone(), project_execution: self.project_execution.clone(),
-            recent_accounts: self.recent_accounts.clone(), mode: if is_guest {"offline"} else {"local"} }
+            recent_accounts: self.recent_accounts.clone(), mode: if is_guest {"offline"} else {"local"},
+            catalog_source: cloud::catalog_url(&self.data_root).unwrap_or_default() }
     }
     fn save_catalog(&mut self, next: DesignDocument) -> Result<(), String> {
         next.save(&self.catalog_path)?;
