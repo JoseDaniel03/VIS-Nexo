@@ -907,7 +907,7 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
                 horizon::bundled_source_path()?;
                 chosen.horizon_build_dir=horizon::SOURCE_BUILD_ID.into();
             }
-            if chosen.horizon_minecraft_dir.is_empty() || chosen.horizon_server_jar.is_empty() || !Path::new(&chosen.java_path).starts_with(&dir){
+            if !horizon::private_mojang_ready(&dir,&chosen){
                 let (mc,server,jdk)=minecraft::horizon_prerequisites(&cloned_app,&data_root,&user,&chosen,&other_instances)?;
                 chosen.horizon_minecraft_dir=mc;
                 chosen.horizon_server_jar=server;
