@@ -222,7 +222,7 @@ pub fn sync(root:&Path,username:&str,ins:&Instance,ids:&[String])
             return Err(error);
         }
         Ok(SyncReport{
-            added:desired.len().saturating_sub(user_owned.len()),
+            added:added.len(),
             retired:retire.len(),protected:edited.len()+user_owned.len(),
             unchanged:false
         })
