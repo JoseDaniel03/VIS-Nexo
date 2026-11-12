@@ -223,6 +223,9 @@ pub struct GameProject {
     #[serde(default="default_project_engine")] pub engine: String,
     #[serde(default="default_project_loader")] pub loader: String,
     #[serde(default)] pub loader_version: String,
+    /// Curated Modrinth project IDs; only Java + Fabric supports these mods.
+    /// Serialized with the project so new installations and updates agree.
+    #[serde(default)] pub modrinth_mods: Vec<String>,
     pub banner_path: String,
     pub logo_path: String,
     pub icon_path: String,
@@ -241,7 +244,7 @@ impl Default for GameProject {
     fn default() -> Self {
         Self { id: String::new(), title: String::new(), subtitle: String::new(),
             description: String::new(), versions: Vec::new(), page_scene_id: None,
-            mc_version: String::new(), engine: default_project_engine(), loader: default_project_loader(), loader_version: String::new(), banner_path: String::new(), logo_path: String::new(),
+            mc_version: String::new(), engine: default_project_engine(), loader: default_project_loader(), loader_version: String::new(), modrinth_mods: Vec::new(), banner_path: String::new(), logo_path: String::new(),
             icon_path: String::new(), visible_sections: BTreeMap::new(), notes: String::new(), community_url: String::new(),
             installable: true, posts: Vec::new(), calendar: Vec::new() }
     }
