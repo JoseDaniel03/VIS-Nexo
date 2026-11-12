@@ -945,6 +945,7 @@ function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const 
  return `<article class="instance-card">${bulkInstanceMode&&!isGuest()?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" data-source="${attr(i.source_owner||'')}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · ${i.share_game_data!==false?'mundos y servidores compartidos':'datos separados por cuenta'}</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
  <div class="mc-instance-actions">${isGuest()||i.source_owner?'':`<button class="outline-btn" data-action="manage-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('settings',16)} Mods y archivos</button>
  <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?'Reparar':'Instalar'}</button>`}
+ ${!isGuest()?`<button class="outline-btn" data-action="instance-data-tools" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}">${I('database',16)} Datos</button>`:''}
  <button class="icon-btn" data-action="open-instance-folder" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir carpeta de juego de esta instancia" aria-label="Abrir carpeta de ${attr(i.name)}">${I('folder',17)}</button>
  <button class="icon-btn" data-action="open-instance-resource-folder" data-kind="resourcepacks" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir resourcepacks de esta instancia" aria-label="Abrir resourcepacks de ${attr(i.name)}">${I('image',17)}</button>
  <button class="primary-btn" data-action="launch-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" ${!i.installed||!allow||minecraftBusy?'disabled':''}>${I('play',17)} Jugar</button>
@@ -1299,7 +1300,117 @@ async function projectInstallAndPlay(){
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste de RAM es exclusivo de tu perfil VIS. Los mundos y servidores siguen la política compartida de esta instancia.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
 function confirmDialog(){return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="alertdialog" aria-modal="true"><header class="modal-head"><h2>Confirmar eliminación</h2><button class="icon-btn" data-action="close-modal">${I('x',18)}</button></header><div class="modal-body"><p>¿Querés quitar <strong>${esc(dialog.label)}</strong> de VIS Nexo? Por defecto <b>se conservan todos los mundos y archivos del disco</b>.</p>
  ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los archivos del disco</b><small>Irreversible. Disponible solo para instalaciones administradas por VIS en Instancias/&lt;nombre&gt;. Cerrá el juego antes.</small></span><input type="checkbox" id="delete-instance-files"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
-function dialogView(){return dialog?.type==='bulk-instance-delete'?bulkInstanceDeleteDialog():dialog?.type==='edit-profile'?editProfileDialog():dialog?.type==='vis-skin'?visSkinDialog():dialog?.type==='project'?projectWizard():dialog?.type==='quick-post'?quickPublishDialog():dialog?.type==='crop'?cropDialog():dialog?.type==='avatar'?avatarDialog():dialog?.type==='instance'?instanceDialog():dialog?.type==='project-install'?projectInstallDialog():dialog?.type==='shared-ram'?sharedRamDialog():confirmDialog();}
+function instanceDataDialog(){
+ const d=dialog||{},backups=d.backups||[],health=d.health;
+ const foreign=!!d.sourceOwner;
+ const canRestore=!foreign;
+ const backupChoices=backups.map(b=>'<option value="'+attr(b.name)+'">'+
+   esc(b.name)+' · '+fmtBytes(b.bytes)+'</option>').join('');
+ const issues=(health?.issues||[]).map(it=>'<li class="vis-data-issue">'+
+   '<strong>'+esc(it.code)+'</strong> '+esc(it.detail)+'</li>').join('');
+ const merge=d.merge||null;
+ return '<div class="modal-backdrop" data-action="modal-backdrop">'+
+ '<div class="dialog modal-medium vis-data-dialog" role="dialog" aria-modal="true" aria-label="Datos de la instancia">'+
+ '<header class="modal-head"><div><span class="page-eyebrow">VIS / CENTRO DE INSTANCIAS</span>'+
+ '<h2>Datos de '+esc(d.name||'Minecraft')+'</h2>'+
+ '<small>'+(foreign?'Instancia instalada por '+esc(d.sourceOwner):'Instancia propia')+'</small></div>'+
+ '<button class="icon-btn" data-action="close-modal" aria-label="Cerrar">'+I('x',18)+'</button></header>'+
+ '<div class="modal-body vis-data-grid">'+
+ '<section><h3>'+I('database',17)+' Copias de seguridad</h3>'+
+ '<p class="muted">Resguarda mundos, servidores, packs, mods y configuraciones. No incluye tokens ni binarios del motor.</p>'+
+ '<button class="outline-btn" data-action="instance-data-backup">'+I('save',15)+' Crear copia</button>'+
+ '<p class="muted">Copias disponibles: '+backups.length+'</p>'+
+ (backups.length?
+  '<label>Elegir copia<select id="instance-data-backup-select">'+backupChoices+'</select></label>':
+  '<p class="muted">Todavía no hay copias de esta instancia.</p>')+
+ (canRestore&&backups.length?
+   '<label class="toggle-line"><span><b>Reemplazar archivos existentes</b><small>Los originales reemplazados quedan guardados para recuperación.</small></span>'+
+   '<input type="checkbox" id="instance-data-replace"/></label>'+
+   '<label>Escribí RESTAURAR<input id="instance-data-restore-word" type="text" autocomplete="off" placeholder="RESTAURAR"/></label>'+
+   '<button class="outline-btn" data-action="instance-data-restore">'+I('refresh',15)+' Restaurar copia</button>':
+   foreign?'<p class="muted">La restauración de esta instancia corresponde a su propietario.</p>':'')+
+ '</section>'+
+ '<section><h3>'+I('shield',17)+' Diagnóstico</h3>'+
+ (health?'<p>Mundos detectados: <strong>'+Number(health.worlds||0)+'</strong> · Mundos válidos: <strong>'+Number(health.valid_worlds||0)+'</strong></p>'+
+ '<p>Servidores guardados: '+(health.servers_file?'Sí':'Sin lista')+
+ ' · Resource packs: '+Number(health.resource_packs||0)+'</p>'+
+ '<p class="muted">Problemas corregibles: '+Number(health.repairable||0)+'</p>'+
+ (issues?'<ul class="vis-data-issues">'+issues+'</ul>':'<p class="muted">No se detectaron problemas de estructura.</p>'):
+ '<p class="muted">Sin analizar.</p>')+
+ '<div class="vis-data-actions"><button class="outline-btn" data-action="instance-data-audit">'+I('search',15)+' Volver a analizar</button>'+
+ (canRestore?'<button class="outline-btn" data-action="instance-data-repair">'+I('check',15)+' Crear carpetas faltantes</button>':'')+
+ '</div></section>'+
+ (foreign?'<section><h3>'+I('users',17)+' Servidores de perfiles anteriores</h3>'+
+ '<p class="muted">Fusiona las entradas de servidores.dat por dirección sin sobrescribir tus servidores existentes.</p>'+
+ '<button class="outline-btn" data-action="instance-data-servers-preview">'+I('search',15)+' Buscar servidores anteriores</button>'+
+ (merge?'<p>Servidores actuales: '+merge.current+' · Antiguos: '+merge.legacy+
+ ' · Nuevos: <b>'+merge.additions+'</b> · Duplicados: '+merge.duplicates+'</p>'+
+ (merge.additions?'<button class="outline-btn" data-action="instance-data-servers-merge">'+I('check',15)+' Incorporar '+merge.additions+' servidores</button>':''):'')+
+ '</section>':'')+'</div>'+
+ '<footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cerrar</button></footer>'+
+ '</div></div>';
+}
+async function openInstanceData(projectId,name,sourceOwner){
+ if(!native||isGuest())return message('Iniciá sesión VIS para administrar datos de instancias.',true);
+ const generation=accountGeneration;
+ await onceOperation('instance-data-open:'+JSON.stringify([projectId,name,sourceOwner]),async()=>{
+  try{
+    const params={projectId,name,sourceOwner:sourceOwner||null};
+    const [backups,health]=await Promise.all([
+       command('instance_backups',params),command('inspect_instance_data',params)
+    ]);
+    if(generation!==accountGeneration)return;
+    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,merge:null};
+    render();
+  }catch(error){if(generation===accountGeneration)message('No se pudieron consultar los datos: '+String(error),true);}
+ });
+}
+async function runInstanceDataAction(kind){
+ if(dialog?.type!=='instance-data')return;
+ const d=dialog,generation=accountGeneration;
+ const params={projectId:d.projectId,name:d.name,sourceOwner:d.sourceOwner||null};
+ return onceOperation('instance-data-'+kind+':'+JSON.stringify(params),async()=>{
+ try{
+   if(kind==='backup'){
+     const info=await command('backup_instance_data',params);
+     message('Copia guardada: '+info.name+' ('+fmtBytes(info.bytes)+')');
+   }else if(kind==='restore'){
+     const backupName=document.querySelector('#instance-data-backup-select')?.value||'';
+     const confirmation=document.querySelector('#instance-data-restore-word')?.value||'';
+     const replace=document.querySelector('#instance-data-replace')?.checked===true;
+     if(confirmation!=='RESTAURAR')return message('Escribí exactamente RESTAURAR para continuar.',true);
+     if(replace&&!window.confirm('Se reemplazarán archivos existentes. VIS conservará una copia de los originales. ¿Continuar?'))return;
+     const result=await command('restore_instance_data',{...params,backupName,replace,confirmation});
+     message('Restaurados: '+result.restored+' · Conservados: '+result.preserved+
+       (result.safety_copy?' · Resguardo: '+result.safety_copy:''));
+   }else if(kind==='repair'){
+     if(!window.confirm('Se crearán solamente carpetas faltantes. No se borrarán archivos. ¿Continuar?'))return;
+     d.health=await command('repair_instance_data',params);
+     message('Carpetas faltantes reparadas. No se modificaron mundos.');
+   }else if(kind==='audit'){
+     d.health=await command('inspect_instance_data',params);
+   }else if(kind==='servers-preview'){
+     d.merge=await command('merge_shared_servers',{projectId:d.projectId,name:d.name,
+       sourceOwner:d.sourceOwner,apply:false});
+   }else if(kind==='servers-merge'){
+     if(!d.merge?.additions)return;
+     if(!window.confirm('Incorporar '+d.merge.additions+' servidores y conservar una copia del servers.dat original?'))return;
+     const result=await command('merge_shared_servers',{projectId:d.projectId,name:d.name,
+       sourceOwner:d.sourceOwner,apply:true});
+     message('Servidores incorporados: '+result.additions+
+       (result.backup?' · Original preservado':''));
+     d.merge=result;
+   }
+   if(generation!==accountGeneration||dialog!==d)return;
+   if(['backup','restore'].includes(kind)){
+      [d.backups,d.health]=await Promise.all([
+       command('instance_backups',params),command('inspect_instance_data',params)]);
+   }
+   if(generation===accountGeneration&&dialog===d)render();
+ }catch(error){if(generation===accountGeneration)message('Operación interrumpida: '+String(error),true);}
+ });
+}
+function dialogView(){return dialog?.type==='instance-data'?instanceDataDialog():dialog?.type==='bulk-instance-delete'?bulkInstanceDeleteDialog():dialog?.type==='edit-profile'?editProfileDialog():dialog?.type==='vis-skin'?visSkinDialog():dialog?.type==='project'?projectWizard():dialog?.type==='quick-post'?quickPublishDialog():dialog?.type==='crop'?cropDialog():dialog?.type==='avatar'?avatarDialog():dialog?.type==='instance'?instanceDialog():dialog?.type==='project-install'?projectInstallDialog():dialog?.type==='shared-ram'?sharedRamDialog():confirmDialog();}
 function viewSnapshot(){
  return {
    screen:db.user?`${libraryMode}:${page}:${page==='project'?selectedId:''}`:'auth',authMode,
@@ -1922,6 +2033,15 @@ root.addEventListener('click',async event=>{
    if(input)input.value=selected.build_dir;
    message(`Versión ${selected.tag} seleccionada. Guardá la instancia para fijarla y ejecutá el diagnóstico.`);
  }
+ else if(act==='instance-data-tools'){
+   await openInstanceData(projectId,id,button.dataset.source||'');
+ }
+ else if(act==='instance-data-backup')await runInstanceDataAction('backup');
+ else if(act==='instance-data-restore')await runInstanceDataAction('restore');
+ else if(act==='instance-data-audit')await runInstanceDataAction('audit');
+ else if(act==='instance-data-repair')await runInstanceDataAction('repair');
+ else if(act==='instance-data-servers-preview')await runInstanceDataAction('servers-preview');
+ else if(act==='instance-data-servers-merge')await runInstanceDataAction('servers-merge');
  else if(act==='open-instance-folder'||act==='open-instance-resource-folder'){
    if(!native)return message('Esta acción requiere VIS Nexo instalado.',true);
    const kind=act==='open-instance-folder'?'game':button.dataset.kind||'resourcepacks';
