@@ -170,7 +170,7 @@ fn marker(dir:&Path)->PathBuf{dir.join(".vis").join("horizon.json")}
 /// The Horizon game must not depend on an existing .minecraft elsewhere.
 /// Cheap structural validation is performed on every "installed" check; the
 /// checksummed Minecraft downloader handles full repair on demand.
-fn private_mojang_ready(dir:&Path,ins:&Instance)->bool{
+pub(crate) fn private_mojang_ready(dir:&Path,ins:&Instance)->bool{
     let base=dir.join(".vis/minecraft-base");
     let runtime=base.join(".vis/runtime");
     let mc=Path::new(&ins.horizon_minecraft_dir);
