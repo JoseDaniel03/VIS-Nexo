@@ -257,13 +257,25 @@ pub(crate) async fn microsoft_poll(
 /// local JSON file that horizon.rs sends to the game via stdin. Never persist
 /// this file or expose the access token to JavaScript, console or game args.
 pub(crate) fn temporary_horizon_session(
-    dir:&std::path::Path,identity:&MinecraftIdentity
+    private_root:&std::path::Path,identity:&MinecraftIdentity
 )->Result<std::path::PathBuf,String>{
     use std::fs::{self,OpenOptions};
     use std::io::Write;
-    crate::instance_guard::private_paths(dir,&[".vis/tmp"])?;
-    let tmp=dir.join(".vis/tmp");
+    // Never put an access token into the user-selected Minecraft directory.
+    // Games may be on NTFS/FAT/external storage where chmod 0600 is impossible
+    // or permissions are shared across OS users. Native app data is separate.
+    crate::instance_guard::private_paths(private_root,&["private-ms-sessions"])?;
+    let tmp=private_root.join("private-ms-sessions");
     fs::create_dir_all(&tmp).map_err(|e|e.to_string())?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tmp,fs::Permissions::from_mode(0o700))
+            .map_err(|_|"El almacenamiento local de credenciales no admite permisos privados (0700)".to_string())?;
+        let mode=fs::metadata(&tmp).map_err(|e|e.to_string())?.permissions().mode();
+        if mode&0o077!=0 {
+            return Err("Guardá los datos privados de VIS en un disco Linux con permisos POSIX; las sesiones Microsoft nunca se escriben en NTFS".into());
+        }
+    }
     use rand_core::{OsRng,RngCore};
     let mut nonce=[0u8;16];
     OsRng.fill_bytes(&mut nonce);
@@ -276,13 +288,21 @@ pub(crate) fn temporary_horizon_session(
       opts.mode(0o600);
     }
     let mut file=opts.open(&path).map_err(|e|e.to_string())?;
+    #[cfg(unix)]{
+        use std::os::unix::fs::PermissionsExt;
+        let mode=file.metadata().map_err(|e|e.to_string())?.permissions().mode();
+        if mode&0o077!=0 {
+            drop(file);let _=fs::remove_file(&path);
+            return Err("No se pudieron proteger los permisos de la sesión Microsoft".into());
+        }
+    }
     let json=serde_json::to_vec(&json!({
       "name":identity.name,
       "uuid":identity.uuid,
       "access_token":identity.access_token,
       "user_type":"msa"
     })).map_err(|_|"No se pudo crear el ticket Horizon")?;
-    if let Err(err)=file.write_all(&json){
+    if let Err(err)=file.write_all(&json).and_then(|_|file.sync_all()){
        drop(file);let _=fs::remove_file(&path);
        return Err(format!("No se pudo preparar la sesión Horizon: {err}"))
     }
