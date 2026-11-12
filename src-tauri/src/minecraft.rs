@@ -253,6 +253,24 @@ pub fn offline_player_name(account:&str,configured:&str)->Result<String,String>{
  Ok(name.to_owned())
 }
 pub fn instance_dir(data_root:&Path,username:&str,ins:&Instance)->Result<PathBuf,String>{java_home_instance(data_root,username,ins)}
+/// Create Minecraft's complete writable layout before the first world or
+/// resource-pack action. Runtime binaries can be shared, but all of these
+/// folders belong to the selected VIS player, not to the installer owner.
+pub fn prepare_player_directory(game_dir:&Path)->Result<(),String>{
+ let dir=crate::instance_guard::destination(game_dir)?;
+ const FOLDERS:&[&str]=&[
+     "saves","resourcepacks","shaderpacks","screenshots","logs","config","mods",
+     ".vis/cache",".vis/config",".vis/data",".vis/tmp",".vis/cache/mesa"
+ ];
+ crate::instance_guard::private_paths(&dir,FOLDERS)?;
+ fs::create_dir_all(&dir).map_err(|e|format!("No se pudo crear la carpeta de juego: {e}"))?;
+ for item in FOLDERS {
+     fs::create_dir_all(dir.join(item))
+         .map_err(|e|format!("No se pudo crear la carpeta {item}: {e}"))?;
+ }
+ Ok(())
+}
+
 fn installation_path(dir:&Path)->PathBuf{dir.join(".vslauncher").join("install.json")}
 // All new and repaired instances resolve binaries inside the game folder.
 // Legacy shared-runtime installations are marked for non-destructive repair.
@@ -703,7 +721,7 @@ pub fn install(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,known_
      ".vis/runtime/assets/indexes",".vis/runtime/assets/objects",
      ".vis/java-runtimes",".vslauncher/natives","mods"
  ])?;
- fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+ prepare_player_directory(&dir)?;
  let runtime=new_runtime(&dir);let lib_root=runtime.join("libraries");
  let source_roots=candidate_roots(data_root,known_instances,&runtime);
  let library_sources=sources_for_category(&source_roots,"libraries");
@@ -817,9 +835,25 @@ pub fn launch_shared_premium(app:&AppHandle,data_root:&Path,owner:&str,
     launch_with_game_directory(app,data_root,owner,ins,Some(&folder),Some(auth))
 }
 pub fn shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<PathBuf,String>{
-    let relative=PathBuf::from(visitor).join(owner).join(&ins.project_id).join(ins.name.replace(' ',"-"));
-    let target=instance_dir(data_root,owner,ins)?.join(".vis/players").join(&relative);
-    let old=data_root.join("shared-player-data").join(relative);
+    if !clean_segment(visitor)||!clean_segment(owner)||!clean_segment(&ins.project_id){
+        return Err("La identidad o proyecto de la instancia compartida es inválida".into());
+    }
+    // Historical names stay stable where safe. Hash unusual Unicode or
+    // separator-containing titles instead of allowing path traversal.
+    let human_name=ins.name.replace(' ',"-");
+    let folder_name=if clean_segment(&human_name){human_name}else{
+        let digest=Sha256::digest(ins.name.as_bytes());
+        format!("instance-{}",digest[..12].iter().map(|b|format!("{b:02x}")).collect::<String>())
+    };
+    let relative=PathBuf::from(visitor).join(owner).join(&ins.project_id).join(folder_name);
+    let root=instance_dir(data_root,owner,ins)?;
+    let target=root.join(".vis/players").join(&relative);
+    // Do not let a symlink in the owner .vis hierarchy escape the game.
+    let internal=format!(".vis/players/{}",relative.to_string_lossy().replace('\\',"/"));
+    crate::instance_guard::private_paths(&root,&[&internal])?;
+    let parent=target.parent().ok_or("Directorio compartido inválido")?;
+    fs::create_dir_all(parent).map_err(|e|format!("No se pudo preparar el espacio del otro perfil: {e}"))?;
+    let old=data_root.join("shared-player-data").join(&relative);
     if !target.exists() && old.is_dir(){
         let stage=sibling_path(&target,"migration")?;
         let result=crate::horizon::copy_preparation_sources(&old,&stage)
@@ -827,12 +861,14 @@ pub fn shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&s
         if result.is_err(){let _=fs::remove_dir_all(&stage);}
         result?;
     }
+    prepare_player_directory(&target)?;
     Ok(target)
 }
 fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,game_override:Option<&Path>,premium:Option<&PremiumIdentity>)->Result<LaunchResult,String>{
  let dir=instance_dir(data_root,username,ins)?;
  let game_dir=game_override.unwrap_or(&dir);
  if !installed(&dir,ins){return Err("Primero instalá la instancia".into())}
+ prepare_player_directory(game_dir)?;
  let meta_dir=dir.join(".vslauncher");
  let profile:Value=serde_json::from_slice(&fs::read(meta_dir.join("version.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
  let fabric:Value=if ins.loader=="fabric"{serde_json::from_slice(&fs::read(meta_dir.join("fabric.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?}else{Value::Null};
