@@ -1317,7 +1317,7 @@ function instanceDataDialog(){
  '<button class="icon-btn" data-action="close-modal" aria-label="Cerrar">'+I('x',18)+'</button></header>'+
  '<div class="modal-body vis-data-grid">'+
  '<section><h3>'+I('database',17)+' Copias de seguridad</h3>'+
- '<p class="muted">Resguarda mundos, servidores, packs, mods y configuraciones. No incluye tokens ni binarios del motor.</p>'+
+ '<p class="muted">Resguarda mundos, servidores, packs, mods y ajustes. No guarda tokens VIS/Microsoft, pero algunos mods podrían tener credenciales en config; mantené privadas las copias.</p>'+
  '<button class="outline-btn" data-action="instance-data-backup">'+I('save',15)+' Crear copia</button>'+
  '<p class="muted">Copias disponibles: '+backups.length+'</p>'+
  (backups.length?
