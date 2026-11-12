@@ -2,6 +2,7 @@
 //! local accounts and VSUI catalogue; the web view never authorizes admin work.
 mod accounts;
 mod minecraft;
+mod project_mods;
 mod maintenance;
 mod cloud;
 mod updates;
@@ -831,16 +832,18 @@ async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,proj
 }
 #[tauri::command]
 async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Snapshot,String>{
-    let (username,instance,data_root,other_instances)={
+    let (username,instance,data_root,other_instances,curated_mods)={
         let s=locked(&state)?;
         let (u,i)=checked_instance(&s,&project_id,&name,true)?;
+        let curated_mods=s.project(&project_id).filter(|p|p.engine=="java")
+            .map(|p|p.modrinth_mods.clone());
         let other=s.storage.prefs(&u).instances.into_iter()
             .filter(|item|item.name!=i.name || item.project_id!=i.project_id)
             .filter_map(|item|minecraft::instance_dir(&s.data_root,&u,&item).ok())
             .collect::<Vec<_>>();
         let mut other=other;
         if !i.reuse_source.trim().is_empty(){other.push(PathBuf::from(&i.reuse_source));}
-        (u,i,s.data_root.clone(),other)
+        (u,i,s.data_root.clone(),other,curated_mods)
     };
     let cloned_app=app.clone();let chosen=instance.clone();let user=username.clone();
     let prepared=tauri::async_runtime::spawn_blocking(move||->Result<Instance,String>{
@@ -866,6 +869,9 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
         } else {
             chosen.java_path.clear();
             minecraft::install(&cloned_app,&data_root,&user,&chosen,&other_instances)?;
+            if let Some(mod_ids)=curated_mods.as_ref() {
+                project_mods::sync(&data_root,&user,&chosen,mod_ids)?;
+            }
         }
         Ok(chosen)
     }).await.map_err(|e|e.to_string())??;
@@ -883,6 +889,27 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
     s.storage.save_prefs(&username,&prefs)?;
     Ok(s.snapshot())
 }
+/// Apply the published project's exact Modrinth set. No custom URLs or
+/// arbitrary mod IDs are accepted from the frontend at update time.
+#[tauri::command]
+async fn sync_project_mods(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String
+) -> Result<project_mods::SyncReport,String> {
+    let (username,ins,root,mods)={
+        let s=locked(&state)?;
+        let (username,ins)=checked_instance(&s,&project_id,&name,true)?;
+        let project=s.project(&project_id).ok_or("Proyecto inexistente")?;
+        if project.engine!="java" || project.mc_version!=ins.version ||
+           project.loader!=ins.loader || project.loader_version!=ins.loader_version {
+            return Err("La versión/motor del proyecto cambió: prepará una instancia nueva sin borrar la anterior".into());
+        }
+        (username,ins,s.data_root.clone(),project.modrinth_mods.clone())
+    };
+    tauri::async_runtime::spawn_blocking(move||
+        project_mods::sync(&root,&username,&ins,&mods))
+        .await.map_err(|e|e.to_string())?
+}
+
 // Portable VIS Worlds exports contain the instance folder but no launcher
 // account database or administrator credentials. All heavy ZIP work is off the
 // UI thread, and imported names cannot replace existing instances.
@@ -1072,7 +1099,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, ensure_project_instance, configure_shared_ram, delete_instance,
+            save_project, delete_project, save_instance, ensure_project_instance, configure_shared_ram, delete_instance, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             social::social_identity_info,
