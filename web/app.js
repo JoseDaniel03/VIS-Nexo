@@ -15,6 +15,21 @@ const T = window.__TAURI__;
 const native = !!T?.core?.invoke;
 const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],catalog_source:'',hidden_shared_instances:[],mode:native?'local':'preview'});
 let db = empty();
+// Network responses and UI actions belong to the account that started them.
+let accountGeneration=0;
+const pendingOperations=new Set();
+function resetAccountView(){
+ accountGeneration++;
+ mcSelected=null;modResults=[];installedFiles=[];horizonChecks=[];
+ bulkInstanceMode=false;bulkInstanceSelection.clear();
+ cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;
+ socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;
+}
+async function onceOperation(key,operation){
+ if(pendingOperations.has(key))return false;
+ pendingOperations.add(key);
+ try{return await operation();}finally{pendingOperations.delete(key);}
+}
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
 let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
 let premiumCosmetics=null, premiumCosmeticsBusy=false;
@@ -527,14 +542,20 @@ async function connectSocial(reuseCloudSession=false) {
   catch (error) { message('VIS Social sin conexión: ' + String(error), true); }
 }
 async function apply(name,args={},success=''){
+ const generation=accountGeneration;
+ return onceOperation('mutation:'+name+':'+JSON.stringify(args),async()=>{
   try {
-    db=await command(name,args);
+    const updated=await command(name,args);
+    if(generation!==accountGeneration)return false;
+    db=updated;
     mergeSocialView();
     await refreshAssets();
+    if(generation!==accountGeneration)return false;
     render();
     if(success)message(success);
     return true;
-  } catch(e) { message(String(e),true);return false; }
+  }catch(e){if(generation===accountGeneration)message(String(e),true);return false;}
+ });
 }
 function brandLabel(){return esc(db.branding?.name||'VIS Nexo');}
 function loginView(){
@@ -1046,7 +1067,21 @@ function cloudPage(){
 function updateSection(){return `<section class="surface-card update-card"><div class="card-heading">${I('cloud',20)} VIS Nexo · Actualizaciones</div><p class="muted">${updateInfo?.configured?`Versión instalada: ${esc(updateInfo.current_version)}. ${updateInfo.available?'Nueva versión '+esc(updateInfo.version)+' disponible.':'Sin actualizaciones detectadas.'}`:'Las actualizaciones firmadas se activan al configurar el repositorio y la clave pública de firma durante la compilación.'}</p>${updateInfo?.notes?`<p class="muted">${esc(updateInfo.notes)}</p>`:''}<div class="update-actions"><button class="outline-btn" data-action="check-update" ${updateBusy?'disabled':''}>${I('cloud',16)} ${updateBusy?'Comprobando…':'Buscar actualizaciones'}</button>${updateInfo?.available?`<button class="primary-btn" data-action="install-update" ${updateBusy?'disabled':''}>${I('cloud',17)} Instalar versión ${esc(updateInfo.version)}</button>`:''}</div><small>Se conserva la carpeta de datos y el identificador de aplicación anterior para preservar proyectos, mundos y perfiles.</small></section>`;}
 async function checkAppUpdate(silent=false){if(!native)return;if(updateBusy)return;updateBusy=true;if(!silent)render();try{updateInfo=await command('check_app_update');if(updateInfo.available)message(`VIS Nexo ${updateInfo.version} disponible`);else if(!silent)message(updateInfo.configured?'Ya tenés la última versión.':'Las actualizaciones todavía no están configuradas.');}catch(e){if(!silent)message(String(e),true);}finally{updateBusy=false;if(!silent||page==='settings')render();}}
 async function installAppUpdate(){if(!native)return;if(!updateInfo?.available)return;if(!confirm('¿Instalar la actualización firmada de VIS Nexo? Antes se guardará una copia de seguridad de tus preferencias. Los mundos y las instancias se conservan.'))return;updateBusy=true;render();try{await command('install_app_update',{confirmed:true});message('Actualización instalada. Reiniciá VIS Nexo si es necesario.');}catch(e){message(String(e),true);}finally{updateBusy=false;render();}}
-async function refreshCloudCatalog(silent=false){if(!native)return;if(cloudCatalogBusy)return;cloudCatalogBusy=true;if(!silent)render();try{db=await command('sync_universe');cloudCatalog=await command('fetch_cloud_catalog');await refreshAssets();if(!silent)message(`Catálogo actualizado: ${cloudCatalog.projects?.length||0} proyectos`);}catch(e){if(!silent)message(String(e),true);}finally{cloudCatalogBusy=false;render();}}
+async function refreshCloudCatalog(silent=false){
+ if(!native||cloudCatalogBusy)return;
+ const generation=accountGeneration;
+ cloudCatalogBusy=true;if(!silent)render();
+ try{
+  const next=await command('sync_universe');
+  if(generation!==accountGeneration)return;
+  const catalog=await command('fetch_cloud_catalog');
+  if(generation!==accountGeneration)return;
+  db=next;cloudCatalog=catalog;
+  await refreshAssets();
+  if(generation===accountGeneration&&!silent)message(`Catálogo actualizado: ${catalog.projects?.length||0} proyectos`);
+ }catch(e){if(generation===accountGeneration&&!silent)message(String(e),true);}
+ finally{cloudCatalogBusy=false;if(generation===accountGeneration)render();}
+}
 async function downloadCloudBundle(id){const project=cloudCatalog?.projects?.find(p=>p.id===id);if(!project||!confirm(`¿Descargar el archivo de ${project.name}? Se guardará en VIS/descargas. El archivo no se ejecutará automáticamente.`))return;try{const path=await command('download_cloud_bundle',{projectId:id});message(`Paquete descargado: ${path}`);}catch(e){message(String(e),true);}}
 function downloadDock(){
  if(!minecraftBusy)return '';
@@ -1438,6 +1473,7 @@ root.addEventListener('submit',async event=>{
  if(!(form instanceof HTMLFormElement))return;
  event.preventDefault();const formData=new FormData(form);
  if(form.id==='auth-form'){
+  if(authBusy)return;
   const username=String(formData.get('username')||''),password=String(formData.get('password')||'');
   authBusy=true;
   try {
@@ -1451,7 +1487,7 @@ root.addEventListener('submit',async event=>{
        await command(authMode==='register'?'register':'login',
          authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
    }
-   page='home';await refreshAssets();render();message(`Sesión iniciada · ${db.user?.username}`);
+   resetAccountView();page='home';await refreshAssets();render();message(`Sesión iniciada · ${db.user?.username}`);
    if(native&&db.mode!=='offline')void connectSocial(cloud);
   }catch(e){message(String(e),true)}finally{authBusy=false;}
   return;
@@ -1677,7 +1713,7 @@ root.addEventListener('click',async event=>{
   else try{await social.acceptFriend(id);message('Solicitud aceptada');}
   catch(e){message(String(e),true);}
  }
- else if(act==='logout'){microsoftGamertag=null;premiumCosmetics=null;cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
+ else if(act==='logout'){resetAccountView();microsoftGamertag=null;premiumCosmetics=null;cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
  else if(act==='create-project'){startProject();void loadMinecraftVersions();}
  else if(act==='quick-publish'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind||'news'};render();}
  else if(act==='edit-publication'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind,index:Number(button.dataset.index)};render();}
@@ -2011,8 +2047,10 @@ async function performInstall(projectId,name){
  catch(e){message(String(e),true)}finally{minecraftBusy=false;installProgress=null;render();}
 }
 async function performLaunch(projectId,name,sourceOwner=''){
- lastMinecraftExit=null;
  if(!native)return message('Para iniciar Minecraft abrí el cliente Tauri.',true);
+ const generation=accountGeneration;
+ return onceOperation('launch:'+JSON.stringify([projectId,name,sourceOwner]),async()=>{
+ lastMinecraftExit=null;
  try{
   const instance=db.instances.find(i=>i.project_id===projectId&&i.name===name);
   let result;
@@ -2022,8 +2060,9 @@ async function performLaunch(projectId,name,sourceOwner=''){
   }else{
     result=await command('launch_minecraft',{projectId,name,sourceOwner:sourceOwner||null});
   }
-  message(`Minecraft iniciado · PID ${result.pid}. Logs en ${result.log_file}`);
- }catch(e){message(String(e),true)}
+  if(generation===accountGeneration)message(`Minecraft iniciado · PID ${result.pid}. Logs en ${result.log_file}`);
+ }catch(e){if(generation===accountGeneration)message(String(e),true)}
+ });
 }
 async function performModSearch(data){
  const i=selectedMcInstance();if(!i)return;
