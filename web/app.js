@@ -851,8 +851,8 @@ function validateStep(){
 root.addEventListener('input',event=>{
  const el=event.target;
  if(el?.id==='crop-zoom'&&cropState){cropState.zoom=Number(el.value);const output=document.querySelector('#crop-zoom-value');if(output)output.textContent=`${Math.round(cropState.zoom*100)}%`;paintCrop();return;}
- if(el?.id==='vis-project-engine'&&wizard){wizard.engine=el.value;if(el.value==='horizon'){wizard.mc_version='26.3';wizard.loader='horizon';wizard.loader_version='';}else if(wizard.loader==='horizon'){wizard.loader='vanilla';}render();return;}
- if(el?.id==='vis-project-loader'&&wizard){wizard.loader=el.value;render();if(el.value==='fabric')void loadFabricLoaders(wizard.mc_version);return;}
+ if(el?.id==='vis-project-engine'&&wizard){acceptWizardInput();wizard.engine=el.value;if(el.value==='horizon'){wizard.mc_version='26.3';wizard.loader='horizon';wizard.loader_version='';}else if(wizard.loader==='horizon'){wizard.loader='vanilla';}render();return;}
+ if(el?.id==='vis-project-loader'&&wizard){acceptWizardInput();wizard.loader=el.value;render();if(el.value==='fabric')void loadFabricLoaders(wizard.mc_version);return;}
  if(el?.dataset?.field==='mc_version'&&wizard?.loader==='fabric')void loadFabricLoaders(el.value);
  if(el?.id==='mc-instance-version'){syncVersionSuggestions();return;}
  if(el?.id==='catalog-search'){query=el.value;document.querySelectorAll('.portal-game-card').forEach(card=>{const p=db.projects.find(p=>p.id===card.dataset.id);card.hidden=!p||!`${p.title} ${p.subtitle}`.toLowerCase().includes(query.toLowerCase());});return;}
