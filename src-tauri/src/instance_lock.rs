@@ -45,6 +45,15 @@ mod platform {
     }
 }
 pub struct InstanceLock{_file:File}
+// On Unix, Java/Horizon inherit this open file description when spawned.
+ // The kernel then keeps flock held even if VIS Nexo exits unexpectedly.
+#[cfg(unix)]
+impl InstanceLock {
+    pub(crate) fn os_fd(&self)->std::os::fd::RawFd {
+        use std::os::fd::AsRawFd;
+        self._file.as_raw_fd()
+    }
+}
 pub fn try_lock(dir:&Path)->Result<InstanceLock,String>{
     if !dir.is_dir(){return Err("La carpeta de juego todavía no existe".into());}
     crate::instance_guard::private_paths(dir,&[".vis",".vis/instance-running.lock"])?;
