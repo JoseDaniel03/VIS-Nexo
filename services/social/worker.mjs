@@ -98,7 +98,7 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.public_id,u.avatar_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
+    "SELECT u.id,u.username,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
     "CASE WHEN u.password_hash!=\'\' THEN 1 ELSE 0 END AS cloud_login_enabled " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
@@ -281,13 +281,13 @@ async function setKey(request, db, user) {
 }
 async function currentState(db, user) {
   const friends = await db.prepare(
-    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.last_seen_at," +
+    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.skin_version,u.last_seen_at," +
     "a.alias FROM social_users u LEFT JOIN friend_aliases a ON a.owner_id=? AND a.friend_id=u.id " +
     "WHERE u.id IN (SELECT user_b FROM friendships WHERE user_a=? UNION " +
     "SELECT user_a FROM friendships WHERE user_b=?) ORDER BY u.username LIMIT 500"
   ).bind(user.id, user.id, user.id).all();
   const visible = (friends.results || []).map(f => ({
-    username: f.username, alias: f.alias || "", avatar_version:f.avatar_version,
+    username: f.username, alias: f.alias || "", avatar_version:f.avatar_version, skin_version:f.skin_version,
     presence: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.presence : "offline",
     custom_status: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.custom_status : "",
     current_game: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.current_game : "",
@@ -321,7 +321,7 @@ async function currentState(db, user) {
   for (const friend of visible) friend.shared_projects=idsByFriend.get(friend.username)||[];
   return reply({
     projects,
-    username: user.username, public_id: user.public_id, avatar_version:user.avatar_version,
+    username: user.username, public_id: user.public_id, avatar_version:user.avatar_version, skin_version:user.skin_version,
     cloud_login_enabled: !!user.cloud_login_enabled,
     developer: await canDevelop(db,user), presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
@@ -663,6 +663,60 @@ async function getAvatar(request, db, user) {
     avatar:"data:image/webp;base64,"+data.data_base64});
 }
 
+
+// Public VIS skin sheets, never a Minecraft Services entitlement or cape.
+// Available only to authenticated launcher accounts; keep per-account storage
+// bounded, reject oversized payloads, and verify the PNG dimensions server-side.
+async function uploadSkin(request,db,user){
+  await rateLimit(db,request,"skin-upload:"+user.id,8);
+  const body=await parseBody(request,90000);
+  if(body.mime!=="image/png"||typeof body.data!=="string"
+    ||body.data.length<32||body.data.length>87384
+    ||!/^[A-Za-z0-9+/]*={0,2}$/.test(body.data)){
+    bad(400,"Only bounded 64x64 or 64x32 PNG skins are accepted");
+  }
+  const bytes=unbase64(body.data,undefined,87384);
+  const sig=[137,80,78,71,13,10,26,10];
+  if(bytes.length<33||bytes.length>65536||!sig.every((v,i)=>bytes[i]===v)
+    ||bytes[12]!==73||bytes[13]!==72||bytes[14]!==68||bytes[15]!==82){
+    bad(400,"Invalid Minecraft PNG");
+  }
+  const u32=index=>((bytes[index]*0x1000000)+(bytes[index+1]<<16)+(bytes[index+2]<<8)+bytes[index+3])>>>0;
+  if(u32(8)!==13||u32(16)!==64||![32,64].includes(u32(20))
+    ||bytes[24]!==8||![2,6].includes(bytes[25])
+    ||bytes[26]!==0||bytes[27]!==0||bytes[28]!==0){
+    bad(400,"Minecraft skin must be 64x64 or 64x32 RGB/RGBA PNG");
+  }
+  await db.batch([
+    db.prepare("INSERT INTO social_skins(user_id,mime,data_base64,byte_size) "+
+      "VALUES (?,'image/png',?,?) ON CONFLICT(user_id) DO UPDATE SET "+
+      "data_base64=excluded.data_base64,byte_size=excluded.byte_size,updated_at=unixepoch()")
+      .bind(user.id,body.data,bytes.length),
+    db.prepare("UPDATE social_users SET skin_version=skin_version+1,updated_at=unixepoch() WHERE id=?").bind(user.id)
+  ]);
+  return reply({ok:true,byte_size:bytes.length});
+}
+async function getSkin(request,db,user){
+  await rateLimit(db,request,"skin-get:"+user.id,120);
+  const body=await parseBody(request);
+  const username=normalName(body.username);
+  const owner=await db.prepare("SELECT id,skin_version FROM social_users WHERE username=? AND disabled_at IS NULL")
+    .bind(username).first();
+  if(!owner)bad(404,"VIS user not found");
+  const skin=await db.prepare("SELECT data_base64 FROM social_skins WHERE user_id=?")
+    .bind(owner.id).first();
+  return reply({username,skin_version:owner.skin_version,
+    skin:skin?"data:image/png;base64,"+skin.data_base64:null});
+}
+async function deleteSkin(request,db,user){
+  await rateLimit(db,request,"skin-delete:"+user.id,12);
+  await db.batch([
+    db.prepare("DELETE FROM social_skins WHERE user_id=?").bind(user.id),
+    db.prepare("UPDATE social_users SET skin_version=skin_version+1,updated_at=unixepoch() WHERE id=?").bind(user.id)
+  ]);
+  return reply({ok:true});
+}
+
 async function cleanup(db) {
   const t = now();
   await db.batch([
@@ -687,15 +741,15 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','developer_grants')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
-          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version')"
+          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 12 &&
-          new Set((columns.results || []).map(x=>x.name)).size === 5;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 6 : 0 },
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 13 &&
+          new Set((columns.results || []).map(x=>x.name)).size === 6;
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 7 : 0 },
           ready ? 200 : 503);
       }
       if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
@@ -718,6 +772,9 @@ export default {
       if (method === "POST" && path === "/v1/admin/accounts/disable") return await adminAccountDisable(request,db,user);
       if (method === "POST" && path === "/v1/avatar/upload") return await uploadAvatar(request,db,user);
       if (method === "POST" && path === "/v1/avatar/get") return await getAvatar(request,db,user);
+      if (method === "POST" && path === "/v1/skins/upload") return await uploadSkin(request,db,user);
+      if (method === "POST" && path === "/v1/skins/get") return await getSkin(request,db,user);
+      if (method === "POST" && path === "/v1/skins/delete") return await deleteSkin(request,db,user);
       if (method === "POST" && path === "/v1/keys") return await setKey(request, db, user);
       if (method === "POST" && path === "/v1/friends/request") return await friendRequest(request, db, user);
       if (method === "POST" && path === "/v1/friends/accept") return await friendAccept(request, db, user);
