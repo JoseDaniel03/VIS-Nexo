@@ -361,5 +361,5 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
-    setAccountRole, setAccountDisabled, accountInfo, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
+    setAccountRole, setAccountDisabled, accountInfo, setDisplayName, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
 }
