@@ -12,7 +12,8 @@ class D1Database {
       '../services/social/migrations/0002_device_auth.sql',
       '../services/social/migrations/0003_roles_projects.sql',
       '../services/social/migrations/0004_cloud_credentials.sql',
-      '../services/social/migrations/0005_avatars.sql'
+      '../services/social/migrations/0005_avatars.sql',
+      '../services/social/migrations/0006_super_developer.sql'
     ]) this.sqlite.exec(readFileSync(new URL(path, import.meta.url), 'utf8'));
   }
   prepare(sql) {
@@ -85,7 +86,7 @@ async function account(username) {
 }
 let response = await call('/health');
 assert.equal(response.status, 200, JSON.stringify(response));
-assert.equal(response.data.schema, 5);
+assert.equal(response.data.schema, 6);
 assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
@@ -272,6 +273,30 @@ assert.equal((await call('/v1/avatar/get',{username:'alice'},cloudLogin.data.tok
 const stored=DB.sqlite.prepare("SELECT password_hash,password_salt FROM social_users WHERE username='clouduser'").get();
 assert.equal(stored.password_hash,'ed25519:'+cloudPub);
 assert.equal(stored.password_salt,cloudSalt);
+assert.equal(cloudAccount.developer,false);
+assert.equal((await call('/v1/admin/accounts/disable',{
+  username:'alice',disabled:true
+},cloudLogin.data.token)).status,403);
+const newDev=DB.sqlite.prepare("SELECT id FROM social_users WHERE username='clouduser'").get();
+DB.sqlite.prepare("INSERT INTO developer_grants(user_id) VALUES (?)").run(newDev.id);
+assert.equal((await call('/v1/account',undefined,cloudLogin.data.token)).data.account.developer,true);
+assert.equal((await call('/v1/state',undefined,cloudLogin.data.token)).data.developer,true);
+assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'dev-test-project',title:'Developer testing',visibility:'draft'
+},cloudLogin.data.token)).status,200);
+assert.equal((await call('/v1/admin/projects/staff',{
+  project_id:'dev-test-project',username:'clouduser',staff_role:'manager'
+},cloudLogin.data.token)).status,200);
+assert.equal((await call('/v1/admin/accounts/role',{
+  username:'clouduser',role:'moderator'
+},cloudLogin.data.token)).status,403,'developer must not administer users');
+assert.equal((await call('/v1/admin/accounts/disable',{
+  username:'alice',disabled:true
+},cloudLogin.data.token)).status,403,'developer must not suspend accounts');
+DB.sqlite.prepare("DELETE FROM developer_grants WHERE user_id=?").run(newDev.id);
+assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'dev-test-project',title:'Revoked',visibility:'published'
+},cloudLogin.data.token)).status,403,'grant revocation must be immediately enforced');
 
 DB.sqlite.exec("UPDATE auth_sessions SET expires_at=1");
 DB.sqlite.exec("UPDATE auth_challenges SET expires_at=1");
