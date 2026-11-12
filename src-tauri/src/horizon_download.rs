@@ -448,12 +448,51 @@ fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
     }
     for (name,digest) in hashes{
         let rel=safe_rel(Path::new(name))?;
+        // Releases contain only the compiled game, licences, and the open
+        // Java source exporters. Never accept arbitrary DLLs or game assets.
+        let client=if cfg!(target_os="windows"){"horizon-client.exe"}else{"horizon-client"};
+        let preparer=if cfg!(target_os="windows"){"horizon-prepare.exe"}else{"horizon-prepare"};
+        let base=matches!(name.as_str(),"LICENSE"|"THIRD_PARTY_NOTICES.md"|"research-lock.json")
+            || name==client || name==preparer;
+        let dxc=cfg!(target_os="windows") && matches!(name.as_str(),
+            "dxcompiler.dll"|"DXC-LICENSE-MS.txt"|"DXC-LICENSE-LLVM.txt"|"DXC-NOTICE.txt");
+        let exporter=name.starts_with("mods/horizon/src/test/java/dev/horizonlab/parity/")
+            && name.ends_with(".java");
+        if !base && !dxc && !exporter{
+            return Err(format!("Archivo inesperado en el paquete Horizon: {name}"));
+        }
         let expected=digest.as_str().ok_or("Huella inválida de archivo Horizon")?;
         if expected.len()!=64 || !expected.bytes().all(|b|b.is_ascii_hexdigit()) ||
            sha256_file(&build.join(rel))?!=expected.to_ascii_lowercase(){
             return Err(format!("Archivo del motor Horizon no coincide: {name}"));
         }
     }
+    // Also reject extra files omitted from the manifest. The only permitted
+    // addition after installation is VIS's own integrity stamp.
+    let mut found=std::collections::BTreeSet::new();
+    let mut pending=vec![build.to_path_buf()];
+    let mut count=0usize;
+    while let Some(folder)=pending.pop(){
+        for item in fs::read_dir(&folder).map_err(|e|e.to_string())?{
+            let item=item.map_err(|e|e.to_string())?;
+            count+=1;
+            if count>MAX_ITEMS{return Err("Paquete Horizon tiene demasiados archivos".into());}
+            let path=item.path();
+            let typ=fs::symlink_metadata(&path).map_err(|e|e.to_string())?.file_type();
+            if typ.is_symlink(){return Err("El juego Horizon contiene un enlace simbólico".into());}
+            if typ.is_dir(){pending.push(path);continue;}
+            if !typ.is_file(){return Err("El juego Horizon contiene un objeto no permitido".into());}
+            let relative=path.strip_prefix(build).map_err(|e|e.to_string())?
+                .to_str().ok_or("Ruta no UTF-8 en Horizon")?
+                .replace(std::path::MAIN_SEPARATOR,"/");
+            if relative=="vis-horizon-source.json" || relative==GAME_FILES_STAMP{continue;}
+            if !hashes.contains_key(&relative){
+                return Err(format!("Archivo Horizon sin huella declarada: {relative}"));
+            }
+            found.insert(relative);
+        }
+    }
+    if found.len()!=hashes.len(){return Err("Manifiesto Horizon incompleto".into());}
     Ok(())
 }
 /// Download Horizon only after the user selects an instance. All binaries live
@@ -579,6 +618,11 @@ mod tests{
             "minecraft_assets_included":false,"game_binary":"horizon-official","sha256":hashes
         });
         fs::write(dir.join("vis-horizon-source.json"),serde_json::to_vec(&data).unwrap()).unwrap();
+        assert!(fork_metadata(&dir,tag).is_ok());
+        // Extra files must be rejected even when declared checksums match.
+        fs::write(dir.join("unexpected.dll"),b"not in manifest").unwrap();
+        assert!(fork_metadata(&dir,tag).is_err());
+        fs::remove_file(dir.join("unexpected.dll")).unwrap();
         assert!(fork_metadata(&dir,tag).is_ok());
         fs::write(binary(&dir,"horizon-client"),b"tampered").unwrap();
         assert!(fork_metadata(&dir,tag).is_err());
