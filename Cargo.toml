@@ -9,3 +9,14 @@ edition = "2021"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Prefer a small standalone AppImage/NSIS executable over maximum benchmark
+# throughput. Horizon binaries are compiled from their own source workspace.
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+debug = 0
+incremental = false
