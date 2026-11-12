@@ -281,13 +281,13 @@ async function setKey(request, db, user) {
 }
 async function currentState(db, user) {
   const friends = await db.prepare(
-    "SELECT u.id,u.username,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.skin_version,u.last_seen_at," +
+    "SELECT u.id,u.username,u.display_name,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.skin_version,u.last_seen_at," +
     "a.alias FROM social_users u LEFT JOIN friend_aliases a ON a.owner_id=? AND a.friend_id=u.id " +
     "WHERE u.id IN (SELECT user_b FROM friendships WHERE user_a=? UNION " +
     "SELECT user_a FROM friendships WHERE user_b=?) ORDER BY u.username LIMIT 500"
   ).bind(user.id, user.id, user.id).all();
   const visible = (friends.results || []).map(f => ({
-    username: f.username, alias: f.alias || "", avatar_version:f.avatar_version, skin_version:f.skin_version,
+    username: f.username, display_name: f.display_name || f.username, alias: f.alias || "", avatar_version:f.avatar_version, skin_version:f.skin_version,
     presence: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.presence : "offline",
     custom_status: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.custom_status : "",
     current_game: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.current_game : "",
@@ -321,7 +321,8 @@ async function currentState(db, user) {
   for (const friend of visible) friend.shared_projects=idsByFriend.get(friend.username)||[];
   return reply({
     projects,
-    username: user.username, public_id: user.public_id, avatar_version:user.avatar_version, skin_version:user.skin_version,
+    username: user.username, display_name: user.display_name || user.username,
+    public_id: user.public_id, avatar_version:user.avatar_version, skin_version:user.skin_version,
     cloud_login_enabled: !!user.cloud_login_enabled,
     developer: await canDevelop(db,user), presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
@@ -468,17 +469,31 @@ function auditStatement(db, actorId, operation, target) {
 }
 async function accountInfo(db, user) {
   const row = await db.prepare(
-    "SELECT id,username,public_id,avatar_version,role,signing_public_key,disabled_at,created_at,password_hash FROM social_users WHERE id=?"
+    "SELECT id,username,display_name,public_id,avatar_version,role,signing_public_key,disabled_at,created_at,password_hash FROM social_users WHERE id=?"
   ).bind(user.id).first();
   if (!row || row.disabled_at !== null) bad(403, "Account disabled");
   return reply({ account: {
-    username: row.username, public_id: row.public_id, avatar_version:row.avatar_version, role: row.role,
+    username: row.username, display_name: row.display_name || row.username,
+    public_id: row.public_id, avatar_version:row.avatar_version, role: row.role,
     cloud_login_enabled: !!row.password_hash,
     cloud_credential_public_key: row.password_hash?.startsWith("ed25519:")
       ? row.password_hash.slice(8) : null,
     developer: await canDevelop(db,user),
     signing_public_key: row.signing_public_key, created_at: row.created_at
   } });
+}
+// Display names are cosmetic only; usernames, public IDs, signing keys and
+// friend relationships are immutable and cannot be impersonated by renaming.
+async function updateDisplayName(request,db,user){
+  await rateLimit(db,request,"display-name:"+user.id,20);
+  const payload=await parseBody(request,1024);
+  const name=typeof payload.display_name==="string"?payload.display_name.trim():"";
+  if(name.length<2||name.length>32||!/^[\p{L}\p{N} ._-]+$/u.test(name)){
+    bad(400,"Display name must have 2-32 readable characters");
+  }
+  await db.prepare("UPDATE social_users SET display_name=?,updated_at=unixepoch() WHERE id=?")
+    .bind(name,user.id).run();
+  return reply({ok:true,display_name:name});
 }
 async function getProjects(db, user) {
   const projects = await db.prepare(
@@ -763,6 +778,7 @@ export default {
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
       if (method === "GET" && path === "/v1/account") return await accountInfo(db,user);
+      if (method === "POST" && path === "/v1/account/display") return await updateDisplayName(request,db,user);
       if (method === "GET" && path === "/v1/projects") return reply({projects:await getProjects(db,user)});
       if (method === "POST" && path === "/v1/projects/subscribe") return await projectSubscription(request,db,user,"subscribe");
       if (method === "POST" && path === "/v1/projects/unsubscribe") return await projectSubscription(request,db,user,"unsubscribe");
