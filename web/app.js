@@ -107,7 +107,7 @@ function syncVersionSuggestions(){
  if(list)list.innerHTML=versionSuggestions(document.getElementById('mc-instance-version')?.value||'')
   .map(v=>`<option value="${attr(v.id)}">${esc(v.kind)}</option>`).join('');
 }
-let maintenanceReport = null, maintenanceLoading = false;
+let maintenanceReport = null, maintenanceLoading = false, legacyReport = null, legacyLoading = false;
 let updateInfo = null, updateBusy = false, cloudCatalog = null, cloudCatalogBusy = false;
 let lastMinecraftExit = null;
 let horizonChecks = [];
@@ -980,7 +980,30 @@ function maintenancePage(){
  return `<div class="content-inner vis-maintenance"><div class="page-heading"><div><span class="page-eyebrow">VIS / MANTENIMIENTO</span><h1>VIS Maintenance</h1><p>Control de temporales, diagnósticos y logs de esta computadora. No modifica datos en la nube.</p></div><button class="outline-btn" data-action="go-settings">${I('chevron',16)} Volver a ajustes</button></div>
  <section class="surface-card maintenance-intro"><div class="maintenance-total"><span class="page-eyebrow">ESPACIO RECUPERABLE</span><strong>${report?fmtBytes(report.total_bytes):'—'}</strong><small>${report?`${report.total_files} archivos candidatos`:'Ejecutá el análisis para conocer los archivos vencidos'}</small></div><div class="maintenance-controls"><button class="outline-btn" data-action="maintenance-preview" ${maintenanceLoading||!native?'disabled':''}>${I('search',17)} ${maintenanceLoading?'Analizando...':'Analizar archivos'}</button><button class="danger-btn" data-action="maintenance-clean" ${maintenanceLoading||!native||!report?.total_files?'disabled':''}>${I('trash',17)} Limpiar vencidos</button></div></section>
  <div class="maintenance-grid">${(report?.areas||[{label:'Temporales VIS',retained_days:3},{label:'Descargas incompletas',retained_days:7},{label:'Diagnósticos antiguos',retained_days:90},{label:'Logs del launcher',retained_days:30}]).map(area=>`<section class="surface-card maintenance-area"><span class="page-eyebrow">RETENCIÓN ${area.retained_days} DÍAS</span><h3>${esc(area.label)}</h3><strong>${fmtBytes(area.candidate_bytes)}</strong><small>${area.candidate_files||0} archivos para revisión</small></section>`).join('')}</div>
+ <section class="surface-card maintenance-safe"><h3>${I('shield',19)} Referencias antiguas de VIS</h3>
+ <p>Podés quitar accesos rápidos de cuentas inexistentes y ajustes de instancias compartidas que ya no existen. Esto no toca cuentas, skins, mundos, descargas instaladas ni proyectos.</p>
+ <p class="muted">Referencias candidatas: ${legacyReport?((legacyReport.recent_accounts||0)+(legacyReport.hidden_shared||0)+(legacyReport.shared_ram||0)):'Sin analizar'}. Accesos rápidos: ${legacyReport?.recent_accounts||0}, instancias compartidas: ${legacyReport?.hidden_shared||0}, RAM antigua: ${legacyReport?.shared_ram||0}.</p>
+ <div class="maintenance-controls"><button class="outline-btn" data-action="legacy-cleanup-preview" ${legacyLoading||!native?'disabled':''}>Analizar referencias</button><button class="danger-btn" data-action="legacy-cleanup-apply" ${legacyLoading||!legacyReport||!(legacyReport.recent_accounts+legacyReport.hidden_shared+legacyReport.shared_ram)?'disabled':''}>Quitar referencias obsoletas</button></div></section>
  <section class="surface-card maintenance-safe"><h3>${I('shield',19)} Archivos protegidos</h3><p>No se inspeccionan ni borran cuentas, chats, mundos, instancias, mods, texturas, bibliotecas Minecraft, proyectos o banners. Se ignoran enlaces simbólicos y archivos recientes.</p><p class="muted">Los historiales de chat de VIS Humile se depurarán solamente desde el servicio cloud, con respaldos y avisos a los usuarios. Esa función no está conectada todavía.</p>${!native?'<p class="muted">La vista previa de navegador no tiene acceso a archivos locales.</p>':''}</section></div>`;
+}
+async function loadLegacy(){
+ if(!native)return;
+ legacyLoading=true;render();
+ try{legacyReport=await command('legacy_cleanup_preview');}
+ catch(error){legacyReport=null;message('No se pudo analizar referencias: '+String(error),true);}
+ finally{legacyLoading=false;render();}
+}
+async function cleanLegacy(){
+ if(!native||!legacyReport)return;
+ if(!window.confirm('¿Eliminar solo referencias huérfanas del launcher? No se borrarán cuentas, mundos, proyectos, skins ni instalaciones.'))return;
+ legacyLoading=true;render();
+ try{
+   const result=await command('legacy_cleanup_apply',{confirmed:true});
+   legacyReport=await command('legacy_cleanup_preview');
+   db=await command('get_state');
+   message('Limpieza completada: '+(result.recent_accounts+result.hidden_shared+result.shared_ram)+' referencias antiguas.');
+ }catch(error){message(String(error),true);}
+ finally{legacyLoading=false;render();}
 }
 async function loadMaintenance(){
  if(!native){maintenanceReport=null;render();return;}
@@ -1519,6 +1542,8 @@ root.addEventListener('click',async event=>{
  else if(act==='check-update')await checkAppUpdate();
  else if(act==='install-update')await installAppUpdate();
  else if(act==='go-maintenance'){navigate('maintenance');void loadMaintenance();}
+ else if(act==='legacy-cleanup-preview')await loadLegacy();
+ else if(act==='legacy-cleanup-apply')await cleanLegacy();
  else if(act==='maintenance-preview')await loadMaintenance();
  else if(act==='maintenance-clean')await cleanMaintenance();
  else if(act==='go-assets')navigate('assets');
