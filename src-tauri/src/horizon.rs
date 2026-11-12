@@ -86,8 +86,11 @@ fn verify_source_build(folder:&Path)->Result<(),String>{
     let manifest=fs::read(folder.join("vis-horizon-source.json"))
         .map_err(|e|format!("Sin manifiesto de Horizon compilado: {e}"))?;
     let value:Value=serde_json::from_slice(&manifest).map_err(|e|format!("Manifiesto Horizon inválido: {e}"))?;
-    if value["source_repo"].as_str()!=Some("https://github.com/horizon-rust/horizon.git"){
-        return Err("El cliente incluido no proviene del repositorio de Horizon configurado".into())
+    if !matches!(value["source_repo"].as_str(),Some(
+        "https://github.com/horizon-rust/horizon.git" |
+        "https://github.com/JoseDaniel03/horizon-VISNEXO.git"
+    )){
+        return Err("El motor no proviene de Horizon o de su fork VIS autorizado".into());
     }
     for stem in ["horizon-client","horizon-prepare"]{
         let name=if cfg!(windows){format!("{stem}.exe")}else{stem.into()};
@@ -351,11 +354,20 @@ pub(crate) fn copy_preparation_sources(source:&Path,target:&Path)->Result<(),Str
 pub fn install_instance_engine(dir:&Path,ins:&Instance)->Result<String,String>{
     let source=build_folder(ins)?;
     if !source.join("vis-horizon-source.json").is_file(){
-        return Err("Para una instalación independiente, elegí el motor incluido en VIS".into());
+        return Err("Motor Horizon sin manifiesto de origen verificado".into());
     }
     verify_source_build(&source)?;
+    // Fork packages are already verified and installed in the instance;
+    // never duplicate them, which would waste ~100 MB of disk per profile.
+    let local_root=dir.join(".vis/horizon-engine");
+    if source.starts_with(&local_root) {
+        if crate::horizon_download::verify_managed_build(&source)?!=true{
+            return Err("Motor Horizon de la instancia sin comprobante SHA-256".into());
+        }
+        return Ok(source.to_string_lossy().into_owned());
+    }
     let id=hash_file_sha256(&source.join("vis-horizon-source.json"))?;
-    let target=dir.join(".vis/horizon-engine").join(id);
+    let target=local_root.join(id);
     if !target.exists(){
         let stage=target.with_extension(format!("stage-{}",std::process::id()));
         fs::create_dir_all(&stage).map_err(|e|e.to_string())?;
