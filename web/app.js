@@ -23,6 +23,18 @@ async function cancelMicrosoftLogin(){
  microsoftTicket=null;
  if(native)try{await command('microsoft_cancel');}catch{/* Already cancelled. */}
 }
+async function copyMicrosoftText(value,label){
+ if(typeof value!=='string'||!value)return;
+ try{
+   if(!navigator.clipboard?.writeText)throw Error('Clipboard API unavailable');
+   await navigator.clipboard.writeText(value);
+   message(label+' copiado al portapapeles.');
+ }catch{
+   // Native clipboard can be denied by the desktop/Wayland portal.
+   // The text remains selectable in the browser prompt.
+   window.prompt('Copiá el '+label.toLowerCase()+' manualmente:',value);
+ }
+}
 async function beginMicrosoftLogin(){
  if(!native){message('Microsoft requiere la aplicación de escritorio.',true);return;}
  microsoftPollGeneration++;
@@ -539,6 +551,8 @@ function loginView(){
         <p>Iniciá sesión desde el navegador oficial de Microsoft. VIS Nexo nunca te solicita la contraseña de Microsoft.</p>
         ${microsoftTicket?`<div class="ms-code" aria-label="Código Microsoft">${esc(microsoftTicket.user_code)}</div>
         <button class="primary-btn" type="button" data-action="microsoft-open-verification">${I('external',18)} Abrir Microsoft y colocar el código</button>
+        <div class="ms-copy-options"><button class="outline-btn" type="button" data-action="microsoft-copy-code">${I('copy',15)} Copiar código</button><button class="outline-btn" type="button" data-action="microsoft-copy-url">${I('copy',15)} Copiar enlace</button></div>
+        <p class="muted">Si no se abre Zen Browser, ingresá manualmente a <strong>microsoft.com/link</strong>, pegá el código y mantené VIS Nexo abierto.</p>
         <p class="muted">Código válido por ${Math.ceil(microsoftTicket.expires_in/60)} minutos. VIS Nexo verificará la autorización automáticamente.</p>
         <button class="auth-footer" type="button" data-action="microsoft-cancel">Cancelar autorización</button>`:
         `<p class="muted">${authBusy?'Solicitando código seguro…':'La autorización aún no comenzó.'}</p>
@@ -1416,12 +1430,26 @@ root.addEventListener('click',async event=>{
  if(['create-project','edit-project','edit-avatar','open-instance','edit-instance','delete-instance','delete-project'].includes(act))lastDialogTrigger=button;
  if(act==='modal-backdrop'){if(event.target===button)closeDialog();return;}
  if(act==='auth-microsoft'){void beginMicrosoftLogin();return;}
+ if(act==='microsoft-copy-code'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.user_code,'Código Microsoft');return;}
+ if(act==='microsoft-copy-url'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.verification_uri,'Enlace Microsoft');return;}
  if(act==='microsoft-open-verification'){
    if(!microsoftTicket)return;
    const uri=microsoftTicket.verification_uri;
-   if(!uri.startsWith('https://www.microsoft.com/')&&!uri.startsWith('https://microsoft.com/')&&!uri.startsWith('https://login.microsoftonline.com/'))
-       return message('Microsoft devolvió una URL inesperada',true);
-   try{await T.opener.openUrl(uri);}catch(e){message('No se pudo abrir el navegador Microsoft: '+String(e),true);}
+   let parsed;
+   try{parsed=new URL(uri);}catch{return message('Microsoft devolvió una URL inválida',true);}
+   if(parsed.protocol!=='https:'||!['microsoft.com','www.microsoft.com','login.microsoftonline.com'].includes(parsed.hostname))
+     return message('Microsoft devolvió un enlace no permitido',true);
+   try {
+     // On CachyOS + AppImage, the native host opener removes bundled
+     // GTK/GIO library paths before launching Zen/Flatpak.
+     await command('microsoft_open_verification');
+   }catch {
+     try{await T.opener.openUrl(uri);}
+     catch {
+       await copyMicrosoftText(uri,'Enlace Microsoft');
+       message('Zen no se abrió automáticamente. Pegá el enlace y código en tu navegador. La autorización sigue activa.');
+     }
+   }
    return;
  }
  if(act==='microsoft-cancel'){void cancelMicrosoftLogin();authProvider='cloud';render();return;}
