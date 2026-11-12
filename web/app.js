@@ -780,7 +780,7 @@ function premiumCosmeticsPanel(){
        '<small class="muted">VIS recuerda las texturas que consultás o equipás desde ahora. No puede recuperar automáticamente todas las skins usadas antes de VIS.</small>'+
        (savedRows||'<p class="muted">El historial se completará cuando consultes o uses nuevas skins.</p>')+'</details>'+
        '<div class="profile-actions"><label>Modelo <select id="premium-skin-model"><option value="classic">Clásico</option><option value="slim">Delgado</option></select></label>'+
-         '<button class="primary-btn" data-action="premium-upload-skin">'+I('upload',16)+' Subir PNG 64×64</button></div></div>'+
+         '<button class="primary-btn" data-action="premium-upload-skin" '+(premiumCosmeticsBusy?'disabled':'')+'>'+I('upload',16)+' Guardar en VIS y Minecraft oficial</button></div></div>'+
      '<div class="premium-cosmetics-group"><h3>Capas oficiales ('+capes.length+')</h3>'+
        (capeRows||'<p class="muted">No tenés capas oficiales disponibles.</p>')+
        '<button class="outline-btn" data-action="premium-hide-cape" '+(!capes.some(c=>c.state==='ACTIVE')?'disabled':'')+'>Ocultar capa</button>'+
@@ -843,7 +843,7 @@ function profilePage(){
    '</section>'+
    '<section class="surface-card profile-skin-card">'+
     '<div class="card-heading">'+I('game',20)+' Mi skin en VIS</div>'+
-    '<p class="muted">La skin que subís a VIS Nexo puede mostrarse a cualquier usuario conectado del launcher, aunque no sea tu amigo. Es independiente de las skins oficiales de Mojang.</p>'+
+    '<p class="muted">La skin se guarda en VIS Nexo. Con Microsoft Premium también podés publicarla en el perfil oficial de Minecraft Java; elegí el modelo antes de importar.</p>'+
     '<div class="profile-skin-visual">'+
       (localSkin?'<img class="profile-skin-sheet" src="'+attr(localSkin)+'" alt="Textura PNG local de Minecraft"/>':
        '<div class="profile-skin-placeholder">'+I('game',32)+'<span>Sin skin local</span></div>')+
@@ -854,6 +854,8 @@ function profilePage(){
        '<small>'+(publicSkin?.skin?'Otros usuarios pueden verla buscando @'+esc(username):
          'Importá una skin o publicá la que ya tenés.')+'</small>'+
       '</div></div>'+
+    (microsoftGamertag?'<div class="profile-quick-actions"><label><input type="checkbox" id="premium-auto-skin" checked/> Subir también a Minecraft oficial ('+esc(microsoftGamertag)+')</label>'+
+       '<label>Modelo <select id="premium-local-model"><option value="classic">Clásico · Steve</option><option value="slim">Delgado · Alex</option></select></label></div>':'')+
     '<div class="profile-quick-actions">'+
       '<button class="outline-btn" data-action="import-skin">'+I('upload',15)+' Importar PNG</button>'+
       '<button class="primary-btn" data-action="publish-vis-skin" '+(!skinPath||!connected||skinSharingBusy?'disabled':'')+'>'+
@@ -905,8 +907,10 @@ function editProfileDialog(){
   (user.avatar_layer?'<button class="subtle-btn" data-action="clear-profile-asset" data-kind="avatar_layer">Quitar capa del avatar</button>':'')+'</div></details>'+
  '</section>'+
  '<section><h3>'+I('game',18)+' Minecraft en VIS</h3>'+
-  '<p class="muted">Importá PNG 64×64 o 64×32. Publicarla permite que todas las cuentas VIS conectadas vean tu skin. No modifica las skins de Minecraft oficial.</p>'+
-  '<div class="profile-quick-actions"><button class="outline-btn" data-action="import-skin">Importar skin local</button>'+
+  '<p class="muted">Importá una skin PNG 64×64 o 64×32. VIS Social y Minecraft oficial son publicaciones distintas; en una cuenta Premium podés activar ambas.</p>'+
+  (microsoftGamertag?'<div class="profile-quick-actions"><label><input type="checkbox" id="premium-edit-auto-skin" checked/> Subir también a Minecraft oficial</label>'+
+     '<label>Modelo <select id="premium-edit-model"><option value="classic">Clásico · Steve</option><option value="slim">Delgado · Alex</option></select></label></div>':'')+
+   '<div class="profile-quick-actions"><button class="outline-btn" data-action="import-skin">Importar skin local</button>'+
    '<button class="primary-btn" data-action="publish-vis-skin" '+(!user.skin||!connected||skinSharingBusy?'disabled':'')+'>Publicar en VIS</button>'+
    (skin?'<button class="subtle-btn" data-action="remove-vis-skin">Quitar pública</button>':'')+'</div>'+
   '<details class="profile-advanced"><summary>Recursos locales y avanzados</summary><div class="profile-quick-actions">'+
@@ -1499,11 +1503,23 @@ function navigate(to,id='') {
    root.querySelector('#main-scroll')?.scrollTo(0,0);
  },{reducedMotion:prefs.reducedMotion});
 }
-async function chooseAsset(kind,field='',projectId='') {
+async function chooseAsset(kind,field='',projectId='',forceOfficialSkin=false) {
  try {
    if(native){
-     const path=await T.dialog.open({multiple:false,directory:false,title:'Seleccionar imagen',filters:[{name:'Imágenes (PNG, JPG, WebP)',extensions:['png','jpg','jpeg','webp']}]});
+     const premiumSkin=kind==='skin'&&!!microsoftGamertag;
+     const editor=dialog?.type==='edit-profile';
+     const opt=document.getElementById(editor?'premium-edit-auto-skin':'premium-auto-skin');
+     const selectedModel=document.getElementById(forceOfficialSkin?'premium-skin-model':editor?'premium-edit-model':'premium-local-model');
+     const syncOfficial=premiumSkin&&(forceOfficialSkin||opt?.checked!==false);
+     const variant=selectedModel?.value==='slim'?'slim':'classic';
+     const generation=accountGeneration,owner=db.user?.username;
+     const path=await T.dialog.open({multiple:false,directory:false,
+       title:kind==='skin'?'Seleccionar skin PNG':'Seleccionar imagen',
+       filters:kind==='skin'?[{name:'Skin PNG',extensions:['png']}]:
+          [{name:'Imágenes (PNG, JPG, WebP)',extensions:['png','jpg','jpeg','webp']}]});
      if(!path)return;
+     if(accountGeneration!==generation||db.user?.username!==owner)
+       return message('Cambió la cuenta activa: seleccioná nuevamente el archivo.',true);
      const personal=['avatar','profile_banner'].includes(kind);
      const result=await command('import_asset',{path,kind,projectId:projectId||null,stageOnly:personal});
      assetCache[result.path]=result.data_url;
@@ -1512,9 +1528,37 @@ async function chooseAsset(kind,field='',projectId='') {
      if(['skin','cape','avatar_layer','home','login','launcher_logo'].includes(kind)) db=await command('get_state');
      render();
      if(kind==='skin'){
-       message('Skin PNG importada a VIS Nexo.');
-       if(social.connected())void publishLocalSkin(result.data_url);
-       else message('Se guardó localmente; conectá VIS Social y usá «Compartir skin VIS» para publicarla.');
+       if(syncOfficial){
+         if(premiumCosmeticsBusy){
+           message('La skin quedó guardada en VIS. Terminá la otra operación Premium y volvé a publicarla.',true);
+         }else{
+           premiumCosmeticsBusy=true;render();
+           let uploaded=false;
+           try{
+             const next=await command('microsoft_upload_skin',{path,variant});
+             if(accountGeneration===generation&&db.user?.username===owner){
+               premiumCosmetics={...next,history:next.history||premiumCosmetics?.history||[]};
+               uploaded=true;
+               message('Skin guardada en VIS y publicada en tu Minecraft Java Premium.');
+             }
+           }catch(error){
+             if(accountGeneration===generation)
+               message('Skin guardada en VIS, pero Minecraft oficial rechazó la subida: '+String(error),true);
+           }finally{
+             premiumCosmeticsBusy=false;
+             if(accountGeneration===generation){
+               render();
+               if(uploaded)void loadPremiumCosmetics();
+             }
+           }
+         }
+       }else{
+         message('Skin PNG guardada en VIS Nexo sin modificar Minecraft oficial.');
+       }
+       if(accountGeneration===generation&&db.user?.username===owner){
+         if(social.connected())void publishLocalSkin(result.data_url);
+         else if(!syncOfficial)message('Conectá VIS Social y usá «Compartir skin VIS» para publicarla.');
+       }
      }else message('Recurso importado correctamente.');
    }else{
      const input=document.createElement('input');input.type='file';input.accept=['skin','cape','avatar_layer'].includes(kind)?'image/png':'image/png,image/jpeg,image/webp';
@@ -1808,11 +1852,8 @@ root.addEventListener('click',async event=>{
  else if(act==='premium-hide-cape'){await changePremiumCosmetic('microsoft_hide_cape');}
  else if(act==='premium-upload-skin'){
    if(!native||!T?.dialog?.open)return message('Necesitás VIS Nexo instalado para subir una skin.',true);
-   const variant=document.getElementById('premium-skin-model')?.value||'classic';
-   try {
-     const path=await T.dialog.open({directory:false,multiple:false,title:'Skin oficial Minecraft PNG 64x64',filters:[{name:'Skin PNG',extensions:['png']}]});
-     if(path)await changePremiumCosmetic('microsoft_upload_skin',{path,variant});
-   }catch(error){message(String(error),true);}
+   if(premiumCosmeticsBusy)return message('Ya se está procesando un cosmético oficial.',true);
+   await chooseAsset('skin','','',true);
  }
  else if(act==='social-save-display-name'){
    const text=document.getElementById('social-display-name')?.value?.trim()||'';
