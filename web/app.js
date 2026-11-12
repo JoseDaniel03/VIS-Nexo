@@ -359,7 +359,8 @@ function socialPanel(){
  const projectFriends=socialTab==='projects'?
    projectId?friends.filter(f=>(f.shared_projects||[]).includes(projectId)):[]
    :friends;
- const socialOwner=social.state()?.role==='super_admin';
+ const socialOwner=social.state()?.developer===true;
+ const accountAdmin=social.state()?.role==='super_admin';
  return `<aside class="social-pane ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
  <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
  <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
@@ -373,7 +374,8 @@ function socialPanel(){
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
- ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button><button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}
+ ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}`:''}
+ ${social.connected()&&social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-developer-key" title="Consultar clave pública de la cuenta para una habilitación manual en GitHub">Identidad de desarrollador${socialOwner?' · habilitada':''}</button>`:''}
  <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>${social.connected()&&!social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-enable-cloud">Vincular contraseña online</button>`:''}
  `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
@@ -1002,6 +1004,17 @@ root.addEventListener('click',async event=>{
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';social.setChatActive(false);render();},{reducedMotion:prefs.reducedMotion});}
  else if(act==='social-upload-avatar'){void selectAndUploadSocialAvatar();}
  else if(act==='social-enable-cloud'){void enableSocialCloudPassword();}
+ else if(act==='social-developer-key'){
+  try{
+   const {account}=await social.accountInfo();
+   if(!account?.cloud_credential_public_key)throw Error('Esta cuenta todavía no tiene credencial cloud.');
+   const info='Usuario VIS: '+account.username+'\nID pública: '+account.public_id+
+     '\nClave pública Ed25519: '+account.cloud_credential_public_key+
+     '\nAbrí GitHub Actions → VIS Social - Super Developer, verificá la cuenta y solicitá grant.';
+   try{await navigator.clipboard?.writeText(info);}catch{/* Clipboard unavailable. */}
+   window.prompt('Datos públicos para la solicitud de desarrollador (sin contraseña):',info);
+  }catch(error){message(String(error),true);}
+ }
  else if(act==='social-public-identity'){
   if(!native){message('La identidad se muestra desde VIS Nexo nativo.',true);return;}
   try{
@@ -1019,7 +1032,7 @@ root.addEventListener('click',async event=>{
   catch(e){message(String(e),true);}
  }
  else if(act==='social-register-project'){
-  if(social.state()?.role!=='super_admin'){message('Solo la supercuenta puede registrar proyectos.',true);return;}
+  if(!social.state()?.developer){message('El permiso de desarrollador se habilita desde GitHub Actions.',true);return;}
   const projectId=window.prompt('ID público de proyecto (letras, números, _ y -):');
   if(!projectId)return;
   const title=window.prompt('Nombre del proyecto:');
@@ -1029,7 +1042,7 @@ root.addEventListener('click',async event=>{
   catch(e){message(String(e),true);}
  }
  else if(act==='social-assign-staff'){
-  if(social.state()?.role!=='super_admin'){message('Solo la supercuenta puede asignar responsables.',true);return;}
+  if(!social.state()?.developer){message('El permiso de desarrollador es necesario.',true);return;}
   const projectId=window.prompt('ID del proyecto registrado:');
   if(!projectId)return;
   const username=window.prompt('Usuario al que querés asignar permisos:');
