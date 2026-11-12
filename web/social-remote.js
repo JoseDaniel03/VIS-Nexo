@@ -320,6 +320,15 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     await sync();
     return reply;
   }
+  async function setDisplayName(displayName){
+    if(!connected())throw Error('Conectá VIS Social para cambiar el nombre visible');
+    if(typeof displayName!=='string'||displayName.trim().length<2||displayName.trim().length>32)
+      throw Error('El nombre visible debe tener entre 2 y 32 caracteres');
+    const reply=await rpc('/v1/account/display','POST',{display_name:displayName.trim()});
+    if(state){state.display_name=reply.display_name;notify(true);}
+    await sync();
+    return reply;
+  }
   async function accountInfo() {
     if (!connected()) throw Error('Primero iniciá sesión en VIS Social');
     return rpc('/v1/account');
