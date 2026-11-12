@@ -194,6 +194,18 @@ async function refreshAssets(){
 }
 let socialMode = 'disconnected', socialError = '', socialOverlay = null;
 const socialAvatars=new Map(), avatarLoads=new Set();
+let socialRenderScheduled=false;
+function scheduleSocialRender(){
+  if(socialRenderScheduled||!db.user||document.hidden)return;
+  socialRenderScheduled=true;
+  requestAnimationFrame(()=>{
+    socialRenderScheduled=false;
+    if(db.user&&!document.hidden)render();
+  });
+}
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&db.user)scheduleSocialRender();
+});
 function socialAvatarHtml(username,size=34,owned=false) {
  const entry=socialAvatars.get(username);
  if(entry?.url)return `<span class="avatar" style="width:${size}px;height:${size}px"><img alt="" src="${attr(entry.url)}"/></span>`;
@@ -210,7 +222,7 @@ function refreshSocialAvatars(snapshot) {
   void social.getAvatar(username).then(result=>{
    if(result.avatar&&(!result.avatar.startsWith('data:image/webp;base64,')||result.avatar.length>40000))return;
    socialAvatars.set(username,{version,url:result.avatar||''});
-   if(db.user?.username===snapshot.username)render();
+   if(db.user?.username===snapshot.username)scheduleSocialRender();
   }).catch(()=>{}).finally(()=>avatarLoads.delete(key));
  }
 }
@@ -229,12 +241,12 @@ const social = createSocialRemote(command, (snapshot, messages) => {
     messages:messages||[] };
   mergeSocialView();
   refreshSocialAvatars(snapshot);
-  render();
+  scheduleSocialRender();
 }, (mode, error) => {
   if (socialMode === mode && socialError === (error||'')) return;
   socialMode = mode;
   socialError = error || '';
-  if (db.user) render();
+  if (db.user) scheduleSocialRender();
 });
 async function enableSocialCloudPassword(){
  if(!social.connected()){message('Conectá VIS Social para vincular la cuenta.',true);return;}
@@ -754,14 +766,23 @@ function render(){
  const keepScroll=old&&old.screen===next.screen;
  const mainScrollTop=keepScroll?currentMain?.scrollTop:0;
  const chatScrollTop=currentChat?.scrollTop||0;
- const composeDraft=root.querySelector('#message-form [name="body"]')?.value;
+ const composeField=root.querySelector('#message-form [name="body"]');
+ const composeDraft=composeField?.value;
+ const restoreComposeFocus=document.activeElement===composeField;
+ const composeCaret=restoreComposeFocus?composeField.selectionStart:null;
  const wasAtBottom=currentChat?currentChat.scrollHeight-currentChat.scrollTop-currentChat.clientHeight<30:true;
  document.title=`VIS Nexo${db.user?` · ${displayAccount(db.user.username)}`:''}`;
  document.body.classList.toggle('reduce-motion',!!prefs.reducedMotion);
  root.innerHTML=db.user?shell():loginView();
  if(composeDraft!=null&&next.chatWith===old?.chatWith){
    const input=root.querySelector('#message-form [name="body"]');
-   if(input)input.value=composeDraft;
+   if(input){
+     input.value=composeDraft;
+     if(restoreComposeFocus){
+       input.focus({preventScroll:true});
+       if(composeCaret!=null)input.setSelectionRange(composeCaret,composeCaret);
+     }
+   }
  }
  if(dialog?.type==='crop')startCropCanvas();
  if(keepScroll)root.querySelector('#main-scroll')?.scrollTo({top:mainScrollTop||0,behavior:'instant'});
