@@ -136,7 +136,7 @@ fn poll_access(client:&Client,pending:&DevicePending)->Result<TokenPoll,String>{
     }
     Ok(TokenPoll::Access(extract_string(&data,"access_token","Microsoft OAuth")?.into()))
 }
-fn exchange_xbox(client:&Client,ms_token:&str)->Result<MinecraftIdentity,String>{
+fn exchange_xbox(client:&Client,ms_token:&str)->Result<(MinecraftIdentity,u64),String>{
     let r=client.post(XBL_LOGIN)
         .header("x-xbl-contract-version","1")
         .json(&json!({
@@ -161,6 +161,7 @@ fn exchange_xbox(client:&Client,ms_token:&str)->Result<MinecraftIdentity,String>
         .send().map_err(|_|"Minecraft Services: no se pudo conectar")?;
     let minecraft=checked_json(r,"Minecraft Services")?;
     let access_token=extract_string(&minecraft,"access_token","Minecraft Services")?.to_owned();
+    let ttl=minecraft["expires_in"].as_u64().unwrap_or(3600).clamp(60,86400);
     let r=client.get(MINECRAFT_PROFILE)
         .bearer_auth(&access_token)
         .send().map_err(|_|"Minecraft: no se pudo consultar el perfil")?;
@@ -174,7 +175,7 @@ fn exchange_xbox(client:&Client,ms_token:&str)->Result<MinecraftIdentity,String>
        !name.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'){
         return Err("Minecraft devolvió un nombre de jugador inválido".into())
     }
-    Ok(MinecraftIdentity{name:name.into(),uuid:uuid.to_ascii_lowercase(),access_token})
+    Ok((MinecraftIdentity{name:name.into(),uuid:uuid.to_ascii_lowercase(),access_token},ttl))
 }
 #[tauri::command]
 pub(crate) async fn microsoft_begin(
@@ -215,12 +216,12 @@ pub(crate) async fn microsoft_poll(
          other=>Ok((other,None))
        }
     }).await.map_err(|_|"La autorización de Microsoft se interrumpió")?;
-    let (phase,verified): (TokenPoll,Option<MinecraftIdentity>)=match response {
+    let (phase,verified): (TokenPoll,Option<(MinecraftIdentity,u64)>)=match response {
       Ok(Ok(v))=>v,
       Ok(Err(e))=>{state.lock().map_err(|_|"Estado Microsoft bloqueado")?.pending=None;return Err(e);},
       Err(e)=>return Err(e),
     };
-    if let Some(identity)=verified {
+    if let Some((identity,ttl))=verified {
        let mut backend=backend.lock().map_err(|_|"Cuenta local bloqueada")?;
        let local=backend.storage.ensure_microsoft_profile(&identity.uuid)?;
        backend.active_user=Some(local.clone());
@@ -231,7 +232,7 @@ pub(crate) async fn microsoft_poll(
        let profile_name=identity.name.clone();
        let mut state=state.lock().map_err(|_|"Estado de Microsoft bloqueado")?;
        state.pending=None;
-       state.verified=Some(Verified{profile:identity,expires:Instant::now()+Duration::from_secs(20*3600),owner:local});
+       state.verified=Some(Verified{profile:identity,expires:Instant::now()+Duration::from_secs(ttl.saturating_sub(120).max(30)),owner:local});
        return Ok(json!({"status":"connected","snapshot":snapshot,
           "minecraft_name":profile_name}))
     }
