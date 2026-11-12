@@ -39,6 +39,32 @@ pub(crate) fn acquire_game_run(dir:&Path)->Result<GameRunGuard,String>{
     Ok(GameRunGuard{path,_os_lock:os_lock})
 }
 
+/// Keep an advisory game lock alive inside the spawned Minecraft process on
+/// Unix, even if the launcher crashes. Only the lock descriptor is inherited;
+/// the parent still releases its own handle after the game exits.
+#[cfg(unix)]
+pub(crate) fn inherit_game_lock(cmd:&mut Command,guard:&GameRunGuard){
+    use std::os::unix::process::CommandExt;
+    let fd=guard._os_lock.os_fd();
+    // SAFETY: pre_exec performs only async-signal-safe fcntl calls.
+    // F_GETFD=1, F_SETFD=2, FD_CLOEXEC=1 on supported Unix platforms.
+    unsafe {
+        cmd.pre_exec(move||{
+            unsafe extern "C" { fn fcntl(fd:i32, operation:i32, ...)->i32; }
+            let flags=fcntl(fd,1);
+            if flags<0{return Err(std::io::Error::last_os_error());}
+            if fcntl(fd,2,flags & !1)<0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+#[cfg(not(unix))]
+pub(crate) fn inherit_game_lock(_cmd:&mut Command,_guard:&GameRunGuard){
+    // Windows still needs a separate supervisor to survive launcher crashes.
+}
+
 const MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const FABRIC: &str = "https://meta.fabricmc.net/v2";
 const MODRINTH: &str = "https://api.modrinth.com/v2";
@@ -1152,6 +1178,7 @@ fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&
  let log_path=game_dir.join("logs").join(format!("vslauncher-{stamp}.log"));
  let logfile=File::create(&log_path).map_err(|e|e.to_string())?;
  cmd.current_dir(game_dir).stdout(Stdio::from(logfile.try_clone().map_err(|e|e.to_string())?)).stderr(Stdio::from(logfile));
+ inherit_game_lock(&mut cmd,&game_run);
  let mut child=cmd.spawn().map_err(|e|format!("Java no pudo iniciar Minecraft: {e}"))?;
  let pid=child.id();let log_file=log_path.to_string_lossy().into_owned();
  // Do not report a successful game just because java.exe/spawn returned a PID.
