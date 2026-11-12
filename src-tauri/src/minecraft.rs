@@ -223,15 +223,9 @@ fn java_home_instance(data_root:&Path,username:&str,ins:&Instance)->Result<PathB
 }
 pub fn instance_dir(data_root:&Path,username:&str,ins:&Instance)->Result<PathBuf,String>{java_home_instance(data_root,username,ins)}
 fn installation_path(dir:&Path)->PathBuf{dir.join(".vslauncher").join("install.json")}
-// Keep existing installs compatible with the historic shared runtime, while new
-// instances store version JARs, libraries and assets alongside the instance.
-fn installed_runtime(data_root:&Path,dir:&Path)->PathBuf {
- let private=fs::read(installation_path(dir)).ok()
-   .and_then(|data|serde_json::from_slice::<LocalInstallation>(&data).ok())
-   .is_some_and(|m|m.runtime_storage=="instance-v1");
- if private {dir.join(".vis").join("runtime")}
- else {data_root.join("minecraft-runtime")}
-}
+// All new and repaired instances resolve binaries inside the game folder.
+// Legacy shared-runtime installations are marked for non-destructive repair.
+fn installed_runtime(_data_root:&Path,dir:&Path)->PathBuf {dir.join(".vis/runtime")}
 fn new_runtime(dir:&Path)->PathBuf{dir.join(".vis").join("runtime")}
 
 // Only predictable launcher cache locations are examined. No recursive disk
@@ -293,12 +287,19 @@ pub fn installed(dir:&Path,ins:&Instance)->bool{
  let Ok(data)=fs::read(installation_path(dir)) else {return false};
  let Ok(marker)=serde_json::from_slice::<LocalInstallation>(&data) else {return false};
  if marker.version!=ins.version || marker.loader!=ins.loader || marker.loader_version!=ins.loader_version {return false}
- if marker.runtime_storage=="instance-v1" {
-  // Portable copies are only considered installed if their private client JAR
-  // is present. Full library/asset validation is still performed at launch.
-  return dir.join(".vis/runtime/versions").join(&ins.version).join(format!("{}.jar",ins.version)).is_file()
- }
- true // Legacy installations have a shared runtime outside this instance dir.
+ if marker.runtime_storage!="instance-v1" {return false}
+ let runtime=dir.join(".vis/runtime");
+ // Old global .minecraft or shared VIS cache never qualifies as installed.
+ let profile_path=dir.join(".vslauncher/version.json");
+ let Ok(raw)=fs::read(&profile_path) else{return false};
+ let Ok(profile)=serde_json::from_slice::<Value>(&raw) else{return false};
+ let Some(index)=profile["assetIndex"]["id"].as_str() else{return false};
+ if !clean_segment(index) {return false}
+ let java=profile["javaVersion"]["majorVersion"].as_u64().unwrap_or(8);
+ runtime.join("versions").join(&ins.version).join(format!("{}.jar",ins.version)).is_file()
+   && runtime.join("libraries").is_dir()
+   && runtime.join("assets/indexes").join(format!("{index}.json")).is_file()
+   && look_for_java(&dir.join(".vis/java-runtimes").join(format!("temurin-{java}")),4).is_some()
 }
 // Cache the official version selector in-process for ten minutes. Downloading the
 // manifest on each wizard opening adds latency and increases provider requests.
@@ -794,7 +795,14 @@ fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&
  let placeholders=[("${auth_player_name}",player_name.to_owned()),("${version_name}",ins.version.clone()),("${game_directory}",game_dir.to_string_lossy().into_owned()),("${assets_root}",runtime.join("assets").to_string_lossy().into_owned()),("${assets_index_name}",asset_index.into()),("${auth_uuid}",uuid),
   ("${auth_access_token}","0".into()),("${clientid}","".into()),("${auth_xuid}","".into()),("${user_type}","legacy".into()),("${version_type}","VIS-Nexo-local".into()),("${user_properties}","{}".into())];
  let required_java=profile["javaVersion"]["majorVersion"].as_u64().unwrap_or(8);
- let java=find_java(&dir.join(".vis"),ins,required_java).or_else(||find_java(data_root,ins,required_java)).ok_or_else(||format!("No se encontró Java {required_java}+. Usá Instalar/Reparar instancia para descargar Temurin automáticamente."))?;
+ // No fallback to PATH, AppData or other installations: game is self-contained.
+ // Explicit custom Java is retained as a user opt-in, never selected automatically.
+ let managed=dir.join(".vis/java-runtimes").join(format!("temurin-{required_java}"));
+ let java=if !ins.java_path.trim().is_empty() {
+     find_java(&dir.join(".vis"),ins,required_java)
+ } else {
+     look_for_java(&managed,4).filter(|p|java_major(p.as_os_str())==Some(required_java))
+ }.ok_or_else(||format!("Falta Temurin Java {required_java} dentro de la instancia. Ejecutá Instalar/Reparar para descargarlo sin usar .minecraft global."))?;
  let mut cmd=Command::new(java);
  configure_instance_environment(&mut cmd,game_dir)?;
  cmd.arg(format!("-Djava.io.tmpdir={}",game_dir.join(".vis/tmp").display()));
@@ -1128,11 +1136,13 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
   assert_eq!(fs::read(&old).unwrap(),valid);
   let _=fs::remove_dir_all(root);
  }
- #[test]fn old_installation_without_runtime_storage_stays_compatible(){
+ #[test]fn old_installation_requires_private_runtime_repair(){
   let root=std::env::temp_dir().join(format!("vis212-compat-{}-{}",std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
   fs::create_dir_all(root.join("inst/.vslauncher")).unwrap();
   fs::write(root.join("inst/.vslauncher/install.json"),r#"{"version":"1.20.1","loader":"vanilla","loader_version":"","installed_at":0}"#).unwrap();
-  assert_eq!(installed_runtime(&root, &root.join("inst")),root.join("minecraft-runtime"));
+  assert_eq!(installed_runtime(&root,&root.join("inst")),root.join("inst/.vis/runtime"));
+  let instance=Instance{version:"1.20.1".into(),..Default::default()};
+  assert!(!installed(&root.join("inst"),&instance));
   let _=fs::remove_dir_all(root);
  }
  #[test]fn staged_batch_preserves_prior_files_on_bad_source(){
