@@ -45,6 +45,34 @@ pub fn destination(path:&Path)->Result<PathBuf,String>{
     Ok(resolved)
 }
 
+/// Protect every parent of a game-owned path from symlink redirection.
+/// A symlink to the global .minecraft hidden inside .vis/runtime is still an
+/// external dependency, even if the instance root itself was checked.
+pub fn private_paths(root:&Path, relatives:&[&str])->Result<(),String>{
+    for relative in relatives {
+        let mut current=root.to_path_buf();
+        for component in Path::new(relative).components(){
+            let Component::Normal(segment)=component else {
+                return Err("Ruta interna VIS inválida".into());
+            };
+            current.push(segment);
+            match fs::symlink_metadata(&current){
+                Ok(meta)=>{
+                    if meta.file_type().is_symlink() {
+                        return Err(format!("La carpeta interna {} es un enlace simbólico; usá una copia local",current.display()));
+                    }
+                    if !meta.is_dir() && current!=root.join(relative){
+                        return Err("Un archivo ocupa una carpeta de sistema de la instancia".into());
+                    }
+                }
+                Err(error) if error.kind()==std::io::ErrorKind::NotFound=>{},
+                Err(error)=>return Err(format!("No se pudo comprobar la carpeta interna: {error}")),
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn independent(a:&Path,b:&Path)->Result<(),String>{
     let a=destination(a)?;
     let b=destination(b)?;
@@ -66,6 +94,20 @@ mod tests{
         assert!(independent(&home.join("Pack"),&home.join("OtherPack")).is_ok());
         let _=fs::remove_dir_all(home);
     }
+    #[cfg(unix)]
+    #[test]
+    fn blocks_symlinked_internal_runtime(){
+        use std::os::unix::fs::symlink;
+        let root=std::env::temp_dir().join(format!("vis-internal-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".vis")).unwrap();
+        let outside=root.join("external");
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside,root.join(".vis/runtime")).unwrap();
+        assert!(private_paths(&root,&[".vis/runtime/assets"]).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn blocks_symlink_into_global_minecraft(){
