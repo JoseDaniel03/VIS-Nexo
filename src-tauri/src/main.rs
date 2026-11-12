@@ -2,6 +2,7 @@
 //! local accounts and VSUI catalogue; the web view never authorizes admin work.
 mod accounts;
 mod minecraft;
+mod instance_guard;
 mod project_mods;
 mod maintenance;
 mod cloud;
@@ -448,12 +449,14 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
     if instance.game_dir.trim().is_empty() && !prefs.instances.iter().any(|i|i.project_id==instance.project_id&&i.name==instance.name){
         return Err("Elegí una carpeta para instalar todos los archivos de la instancia".into());
     }
-    // Legacy paths derive from the normalized display name. Distinct names may
-    // otherwise point to the SAME game directory and corrupt both instances.
-    for previous in &prefs.instances {
-        if previous.name != instance.name || previous.project_id != instance.project_id {
-            let existing_dir=minecraft::instance_dir(&s.data_root,&username,previous)?;
-            if existing_dir==dir {return Err("Otra instancia ya usa esa carpeta. Elegí un nombre o ruta diferente.".into());}
+    // An instance may never share or nest a game folder with another profile,
+    // including symlink aliases. Preserve installed worlds on conflict.
+    for account in &s.storage.data.accounts {
+        for previous in s.storage.prefs(&account.username).instances {
+            if account.username==username && previous.name==instance.name
+                && previous.project_id==instance.project_id {continue;}
+            let previous_dir=minecraft::instance_dir(&s.data_root,&account.username,&previous)?;
+            instance_guard::independent(&dir,&previous_dir)?;
         }
     }
     if let Some(i) = prefs.instances.iter().position(|p| p.name == instance.name && p.project_id == instance.project_id) {
