@@ -209,6 +209,7 @@ pub(crate) async fn microsoft_poll(
       p.next_poll=Instant::now()+Duration::from_secs(p.interval);
       p.clone()
     };
+    let challenge_key=pending.code.clone();
     let response=tauri::async_runtime::spawn_blocking(move||{
        let http=client()?;
        match poll_access(&http,&pending)? {
@@ -221,6 +222,13 @@ pub(crate) async fn microsoft_poll(
       Ok(Err(e))=>{state.lock().map_err(|_|"Estado Microsoft bloqueado")?.pending=None;return Err(e);},
       Err(e)=>return Err(e),
     };
+    // A user can cancel or replace the code while the HTTP exchange is in
+    // flight. The old exchange must not log them in after that cancellation.
+    // Lock order: Microsoft session first, then local profile, as at logout.
+    let mut state=state.lock().map_err(|_|"Estado de Microsoft bloqueado")?;
+    if state.pending.as_ref().map(|p|p.code.as_str())!=Some(challenge_key.as_str()){
+        return Ok(json!({"status":"idle"}));
+    }
     if let Some((identity,ttl))=verified {
        let mut backend=backend.lock().map_err(|_|"Cuenta local bloqueada")?;
        let local=backend.storage.ensure_microsoft_profile(&identity.uuid)?;
@@ -230,13 +238,11 @@ pub(crate) async fn microsoft_poll(
        backend.add_recent(&local,"microsoft")?;
        let snapshot=backend.snapshot();
        let profile_name=identity.name.clone();
-       let mut state=state.lock().map_err(|_|"Estado de Microsoft bloqueado")?;
        state.pending=None;
        state.verified=Some(Verified{profile:identity,expires:Instant::now()+Duration::from_secs(ttl.saturating_sub(120).max(30)),owner:local});
        return Ok(json!({"status":"connected","snapshot":snapshot,
           "minecraft_name":profile_name}))
     }
-    let mut state=state.lock().map_err(|_|"Estado de Microsoft bloqueado")?;
     match phase{
       TokenPoll::Waiting=>Ok(json!({"status":"pending","interval":state.pending.as_ref().map_or(5,|p|p.interval)})),
       TokenPoll::SlowDown=>{
