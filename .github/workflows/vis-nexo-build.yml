@@ -84,12 +84,67 @@ jobs:
           nunca se incluyen en este ZIP ni se instalan en AppData/.minecraft.
           '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
           Compress-Archive -Path (Join-Path $dir '*') -DestinationPath 'target/release/VIS-Nexo-Windows-Portable.zip' -Force
-      - name: Upload installer artifacts
+      # Upload only distributable binaries. In particular, appimage/** also
+      # contains linuxdeploy's unpacked AppDir and nearly doubles artifact size.
+      - name: Validate Linux AppImage and generate SHA-256
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(target/release/bundle/appimage/*.AppImage)
+          if (( ${#packages[@]} != 1 )); then
+            printf 'Expected one final AppImage; found %s\n' "${#packages[@]}" >&2
+            exit 1
+          fi
+          cd target/release/bundle/appimage
+          sha256sum -- ./*.AppImage > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Validate Windows installer and portable ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem 'target/release/bundle/nsis' -Filter '*.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected one NSIS installer, got $($installers.Count)" }
+          $portable = Get-Item 'target/release/VIS-Nexo-Windows-Portable.zip'
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($portable.FullName)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName })
+            if ($names.Count -ne 2 -or
+                'VIS-Nexo.exe' -notin $names -or
+                'LEEME.txt' -notin $names) {
+              throw "Portable archive has unexpected entries: $($names -join ', ')"
+            }
+            $exe = $zip.GetEntry('VIS-Nexo.exe')
+            if ($exe.Length -lt 100000) { throw 'Portable executable is unexpectedly small' }
+          } finally {
+            $zip.Dispose()
+          }
+          $digestLines = @($installers[0], $portable) | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          $digestLines | Set-Content 'target/release/SHA256SUMS-Windows.txt' -Encoding utf8
+      - name: Upload Linux AppImage only
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: vis-nexo-${{ matrix.name }}
+          name: vis-nexo-linux
           path: |
-            target/release/bundle/appimage/**
-            target/release/bundle/nsis/**
-            target/release/VIS-Nexo-Windows-Portable.zip
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/SHA256SUMS
           if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows NSIS installer and portable ZIP only
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-windows
+          path: |
+            target/release/bundle/nsis/*.exe
+            target/release/VIS-Nexo-Windows-Portable.zip
+            target/release/SHA256SUMS-Windows.txt
+          if-no-files-found: error
+          retention-days: 30
