@@ -137,7 +137,14 @@ pub fn import_instance(archive: &Path, library: &Path, taken_names: &[String]) -
     let mut instance=manifest.instance;
     instance.name=name;instance.project_id="__personal__".into();instance.game_dir=destination.to_string_lossy().into_owned();
     instance.java_path.clear();instance.source_owner.clear();instance.reuse_source.clear();
-    instance.installed=crate::minecraft::installed(&destination,&instance);
+    if instance.engine=="horizon" {
+        // A copied ZIP cannot reuse the exporting computer's absolute paths.
+        // Unverified/incomplete imports remain recoverable through Repair.
+        instance.installed=crate::horizon::relocate_imported(&destination,&mut instance).is_ok()
+            && crate::horizon::installed(&destination,&instance);
+    } else {
+        instance.installed=crate::minecraft::installed(&destination,&instance);
+    }
     Ok(instance)
 }
 
