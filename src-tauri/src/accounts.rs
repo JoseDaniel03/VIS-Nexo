@@ -178,6 +178,27 @@ impl LocalStore {
         }
         Ok(())
     }
+    /// Store only an OS-local profile label. The Microsoft/Minecraft access
+    /// token remains exclusively in the Rust process, never accounts.json.
+    pub fn ensure_microsoft_profile(&mut self, minecraft_uuid: &str) -> Result<String,String> {
+        if minecraft_uuid.len()!=32 || !minecraft_uuid.bytes().all(|b|b.is_ascii_hexdigit()){
+            return Err("UUID de Minecraft inválido".into());
+        }
+        let username=format!("msa_{}",&minecraft_uuid.to_ascii_lowercase()[..20]);
+        if let Some(existing)=self.get(&username){
+            return if existing.microsoft_linked && existing.password_hash.is_empty()
+                && existing.role==Role::User {Ok(username)}
+            else {Err("Ya existe un perfil local con ese identificador".into())}
+        }
+        self.data.accounts.push(Account {
+            username:username.clone(),password_hash:String::new(),role:Role::User,
+            avatar:String::new(),skin:String::new(),cape:String::new(),
+            avatar_layer:String::new(),profile_banner:String::new(),
+            microsoft_linked:true
+        });
+        if let Err(e)=self.save(){self.data.accounts.pop();return Err(e);}
+        Ok(username)
+    }
     pub fn register(&mut self, name: &str, password: &str, repeat: &str) -> Result<String, String> {
         if let Some(error)=&self.load_error {return Err(error.clone());}
         let normalized = name.trim().to_ascii_lowercase();
