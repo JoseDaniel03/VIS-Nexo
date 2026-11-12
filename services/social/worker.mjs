@@ -749,7 +749,7 @@ export default {
         ).all();
         const ready = new Set((tables.results || []).map(x => x.name)).size === 13 &&
           new Set((columns.results || []).map(x=>x.name)).size === 6;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 7 : 0 },
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 8 : 0 },
           ready ? 200 : 503);
       }
       if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
