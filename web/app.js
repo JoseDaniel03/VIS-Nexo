@@ -113,6 +113,9 @@ let lastMinecraftExit = null;
 let horizonChecks = [];
 let horizonLibraryBuilds = [];
 let mcSelected = null, modKind = 'mod', modSearchQuery = '', installProgress = null, minecraftBusy = false;
+let bulkInstanceMode=false;
+const bulkInstanceSelection=new Set();
+const instanceSelectionKey=(instance)=>JSON.stringify([instance.project_id,instance.name]);
 let lastDialogTrigger = null;
 let prefs = {reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches};
 let demoAccounts=[];
@@ -659,7 +662,8 @@ function personalHomePage(){
  return `<div class="content-inner home-page user-library-page">${modeSelector()}
  <div class="user-library-hero"><div><span class="page-eyebrow">BIBLIOTECA PERSONAL</span><h1>Tu Minecraft, a tu manera.</h1><p>Creá varias versiones Vanilla, Fabric o Horizon Rust, instalá mods compatibles y mantené cada mundo separado de los proyectos oficiales.</p></div>
  ${!isGuest()?`<button class="primary-btn" data-action="new-personal-instance">${I('plus',18)} Crear instancia</button>`:''}</div>
- <div class="section-heading"><div><span class="page-eyebrow">MIS PERFILES</span><h2>Instancias personales <small>${items.length}</small></h2></div><button class="outline-btn" data-action="go-instances">${I('layers',16)} Ver todas</button></div>
+ <div class="section-heading"><div><span class="page-eyebrow">MIS PERFILES</span><h2>Instancias personales <small>${items.length}</small></h2></div><div class="vis-instance-toolbar">${items.some(i=>!i.source_owner)?`<button class="outline-btn" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar'}</button>`:''}<button class="outline-btn" data-action="go-instances">${I('layers',16)} Ver todas</button></div></div>
+ ${bulkInstanceMode?bulkInstanceToolbar(items.filter(i=>!i.source_owner)):''}
  ${items.length?`<div class="instance-list">${items.map(instanceLine).join('')}</div>`:quietEmpty('Todavía no creaste instancias personales',isGuest()?'Las cuentas offline solo pueden iniciar instancias ya instaladas.':'Elegí la versión de Minecraft, Vanilla o Fabric, configurá la RAM y empezá sin crear un proyecto oficial.')}
  ${isGuest()?`<button class="outline-btn" data-action="go-instances">${I('play',16)} Ver juegos offline disponibles</button>`:''}
  </div>`;
@@ -891,7 +895,7 @@ function visSkinDialog(){
 function isExecutionEnabled(p){return p?.installable&&db.project_execution?.[p.id]!==false;}
 function selectedMcInstance(){return db.instances.find(i=>i.project_id===mcSelected?.projectId&&i.name===mcSelected?.name)||(libraryMode==='user'?personalInstances()[0]:officialInstances()[0])||null;}
 function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const allow=i.project_id===PERSONAL_PROJECT_ID || isExecutionEnabled(p);
- return `<article class="instance-card"><div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · partidas separadas para tu perfil</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
+ return `<article class="instance-card">${bulkInstanceMode&&!isGuest()&&!i.source_owner?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · partidas separadas para tu perfil</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
  <div class="mc-instance-actions">${isGuest()||i.source_owner?'':`<button class="outline-btn" data-action="manage-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('settings',16)} Mods y archivos</button>
  <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?'Reparar':'Instalar'}</button>`}
  <button class="primary-btn" data-action="launch-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" ${!i.installed||!allow||minecraftBusy?'disabled':''}>${I('play',17)} Jugar</button>
@@ -909,11 +913,41 @@ function minecraftExitNotice(){
  <button class="outline-btn" data-action="dismiss-launch-diagnostic">Cerrar diagnóstico</button>
  </section>`;
 }
-function instancesPage(){const items=isGuest()?db.instances:(libraryMode==='user'?personalInstances():officialInstances());return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">MINECRAFT / INSTANCIAS</span><h1>${libraryMode==='user'?'Mis instancias':'Instancias de Universe'}</h1><p>${isGuest()?'Instancias instaladas por los perfiles VIS de esta computadora. Cada jugador conserva sus propios mundos.':'Instalá Minecraft Java (Vanilla/Fabric) o prepará Horizon Rust Edition sin utilizar su launcher.'}</p></div><div class="vis-instance-toolbar">${isGuest()?'':`<button class="outline-btn" data-action="import-worlds-instance">${I('upload',18)} Importar ZIP VIS</button>`}<button class="primary-btn" data-action="open-instance" ${!isGuest()&&(libraryMode==='user'||db.projects.length)?'':'disabled'}>${I('plus',18)} Nueva instancia</button></div></div>
+function instancesPage(){const items=isGuest()?db.instances:(libraryMode==='user'?personalInstances():officialInstances());const owned=items.filter(i=>!i.source_owner);return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">MINECRAFT / INSTANCIAS</span><h1>${libraryMode==='user'?'Mis instancias':'Instancias de Universe'}</h1><p>${isGuest()?'Instancias instaladas por los perfiles VIS de esta computadora. Cada jugador conserva sus propios mundos.':'Instalá Minecraft Java (Vanilla/Fabric) o prepará Horizon Rust Edition sin utilizar su launcher.'}</p></div><div class="vis-instance-toolbar">${!isGuest()&&owned.length?`<button class="outline-btn ${bulkInstanceMode?'danger':''}" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar para quitar'}</button>`:''}${isGuest()?'':`<button class="outline-btn" data-action="import-worlds-instance">${I('upload',18)} Importar ZIP VIS</button>`}<button class="primary-btn" data-action="open-instance" ${!isGuest()&&(libraryMode==='user'||db.projects.length)?'':'disabled'}>${I('plus',18)} Nueva instancia</button></div></div>
+ ${bulkInstanceMode&&!isGuest()?bulkInstanceToolbar(owned):''}
  ${minecraftBusy?`<div class="mc-progress" id="minecraft-progress">${I('upload',16)} ${esc(installProgress?.detail||'Preparando descarga...')}</div>`:''}
  <aside class="vis-smart-tip">${I('info',17)} <div><strong>VIS Smart Install</strong><span>Si ya tenés esta versión en Minecraft oficial, CurseForge, Prism o VIS Worlds, se intentarán copiar únicamente los archivos comprobados por SHA-1. El resto se descarga normalmente.</span></div></aside>
  ${minecraftExitNotice()}
  ${items.length?`<div class="instance-list">${items.map(instanceLine).join('')}</div>`:quietEmpty('Sin instancias configuradas',libraryMode==='user'?'Creá un Minecraft personal sin depender de un proyecto del administrador.':isGuest()?'Necesitás una instancia Java instalada en cualquiera de los perfiles locales de VIS.':'Elegí un proyecto habilitado, seleccioná la versión de Minecraft y creá tu primera instancia.')}</div>`;}
+function bulkInstanceToolbar(available){
+ const count=available.filter(i=>bulkInstanceSelection.has(instanceSelectionKey(i))).length;
+ return '<div class="bulk-instance-toolbar" role="group" aria-label="Selección de instancias">'+
+ '<strong>'+count+' seleccionada'+(count===1?'':'s')+'</strong>'+
+ '<span class="muted">Solo se pueden seleccionar tus instancias. Las compartidas pertenecen a otro perfil.</span>'+
+ '<button type="button" class="outline-btn" data-action="bulk-instance-select-all">Seleccionar todas</button>'+
+ '<button type="button" class="danger-btn" data-action="bulk-instance-confirm" '+(count?'':'disabled')+'>'+
+ I('trash',16)+' Quitar '+count+'</button></div>';
+}
+function bulkInstanceDeleteDialog(){
+ const keys=[...bulkInstanceSelection];
+ const instances=(db.instances||[]).filter(i=>!i.source_owner&&keys.includes(instanceSelectionKey(i)));
+ const rows=instances.map(i=>'<li><strong>'+esc(i.name)+'</strong><small> · '+esc(i.engine==='horizon'?'Horizon Rust':'Minecraft Java')+
+   ' · '+esc(i.game_dir||'Carpeta administrada')+'</small></li>').join('');
+ return '<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-medium" role="alertdialog" aria-modal="true" aria-label="Confirmar eliminación múltiple">'+
+ '<header class="modal-head"><div><span class="page-eyebrow">OPERACIÓN IRREVERSIBLE SI BORRÁS ARCHIVOS</span><h2>Quitar '+instances.length+
+ ' instancia'+(instances.length===1?'':'s')+'</h2></div>'+
+ '<button type="button" class="icon-btn" data-action="close-modal" aria-label="Cerrar">'+I('x',18)+'</button></header>'+
+ '<div class="modal-body bulk-delete-body"><p>Revisá las instancias seleccionadas:</p>'+
+ '<ul class="bulk-instance-summary">'+rows+'</ul>'+
+ '<label class="toggle-line large"><span><b>Borrar también los mundos y archivos del disco</b>'+
+ '<small>De forma predeterminada, los mundos se conservan. Si activás esta opción, el borrado es irreversible y solo se permite en Instancias/&lt;nombre&gt; administradas por VIS. Cerrá Minecraft antes.</small></span>'+
+ '<input type="checkbox" id="bulk-delete-files"/></label>'+
+ '<label class="bulk-confirm-label">Escribí <strong>CONFIRMAR</strong> para continuar'+
+ '<input id="bulk-delete-confirm-input" type="text" spellcheck="false" autocomplete="off" placeholder="CONFIRMAR" maxlength="20" aria-label="Escribir CONFIRMAR" autofocus/></label>'+
+ '</div><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button>'+
+ '<button type="button" class="danger-btn" data-action="bulk-delete-execute" disabled>'+
+ I('trash',16)+' Quitar instancias seleccionadas</button></footer></div></div>';
+}
 function minecraftPage(){if(isGuest())return `<div class="content-inner"><div class="page-heading"><h1>Minecraft offline</h1><p>Solo inicio de instancias ya instaladas, sin autenticación Microsoft.</p></div><button class="primary-btn" data-action="go-instances">Ver instancias disponibles</button></div>`;const i=selectedMcInstance();const p=db.projects.find(x=>x.id===i?.project_id);
  return `<div class="content-inner mc-manager"><div class="page-heading"><div><span class="page-eyebrow">VIS WORLDS · MOTORES</span><h1>Centro de Minecraft</h1><p>Buscá mods compatibles, importá tus JARs y administrá recursos sin abrir carpetas a mano.</p></div><button class="outline-btn" data-action="go-instances">${I('layers',16)} Instancias</button></div>
  ${!i?quietEmpty('Primero creá una instancia','Desde Instancias elegí un proyecto, la versión oficial de Minecraft y Fabric o Vanilla.'):
@@ -1171,7 +1205,7 @@ async function projectInstallAndPlay(){
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste es exclusivo de tu perfil VIS. No modifica la instalación ni los mundos del propietario.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
 function confirmDialog(){return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="alertdialog" aria-modal="true"><header class="modal-head"><h2>Confirmar eliminación</h2><button class="icon-btn" data-action="close-modal">${I('x',18)}</button></header><div class="modal-body"><p>¿Querés quitar <strong>${esc(dialog.label)}</strong> de VIS Nexo? Por defecto <b>se conservan todos los mundos y archivos del disco</b>.</p>
  ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los archivos del disco</b><small>Irreversible. Disponible solo para instalaciones administradas por VIS en Instancias/&lt;nombre&gt;. Cerrá el juego antes.</small></span><input type="checkbox" id="delete-instance-files"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
-function dialogView(){return dialog?.type==='edit-profile'?editProfileDialog():dialog?.type==='vis-skin'?visSkinDialog():dialog?.type==='project'?projectWizard():dialog?.type==='quick-post'?quickPublishDialog():dialog?.type==='crop'?cropDialog():dialog?.type==='avatar'?avatarDialog():dialog?.type==='instance'?instanceDialog():dialog?.type==='project-install'?projectInstallDialog():dialog?.type==='shared-ram'?sharedRamDialog():confirmDialog();}
+function dialogView(){return dialog?.type==='bulk-instance-delete'?bulkInstanceDeleteDialog():dialog?.type==='edit-profile'?editProfileDialog():dialog?.type==='vis-skin'?visSkinDialog():dialog?.type==='project'?projectWizard():dialog?.type==='quick-post'?quickPublishDialog():dialog?.type==='crop'?cropDialog():dialog?.type==='avatar'?avatarDialog():dialog?.type==='instance'?instanceDialog():dialog?.type==='project-install'?projectInstallDialog():dialog?.type==='shared-ram'?sharedRamDialog():confirmDialog();}
 function viewSnapshot(){
  return {
    screen:db.user?`${libraryMode}:${page}:${page==='project'?selectedId:''}`:'auth',authMode,
@@ -1797,6 +1831,40 @@ root.addEventListener('click',async event=>{
  else if(act==='show-shared-instance'){
    await apply('set_shared_hidden',{sourceOwner:button.dataset.source,projectId,name:id,hidden:false},'Instancia compartida restaurada');
  }
+ else if(act==='bulk-instance-mode'){
+   bulkInstanceMode=!bulkInstanceMode;bulkInstanceSelection.clear();render();
+ }
+ else if(act==='bulk-instance-toggle'){
+   const key=JSON.stringify([projectId,id]);
+   const exists=db.instances.some(i=>!i.source_owner&&i.project_id===projectId&&i.name===id);
+   if(!exists)return;
+   if(button.checked)bulkInstanceSelection.add(key);else bulkInstanceSelection.delete(key);
+   render();
+ }
+ else if(act==='bulk-instance-select-all'){
+   const relevant=(page==='instances'?
+     (libraryMode==='user'?personalInstances():officialInstances()):personalInstances()).filter(i=>!i.source_owner);
+   if(relevant.length>50)return message('Seleccioná hasta 50 instancias por tanda.',true);
+   for(const i of relevant)bulkInstanceSelection.add(instanceSelectionKey(i));
+   render();
+ }
+ else if(act==='bulk-instance-confirm'){
+   if(!bulkInstanceSelection.size)return;
+   dialog={type:'bulk-instance-delete'};render();
+ }
+ else if(act==='bulk-delete-execute'){
+   if(document.getElementById('bulk-delete-confirm-input')?.value!=='CONFIRMAR')
+     return message('Escribí exactamente CONFIRMAR para continuar.',true);
+   const entries=db.instances.filter(i=>!i.source_owner&&bulkInstanceSelection.has(instanceSelectionKey(i)))
+     .map(i=>({project_id:i.project_id,name:i.name}));
+   if(entries.length!==bulkInstanceSelection.size)return message('La selección cambió; revisá las instancias.',true);
+   const eraseFiles=document.getElementById('bulk-delete-files')?.checked===true;
+   const ok=await apply('delete_instances_batch',{
+       instances:entries,eraseFiles,confirmation:'CONFIRMAR'},
+       eraseFiles?'Se eliminaron las instancias seleccionadas y sus archivos VIS':
+         'Las instancias fueron quitadas de VIS; tus mundos permanecen en el disco');
+   if(ok){bulkInstanceSelection.clear();bulkInstanceMode=false;dialog=null;mcSelected=null;render();}
+ }
  else if(act==='delete-instance'){dialog={type:'confirm',kind:'instance',name:id,projectId,label:id};render();}
  else if(act==='delete-project'){dialog={type:'confirm',kind:'project',projectId:id,label:db.projects.find(p=>p.id===id)?.title||id};contextMenu=null;render();}
  else if(act==='confirm-delete'){
@@ -1807,6 +1875,12 @@ root.addEventListener('click',async event=>{
      eraseFiles?'Instancia y sus archivos VIS eliminados':'Instancia quitada de la biblioteca; los mundos siguen en el disco');
    if(ok){dialog=null;mcSelected=null;render();}
  }
+ }
+});
+root.addEventListener('input',event=>{
+ if(event.target?.id==='bulk-delete-confirm-input'){
+   const button=root.querySelector('[data-action="bulk-delete-execute"]');
+   if(button)button.disabled=event.target.value!=='CONFIRMAR';
  }
 });
 root.addEventListener('contextmenu',async e=>{
