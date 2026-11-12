@@ -683,6 +683,34 @@ fn set_shared_hidden(
     s.storage.save_prefs(&viewer,&prefs)?;
     Ok(s.snapshot())
 }
+/// Resolve the actual per-player game directory without exposing arbitrary paths.
+#[tauri::command]
+fn instance_folder(state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>)->Result<String,String>{
+ let s=locked(&state)?;
+ let (owner,instance,visitor)=if let Some(guest)=s.guest_name.as_ref(){
+   let from=source_owner.as_deref().filter(|v|!v.is_empty()).ok_or("Elegí la instalación compartida")?;
+   let ins=s.guest_instances().into_iter().find(|i|
+     i.source_owner==from&&i.project_id==project_id&&i.name==name)
+     .ok_or("La instancia ya no está disponible")?;
+   (from.to_owned(),ins,Some(guest.clone()))
+ }else{
+   let user=s.username()?.to_owned();
+   if let Some(from)=source_owner.as_deref().filter(|v|*v!=user){
+     let ins=s.machine_instances(Some(&user)).into_iter().find(|i|
+       i.source_owner==from&&i.project_id==project_id&&i.name==name)
+       .ok_or("La instancia compartida no está disponible")?;
+     (from.to_owned(),ins,Some(user))
+   }else{
+     let (owner,ins)=checked_instance(&s,&project_id,&name,false)?;
+     (owner,ins,None)
+   }
+ };
+ let dir=if let Some(visitor)=visitor{
+   minecraft::shared_game_directory(&s.data_root,&owner,&instance,&visitor)?
+ }else{minecraft::instance_dir(&s.data_root,&owner,&instance)?};
+ if !dir.is_dir(){return Err("La carpeta todavía no existe. Instalá o iniciá la instancia primero.".into());}
+ Ok(dir.to_string_lossy().into_owned())
+}
 #[tauri::command]
 fn delete_instance(
     state: State<'_, Mutex<Backend>>, project_id: String, name: String,
@@ -1463,7 +1491,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
