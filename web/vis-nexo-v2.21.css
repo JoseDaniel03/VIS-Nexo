@@ -178,3 +178,30 @@ html,body,#app{min-width:0;max-width:100%;min-height:0}
  .profile-skin-head,.profile-skin-nohead{width:59px;height:59px}
  .profile-v21 .profile-share{width:100%;justify-content:center}
 }
+
+/* Device-code authentication stays usable even if xdg-open fails on AppImage. */
+.ms-copy-options{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 3px}
+.ms-copy-options button{min-width:0;flex:1 1 145px;display:flex;align-items:center;justify-content:center;gap:7px}
+.microsoft-device-flow .ms-code{user-select:text;overflow-wrap:anywhere}
+.microsoft-device-flow strong{color:#e2d3fc;font-weight:650}
+/* Explicit bulk deletion never makes checkboxes inaccessible at small widths. */
+.vis-instance-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bulk-instance-choice{display:flex;align-items:center;gap:7px;cursor:pointer;flex:0 0 auto;font-size:11px;font-weight:650;color:#d9c7ee}
+.bulk-instance-choice input{width:17px;height:17px;accent-color:#9c6aff;cursor:pointer}
+.bulk-instance-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;margin:12px 0 16px;padding:12px 14px;background:#24192f;border:1px solid #6b435a;border-radius:10px}
+.bulk-instance-toolbar .muted{flex:1 1 210px;min-width:0;font-size:11px;line-height:1.5}
+.bulk-instance-toolbar>button{max-width:100%;min-width:0}
+.bulk-instance-summary{max-height:min(260px,28dvh);overflow:auto;padding:10px 10px 10px 27px;display:flex;flex-direction:column;gap:7px;background:#21192e;border:1px solid #4f3d61;border-radius:9px}
+.bulk-instance-summary li{font-size:12px;overflow-wrap:anywhere}
+.bulk-instance-summary small{display:block;color:#b7abc9;line-height:1.4}
+.bulk-delete-body{display:flex;flex-direction:column;gap:15px}
+.bulk-confirm-label{display:flex;flex-direction:column;gap:8px;font-size:12px}
+.bulk-confirm-label input{max-width:100%;border:1px solid #a46ab1;background:#1d1728;border-radius:8px;color:#fff;padding:12px 14px;font-weight:750;letter-spacing:.04em}
+.bulk-confirm-label input:focus-visible{outline-color:#f3b2ff}
+.bulk-delete-body .toggle-line{align-items:flex-start;gap:14px}
+.bulk-delete-body .toggle-line input{flex-shrink:0}
+@media(max-width:730px){
+ .bulk-instance-toolbar>button{flex:1 1 140px}
+ .bulk-instance-choice{width:100%}
+ .ms-copy-options{flex-direction:column}
+}
