@@ -530,6 +530,60 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test] fn fork_release_requires_exact_repo_and_github_digest(){
+        let name=fork_asset_name().unwrap();
+        let good=ForkAsset{
+            name:name.into(),
+            browser_download_url:format!("https://github.com/{VIS_FORK}/releases/download/visgame-123456789abc/{name}"),
+            size:25_000_000,
+            digest:Some(format!("sha256:{}", "b".repeat(64)))
+        };
+        let release=ForkRelease{tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![good]};
+        assert!(fork_release(&[release],"missing").is_err());
+        assert!(fork_tag_valid("visgame-123456789abc"));
+        assert!(!fork_tag_valid("visgame-../../bad"));
+        let mut bad=ForkAsset{name:name.into(),browser_download_url:
+            "https://attacker.invalid/game.tar.gz".into(),size:25000,
+            digest:Some(format!("sha256:{}", "b".repeat(64)))};
+        assert!(fork_release(&[ForkRelease{
+            tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![bad.clone()]
+        }],name).is_err());
+        bad.browser_download_url=format!(
+            "https://github.com/{VIS_FORK}/releases/download/visgame-123456789abc/{name}"
+        );
+        bad.digest=None;
+        assert!(fork_release(&[ForkRelease{
+            tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![bad]
+        }],name).is_err());
+    }
+    #[test] fn fork_metadata_rejects_tampering_and_wrong_commit(){
+        let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir=std::env::temp_dir().join(format!("vis-fork-tests-{}-{stamp}",std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entries=[
+            binary(&dir,"horizon-client"),binary(&dir,"horizon-prepare"),
+            dir.join("research-lock.json"),dir.join("LICENSE"),
+            dir.join("THIRD_PARTY_NOTICES.md")
+        ];
+        let mut hashes=serde_json::Map::new();
+        for path in entries{
+            fs::write(&path,b"test-bytes").unwrap();
+            hashes.insert(path.file_name().unwrap().to_string_lossy().into_owned(),
+                serde_json::Value::String(sha256_file(&path).unwrap()));
+        }
+        let tag="visgame-123456789abc";
+        let data=serde_json::json!({
+            "source_repo":"https://github.com/JoseDaniel03/horizon-VISNEXO.git",
+            "source_commit":"123456789abc0000000000000000000000000000",
+            "minecraft_assets_included":false,"sha256":hashes
+        });
+        fs::write(dir.join("vis-horizon-source.json"),serde_json::to_vec(&data).unwrap()).unwrap();
+        assert!(fork_metadata(&dir,tag).is_ok());
+        fs::write(binary(&dir,"horizon-client"),b"tampered").unwrap();
+        assert!(fork_metadata(&dir,tag).is_err());
+        assert!(fork_metadata(&dir,"visgame-abcdef123456").is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test] fn nightly_title_is_bound_to_tag_and_commit(){
         let base=Release{tag_name:"nightly".into(),name:"Nightly 2026-11-10 · a1b2c3d".into(),
             draft:false,assets:vec![],published_at:None};
