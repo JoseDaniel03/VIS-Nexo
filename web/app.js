@@ -17,6 +17,7 @@ const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_req
 let db = empty();
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
 let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
+let premiumCosmetics=null, premiumCosmeticsBusy=false;
 async function cancelMicrosoftLogin(){
  microsoftPollGeneration++;
  microsoftTicket=null;
@@ -41,6 +42,7 @@ async function beginMicrosoftLogin(){
        microsoftTicket=null;
        db=result.snapshot;
        microsoftGamertag=result.minecraft_name;
+       premiumCosmetics=null;
        page='home';await refreshAssets();render();
        message('Microsoft conectado · Minecraft '+result.minecraft_name);
        // Minecraft authentication and VIS Social are separate identities.
@@ -573,10 +575,56 @@ function projectPage(){
  </div>`;
 }
 function quietEmpty(title,desc){return `<div class="quiet-empty">${I('layers',25)}<h3>${esc(title)}</h3><p>${esc(desc)}</p></div>`;}
+async function loadPremiumCosmetics(){
+ if(!native||!microsoftGamertag||premiumCosmeticsBusy)return;
+ premiumCosmeticsBusy=true;if(page==='profile')render();
+ try{premiumCosmetics=await command('microsoft_cosmetics');}
+ catch(error){message('Minecraft Premium: '+String(error),true);}
+ finally{premiumCosmeticsBusy=false;if(page==='profile')render();}
+}
+async function changePremiumCosmetic(action,params={}){
+ if(!native||!microsoftGamertag||premiumCosmeticsBusy)return;
+ premiumCosmeticsBusy=true;render();
+ try{
+   premiumCosmetics=await command(action,params);
+   message('Cosmético oficial actualizado en Minecraft.');
+ }catch(error){message('Minecraft Premium: '+String(error),true);}
+ finally{premiumCosmeticsBusy=false;render();}
+}
+function premiumCosmeticsPanel(){
+ if(!microsoftGamertag)return '';
+ const skins=premiumCosmetics?.skins||[],capes=premiumCosmetics?.capes||[];
+ const skinRows=skins.map(skin=>'<div class="premium-cosmetic-entry">'+
+   (skin.url?'<img src="'+attr(skin.url)+'" alt="Textura de skin" loading="lazy"/>':'')+
+   '<span>'+esc(skin.variant==='SLIM'?'Modelo delgado':'Modelo clásico')+
+   '<small>'+(skin.state==='ACTIVE'?' · Equipada':' · Anterior')+'</small></span>'+
+   (skin.state==='ACTIVE'?'':'<button class="outline-btn" data-action="premium-use-skin" data-id="'+attr(skin.id)+'">Usar</button>')+'</div>').join('');
+ const capeRows=capes.map(cape=>'<div class="premium-cosmetic-entry">'+
+   (cape.url?'<img src="'+attr(cape.url)+'" alt="Textura de capa" loading="lazy"/>':'')+
+   '<span>'+esc(cape.alias||'Capa oficial')+
+   '<small>'+(cape.state==='ACTIVE'?' · Equipada':' · Disponible')+'</small></span>'+
+   (cape.state==='ACTIVE'?'':'<button class="outline-btn" data-action="premium-use-cape" data-id="'+attr(cape.id)+'">Equipar</button>')+'</div>').join('');
+ return '<section class="surface-card premium-cosmetics">'+
+   '<div class="card-heading">'+I('game',20)+' Perfil oficial de Minecraft Java '+
+     '<button class="outline-btn" data-action="premium-refresh" '+(premiumCosmeticsBusy?'disabled':'')+'>'+I('cloud',15)+' Actualizar</button></div>'+
+   '<p class="muted"><b>'+esc(microsoftGamertag)+'</b> · Skins y capas oficiales de tu cuenta Microsoft. No son el avatar de VIS Social.</p>'+
+   (premiumCosmeticsBusy?'<p class="muted">Consultando Minecraft Services…</p>':'')+
+   (premiumCosmetics?'<div class="premium-cosmetics-grid">'+
+     '<div class="premium-cosmetics-group"><h3>Skins anteriores y equipadas ('+skins.length+')</h3>'+
+       (skinRows||'<p class="muted">No hay skins para mostrar.</p>')+
+       '<div class="profile-actions"><label>Modelo <select id="premium-skin-model"><option value="classic">Clásico</option><option value="slim">Delgado</option></select></label>'+
+         '<button class="primary-btn" data-action="premium-upload-skin">'+I('upload',16)+' Subir PNG 64×64</button></div></div>'+
+     '<div class="premium-cosmetics-group"><h3>Capas oficiales ('+capes.length+')</h3>'+
+       (capeRows||'<p class="muted">No tenés capas oficiales disponibles.</p>')+
+       '<button class="outline-btn" data-action="premium-hide-cape" '+(!capes.some(c=>c.state==='ACTIVE')?'disabled':'')+'>Ocultar capa</button>'+
+       '<small class="muted">Solo se pueden equipar capas que la cuenta ya posee.</small></div></div>':
+     '<button class="outline-btn" data-action="premium-refresh">Consultar mis skins y capas</button>')+
+   '</section>';
+}
 function profilePage(){if(isGuest())return `<div class="content-inner"><div class="page-heading"><h1>Modo offline</h1></div><section class="surface-card"><p>Sesión temporal: ${esc(displayAccount(db.user?.username))}. No se creó una cuenta. Solo podés iniciar instancias existentes.</p><button class="primary-btn" data-action="go-instances">Ver instancias instaladas</button><button class="outline-btn" data-action="logout">Salir</button></section></div>`;return `<div class="content-inner profile-page"><div class="page-heading"><div><span class="page-eyebrow">IDENTIDAD / CUENTA</span><h1>Mi perfil</h1><p>Tu presencia e identidad en el ecosistema VIS Nexo.</p></div><button class="outline-btn" data-action="edit-avatar">${I('edit',17)} Personalizar avatar</button></div>
  <div class="profile-banner portal-profile-banner" ${db.user?.profile_banner&&preview(db.user.profile_banner)?`style="background-image:linear-gradient(90deg,rgba(18,12,35,.9),rgba(20,12,38,.33)),url('${preview(db.user.profile_banner)}');background-position:center;background-size:cover"`:''}><div class="profile-orb"></div><div class="profile-portrait">${userAvatar(116)}<button type="button" class="avatar-overlay-edit" data-action="edit-avatar" aria-label="Cambiar avatar">${I('edit',18)}</button></div><div class="profile-titles"><span class="page-eyebrow">MI CUENTA</span><h2>${esc(displayAccount(db.user?.username))}</h2><div><span class="role-chip">${humanRole(db.user?.role)}</span><span class="role-chip ghost">${esc(names[db.user?.presence]||'Conectado')}</span></div></div></div>
  <div class="profile-stat-row"><div>${I('grid',20)} <strong>${db.projects.length}</strong><span>Proyectos</span></div><div>${I('layers',20)} <strong>${db.instances.length}</strong><span>Instancias</span></div><div>${I('users',20)} <strong>${db.friends.length}</strong><span>Amigos globales</span></div></div>
- <div class="settings-grid"><section class="surface-card"><div class="card-heading">${I('user',21)} Avatar y apariencia</div><p class="muted">Importá una imagen o elegí un emblema abstracto. Los ajustes se guardan en tu cuenta local.</p><div class="profile-actions"><button class="outline-btn" data-action="edit-avatar">${I('image',18)} Abrir editor de avatar</button><button class="subtle-btn" data-action="import-avatar">${I('upload',17)} Importar foto</button><button class="subtle-btn" data-action="import-avatar-layer">${I('layers',17)} Capa superpuesta PNG</button><button class="outline-btn" data-action="import-profile-banner">${I('image',17)} Banner de perfil</button>${db.user?.profile_banner?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="profile_banner">${I('trash',15)} Quitar banner</button><button class="subtle-btn" data-action="crop-profile-existing" data-kind="profile_banner">${I('crop',15)} Ajustar banner</button>`:''}</div></section><section class="surface-card"><div class="card-heading">${I('game',21)} Skin de Minecraft</div><p class="muted">Importá una skin Minecraft PNG 64×64 o 64×32 para tu biblioteca local. Para aplicarla a tu personaje oficial necesitás Microsoft.</p>${db.user?.skin&&preview(db.user.skin)?`<img class="mc-skin-preview" src="${preview(db.user.skin)}" alt="Skin local importada"/>`:''}<div class="profile-actions"><button class="outline-btn" data-action="import-skin">${I('upload',18)} Importar skin PNG</button><button class="outline-btn" data-action="import-cape">${I('upload',18)} Importar capa local</button>${db.user?.skin?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="skin">${I('trash',16)} Quitar skin</button>`:''}${db.user?.cape?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="cape">${I('trash',16)} Quitar capa</button>`:''}</div><small class="muted">Las capas locales NO se muestran automáticamente en servidores oficiales.</small></section><section class="surface-card"><div class="card-heading">${I('layers',21)} Instancias</div><p class="muted">Administrá la memoria y las versiones de las instancias de tu equipo.</p><button class="outline-btn" data-action="go-instances">Ver mis instancias ${I('arrow',17)}</button></section><section class="surface-card"><div class="card-heading">${I('shield',21)} Acceso y privacidad</div><p class="muted">Cuenta local protegida con Argon2id. Las sesiones Microsoft se mantienen en memoria; VIS Social utiliza una identidad independiente.</p><button class="outline-btn" data-action="logout">${I('logout',17)} Cerrar sesión</button></section></div></div>`;}
+ ${premiumCosmeticsPanel()}<div class="settings-grid"><section class="surface-card"><div class="card-heading">${I('user',21)} Avatar y apariencia</div><p class="muted">Importá una imagen o elegí un emblema abstracto. Los ajustes se guardan en tu cuenta local.</p><div class="profile-actions"><button class="outline-btn" data-action="edit-avatar">${I('image',18)} Abrir editor de avatar</button><button class="subtle-btn" data-action="import-avatar">${I('upload',17)} Importar foto</button><button class="subtle-btn" data-action="import-avatar-layer">${I('layers',17)} Capa superpuesta PNG</button><button class="outline-btn" data-action="import-profile-banner">${I('image',17)} Banner de perfil</button>${db.user?.profile_banner?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="profile_banner">${I('trash',15)} Quitar banner</button><button class="subtle-btn" data-action="crop-profile-existing" data-kind="profile_banner">${I('crop',15)} Ajustar banner</button>`:''}</div></section><section class="surface-card"><div class="card-heading">${I('game',21)} Skin de Minecraft</div><p class="muted">Importá una skin Minecraft PNG 64×64 o 64×32 para tu biblioteca local. Para aplicarla a tu personaje oficial necesitás Microsoft.</p>${db.user?.skin&&preview(db.user.skin)?`<img class="mc-skin-preview" src="${preview(db.user.skin)}" alt="Skin local importada"/>`:''}<div class="profile-actions"><button class="outline-btn" data-action="import-skin">${I('upload',18)} Importar skin PNG</button><button class="outline-btn" data-action="import-cape">${I('upload',18)} Importar capa local</button>${db.user?.skin?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="skin">${I('trash',16)} Quitar skin</button>`:''}${db.user?.cape?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="cape">${I('trash',16)} Quitar capa</button>`:''}</div><small class="muted">Las capas locales NO se muestran automáticamente en servidores oficiales.</small></section><section class="surface-card"><div class="card-heading">${I('layers',21)} Instancias</div><p class="muted">Administrá la memoria y las versiones de las instancias de tu equipo.</p><button class="outline-btn" data-action="go-instances">Ver mis instancias ${I('arrow',17)}</button></section><section class="surface-card"><div class="card-heading">${I('shield',21)} Acceso y privacidad</div><p class="muted">Cuenta local protegida con Argon2id. Las sesiones Microsoft se mantienen en memoria; VIS Social utiliza una identidad independiente.</p><button class="outline-btn" data-action="logout">${I('logout',17)} Cerrar sesión</button></section></div></div>`;}
 function isExecutionEnabled(p){return p?.installable&&db.project_execution?.[p.id]!==false;}
 function selectedMcInstance(){return db.instances.find(i=>i.project_id===mcSelected?.projectId&&i.name===mcSelected?.name)||(libraryMode==='user'?personalInstances()[0]:officialInstances()[0])||null;}
 function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const allow=i.project_id===PERSONAL_PROJECT_ID || isExecutionEnabled(p);
@@ -930,6 +978,7 @@ function render(){
  }
 }
 function navigate(to,id='') {
+ if(to==='profile'&&microsoftGamertag&&!premiumCosmetics)void loadPremiumCosmetics();
  if(to==='project'&&native&&db.user){
    // Current project images are prioritized; lazy prefetch runs asynchronously.
    void Promise.resolve().then(()=>refreshAssets()).then(scheduleSocialRender).catch(()=>{});
@@ -1218,6 +1267,24 @@ root.addEventListener('click',async event=>{
   }catch(e){message(String(e),true);}
  }
  else if(act==='social-edit-status'){stateEditorOpen=!stateEditorOpen;render();}
+ else if(act==='premium-refresh'){await loadPremiumCosmetics();}
+ else if(act==='premium-use-skin'){
+   if(!premiumCosmetics?.skins?.some(item=>item.id===id))return;
+   await changePremiumCosmetic('microsoft_use_skin',{skinId:id});
+ }
+ else if(act==='premium-use-cape'){
+   if(!premiumCosmetics?.capes?.some(item=>item.id===id))return;
+   await changePremiumCosmetic('microsoft_set_cape',{capeId:id});
+ }
+ else if(act==='premium-hide-cape'){await changePremiumCosmetic('microsoft_hide_cape');}
+ else if(act==='premium-upload-skin'){
+   if(!native||!T?.dialog?.open)return message('Necesitás VIS Nexo instalado para subir una skin.',true);
+   const variant=document.getElementById('premium-skin-model')?.value||'classic';
+   try {
+     const path=await T.dialog.open({directory:false,multiple:false,title:'Skin oficial Minecraft PNG 64x64',filters:[{name:'Skin PNG',extensions:['png']}]});
+     if(path)await changePremiumCosmetic('microsoft_upload_skin',{path,variant});
+   }catch(error){message(String(error),true);}
+ }
  else if(act==='social-copy-handle'){
    const handle=db.user?.username||'';
    if(!handle)return message('No hay cuenta VIS activa.',true);
@@ -1239,7 +1306,7 @@ root.addEventListener('click',async event=>{
   else try{await social.acceptFriend(id);message('Solicitud aceptada');}
   catch(e){message(String(e),true);}
  }
- else if(act==='logout'){microsoftGamertag=null;cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
+ else if(act==='logout'){microsoftGamertag=null;premiumCosmetics=null;cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
  else if(act==='create-project'){startProject();void loadMinecraftVersions();}
  else if(act==='quick-publish'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind||'news'};render();}
  else if(act==='edit-publication'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind,index:Number(button.dataset.index)};render();}
