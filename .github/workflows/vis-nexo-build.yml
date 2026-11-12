@@ -36,7 +36,6 @@ jobs:
     env:
       PYTHONUTF8: "1"
       VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
-      VIS_HORIZON_REF: 1405044d0996d37f850f5ab0dec02bab43d4945f
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,10 +45,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
       - name: Install Linux system libraries
         if: runner.os == 'Linux'
         run: |
@@ -65,10 +60,6 @@ jobs:
         run: |
           cargo check -p vslauncher-tauri --all-targets --locked
           cargo test --workspace --bins --lib --locked
-      - name: Build Minecraft Horizon GAME from official Rust sources
-        run: npm run horizon:source
-      - name: Verify bundled game's source manifest
-        run: npm run horizon:verify
       - name: Build installer
         run: npm run build -- --bundles ${{ matrix.bundles }} --config src-tauri/tauri.unsigned.json
       - name: Upload installer artifacts
