@@ -14,6 +14,8 @@ commands=set(re.findall(r'#\[tauri::command\]\s*(?:async\s+)?fn\s+(\w+)',rust))
 native_modules={}
 if 'mod social;' in rust:
     native_modules['social']=(p/'src-tauri/src/social.rs').read_text()
+if 'mod microsoft;' in rust:
+    native_modules['microsoft']=(p/'src-tauri/src/microsoft.rs').read_text()
 for module, source in native_modules.items():
     commands.update(re.findall(r'#\[tauri::command\]\s*pub\(crate\)\s+(?:async\s+)?fn\s+(\w+)',source))
 assert commands, 'Rust Tauri command list missing'
