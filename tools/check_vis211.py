@@ -14,7 +14,12 @@ checks={
  'mod batch rollback': 'for (file,backup) in promoted.into_iter().rev()' in mc,
  'require Modrinth checksum': 'Modrinth no suministró SHA-1' in mc,
  'no filename collision': 'Dos mods intentan usar el archivo' in mc,
- 'instance path collision': 'Otra instancia ya usa esa carpeta' in main,
+ 'instance path collision': (
+   'instance_guard::independent(&dir,&previous_dir)?' in main
+   and 'mod instance_guard;' in main
+   and 'crate::instance_guard::destination(' in mc
+   and '.minecraft' in (p/'src-tauri/src/instance_guard.rs').read_text()
+ ),
  'enable disable files': 'pub fn toggle_local(' in mc and 'async fn toggle_instance_file(' in main and "data-action=\"toggle-instance-file\"" in ui,
  'retain app identifier': 'com.virgoland.vslauncher' in (p/'src-tauri/tauri.conf.json').read_text(),
 }
