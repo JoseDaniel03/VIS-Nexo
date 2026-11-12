@@ -989,6 +989,9 @@ fn delete_instance(
             if !has_marker && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
                 return Err("La carpeta contiene datos sin marca de instalación VIS. Solo puede quitarse de la biblioteca; no se borrarán archivos desconocidos.".into());
             }
+            // Use the same per-game guard as Java/Horizon and backup/restore.
+            // Never delete a directory that another VIS process is writing to.
+            let _deletion_guard=minecraft::acquire_game_run(&dir)?;
             fs::remove_dir_all(&dir).map_err(|e|format!("No se pudieron borrar los archivos: {e}"))?;
         }
     }
@@ -1081,14 +1084,22 @@ fn delete_instances_batch(
             folders.push(dir);
         }
     }
-    // No filesystem deletion can begin until EVERY selected folder passes
-    // preflight. The selection itself cannot include shared/foreign games.
+    // Lock EVERY writable game folder before deleting ANY selected folder.
+    // Holding all locks until the operation ends avoids a race between
+    // preflight and Minecraft launching from another VIS process.
+    let mut deletion_guards=Vec::new();
+    for folder in &folders {
+        if folder.exists(){
+            deletion_guards.push(minecraft::acquire_game_run(folder)?);
+        }
+    }
     for folder in &folders {
         if folder.exists(){
             fs::remove_dir_all(folder)
                 .map_err(|e|format!("No se pudo eliminar {}: {e}. Revisá el estado antes de reintentar.",folder.display()))?;
         }
     }
+    drop(deletion_guards);
     prefs.instances.retain(|item|!seen.contains(&(String::new(),item.project_id.clone(),item.name.clone())));
     s.storage.save_prefs(&owner,&prefs)?;
     Ok(s.snapshot())
