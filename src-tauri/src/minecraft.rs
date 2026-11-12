@@ -965,7 +965,7 @@ fn historical_shared_dirs(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)
  let internal=PathBuf::from(".vis/players").join(&rel);
  Ok(vec![root.join(internal),data_root.join("shared-player-data").join(rel)])
 }
-fn recovery_sources(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<Vec<PathBuf>,String>{
+pub(crate) fn recovery_sources(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<Vec<PathBuf>,String>{
  let root=instance_dir(data_root,owner,ins)?;
  let mut safe=Vec::new();
  for candidate in historical_shared_dirs(data_root,owner,ins,visitor)? {
