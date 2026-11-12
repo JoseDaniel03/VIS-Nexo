@@ -53,3 +53,14 @@
 .project-mod-item button:hover:not(:disabled){background:#64468a}
 .project-mod-item button:disabled{opacity:.45;cursor:default}
 @media(max-width:720px){.project-mod-search{flex-wrap:wrap}.project-mod-search input{flex-basis:100%}.project-mod-item{align-items:flex-start}}
+
+/* Private instance wizard: small verified layout with no additional panels. */
+.instance-ram-presets{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0 2px}
+.instance-ram-presets button{background:#352b49;color:#e5d7fa;border:1px solid #65507f;border-radius:7px;padding:6px 9px;font-size:11px;cursor:pointer}
+.instance-ram-presets button:hover{background:#50386a}
+.instance-destination-report:not(:empty){display:block;white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 12px;margin-top:8px;border-radius:8px;font-size:11px;line-height:1.6;background:#192b29;color:#c6eee2;border:1px solid #355f54}
+.instance-destination-report.invalid{background:#382229;color:#ffced4;border-color:#90546a}
+.instance-layout-hint{padding:11px 13px;border:1px solid #4d425d;border-radius:10px;background:#231f31}
+.instance-layout-hint summary{cursor:pointer;font-size:12px;font-weight:600}
+.instance-layout-hint code{display:block;white-space:normal;overflow-wrap:anywhere;padding:4px 0 4px 12px;margin:2px 0;font-size:11px;color:#d4c6e6}
+.instance-layout-hint small{font-size:11px;color:#aa9cba}
