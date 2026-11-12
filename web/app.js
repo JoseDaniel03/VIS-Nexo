@@ -13,7 +13,7 @@ const root = document.querySelector('#app');
 const toastRegion = document.querySelector('#toast-region');
 const T = window.__TAURI__;
 const native = !!T?.core?.invoke;
-const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],mode:native?'local':'preview'});
+const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],catalog_source:'',mode:native?'local':'preview'});
 let db = empty();
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
 let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
@@ -523,7 +523,7 @@ function chatDrawer(){
  const visible=msgs.slice(-chatWindowSize);
  return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b><button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="1300" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
 }
-function emptyHome(){return `<div class="empty-projects"><div class="empty-orbit">${I('layers',38)}</div><h3>Todavía no hay proyectos</h3><p>${isAdmin()?'Creá el primer proyecto y personalizá su identidad visual desde el administrador.':'Los proyectos aparecerán acá cuando se publiquen en el catálogo.'}</p>${isAdmin()?`<button class="outline-btn" data-action="create-project">${I('plus',17)} Crear proyecto</button>`:''}</div>`;}
+function emptyHome(){return `<div class="empty-projects"><div class="empty-orbit">${I('layers',38)}</div><h3>Todavía no hay proyectos</h3><p>${isAdmin()?'Creá el primer proyecto y personalizá su identidad visual desde el administrador.':'Los proyectos publicados aparecerán acá automáticamente. Si no tenés un catálogo configurado, VIS Studios debe vincular primero la URL pública de Universe.'}</p>${isAdmin()?`<button class="outline-btn" data-action="create-project">${I('plus',17)} Crear proyecto</button>`:''}</div>`;}
 function modeSelector(){
  return `<nav class="library-mode-switch" aria-label="Seleccionar modo del launcher">
  <button type="button" data-action="mode-vs" class="library-mode-choice ${libraryMode==='vs'?'active':''}" aria-pressed="${libraryMode==='vs'}">${I('shield',20)}<span><b>VIS Universe</b><small>Explorar proyectos y novedades</small></span></button>
@@ -552,7 +552,7 @@ function homePage(){
  <div class="hero-watermark" aria-hidden="true">${logo(true)}</div></section>
  <div class="section-heading portal-section-title"><div><span class="page-eyebrow">EXPLORAR</span><h2>Todos los proyectos <small>${db.projects.length}</small></h2></div><div class="section-tools"><label class="catalog-search">${I('search',16)} <input id="catalog-search" aria-label="Buscar proyectos" type="search" placeholder="Buscar proyectos..." value="${attr(query)}" /></label>${isAdmin()?`<button class="outline-btn" data-action="create-project">${I('plus',17)} Nuevo proyecto</button>`:''}</div></div>
  ${db.projects.length?`<div class="project-grid portal-grid">${db.projects.filter(p=>`${p.title} ${p.subtitle}`.toLowerCase().includes(query.toLowerCase())).map(p=>projectCard(p)).join('')||'<div class="quiet-empty">Sin coincidencias</div>'}</div>`:emptyHome()}
- <div class="portal-footer-note">${I('shield',14)} VIS Universe · Proyectos publicados desde el catálogo online. Los borradores locales solo se muestran al administrador.</div></div>`;
+ <div class="portal-footer-note">${I('shield',14)} ${db.catalog_source?'VIS Universe · Catálogo online: '+esc(db.catalog_source):'VIS Universe · Falta configurar el catálogo remoto en Configuración → Publicación.'} Los borradores locales solo se muestran al administrador.</div></div>`;
 }
 function projectCard(p){const available=isExecutionEnabled(p);return `<button class="project-card portal-game-card" data-action="open-project" data-id="${attr(p.id)}" data-context="${attr(p.id)}"><div class="project-card-cover" ${p.banner_path?bgPhoto(p.banner_path):''}><span class="project-card-watermark">${projectIcon(p)}</span><span class="availability ${available?'available':''}">${available?'Disponible':p.installable?'Pausado':'Próximamente'}</span><span class="card-hover-cta">${I('arrow',17)} Abrir proyecto</span></div><div class="project-card-info"><span class="project-card-logo">${projectIcon(p)}</span><div><strong>${esc(p.title)}</strong><small>${esc(p.subtitle||p.mc_version||'Proyecto VIS Universe')}</small></div>${I('chevron',19)}</div></button>`;}
 function projectPage(){
