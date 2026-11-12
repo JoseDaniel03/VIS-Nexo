@@ -912,6 +912,129 @@ pub fn private_shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,vi
     prepare_player_directory(&target)?;
     Ok(target)
 }
+/// Recover data created when older VIS versions isolated each account.
+/// Nothing is ever deleted from the historical directories and existing
+/// shared saves/settings are never overwritten.
+#[derive(Clone,Serialize)]
+pub struct SharedRecovery {
+ pub source_count:usize,
+ pub worlds:usize,
+ pub other_files:usize,
+ pub restored:usize,
+ pub skipped:usize,
+}
+fn historical_shared_dirs(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<Vec<PathBuf>,String>{
+ if !clean_segment(owner)||!clean_segment(visitor)||!clean_segment(&ins.project_id){
+    return Err("Perfil o proyecto inválido".into());
+ }
+ let human=ins.name.replace(' ',"-");
+ let folder=if clean_segment(&human){human}else{
+    let digest=Sha256::digest(ins.name.as_bytes());
+    format!("instance-{}",digest[..12].iter().map(|b|format!("{b:02x}")).collect::<String>())
+ };
+ let rel=PathBuf::from(visitor).join(owner).join(&ins.project_id).join(folder);
+ let root=instance_dir(data_root,owner,ins)?;
+ let internal=PathBuf::from(".vis/players").join(&rel);
+ Ok(vec![root.join(internal),data_root.join("shared-player-data").join(rel)])
+}
+fn recovery_sources(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<Vec<PathBuf>,String>{
+ let root=instance_dir(data_root,owner,ins)?;
+ let mut safe=Vec::new();
+ for candidate in historical_shared_dirs(data_root,owner,ins,visitor)? {
+    if !candidate.exists(){continue;}
+    let metadata=fs::symlink_metadata(&candidate).map_err(|e|e.to_string())?;
+    if !metadata.is_dir()||metadata.file_type().is_symlink(){
+        return Err("Carpeta antigua inválida o con enlace simbólico".into());
+    }
+    if candidate.starts_with(root.join(".vis/players")) {
+        let relative=candidate.strip_prefix(&root).map_err(|e|e.to_string())?;
+        crate::instance_guard::private_paths(&root,&[relative.to_string_lossy().as_ref()])?;
+    }else {
+        let relative=candidate.strip_prefix(data_root).map_err(|_|"Carpeta antigua fuera de VIS")?;
+        crate::instance_guard::private_paths(data_root,&[relative.to_string_lossy().as_ref()])?;
+    }
+    safe.push(candidate);
+ }
+ Ok(safe)
+}
+const SHARED_RESTORE_CATEGORIES:&[&str]=&["saves","resourcepacks","shaderpacks"];
+const SHARED_RESTORE_FILES:&[&str]=&["servers.dat","options.txt","optionsof.txt"];
+pub fn shared_recovery(
+ data_root:&Path,owner:&str,ins:&Instance,visitor:&str,apply:bool
+)->Result<SharedRecovery,String>{
+ if !ins.share_game_data{return Err("Activá compartir datos de la instancia antes de recuperar partidas".into());}
+ if owner==visitor{return Err("Esta cuenta es propietaria de la instancia; sus mundos ya están en la carpeta principal".into());}
+ let root=instance_dir(data_root,owner,ins)?;
+ let sources=recovery_sources(data_root,owner,ins,visitor)?;
+ let mut summary=SharedRecovery{
+    source_count:sources.len(),worlds:0,other_files:0,restored:0,skipped:0
+ };
+ if apply {
+    prepare_player_directory(&root)?;
+ }
+ // The mutex serializes repeated recovery clicks and concurrent legacy
+ // migrations, but preview remains a read-only operation.
+ let _guard=SHARED_PLAYER_LAYOUT_GUARD.lock()
+    .map_err(|_|"Hay otra operación de recuperación en curso".to_string())?;
+ for source in sources {
+    for category in SHARED_RESTORE_CATEGORIES {
+        let folder=source.join(category);
+        if !folder.is_dir(){continue;}
+        if fs::symlink_metadata(&folder).map_err(|e|e.to_string())?.file_type().is_symlink(){
+            return Err("Los datos antiguos contienen un enlace simbólico".into());
+        }
+        for entry in fs::read_dir(&folder).map_err(|e|e.to_string())?.take(512){
+            let entry=entry.map_err(|e|e.to_string())?;
+            let kind=entry.file_type().map_err(|e|e.to_string())?;
+            if kind.is_symlink(){return Err("El recurso antiguo contiene un enlace simbólico".into());}
+            if !kind.is_dir()&&!kind.is_file(){continue;}
+            if *category=="saves"{summary.worlds+=1}else{summary.other_files+=1}
+            let dest=root.join(category).join(entry.file_name());
+            if dest.exists() {
+                summary.skipped+=1;
+                continue; // Never replace an existing world, pack or setting.
+            }
+            if !apply{continue;}
+            let stage=sibling_path(&dest,"restore")?;
+            let outcome=(||{
+                if kind.is_dir(){
+                    crate::horizon::copy_preparation_sources(&entry.path(),&stage)?;
+                }else {
+                    fs::copy(entry.path(),&stage).map_err(|e|e.to_string())?;
+                }
+                if dest.exists(){return Err("El destino cambió mientras se copiaba".into());}
+                fs::rename(&stage,&dest).map_err(|e|e.to_string())
+            })();
+            if outcome.is_err(){
+                if stage.is_dir(){let _=fs::remove_dir_all(&stage);}
+                else{let _=fs::remove_file(&stage);}
+            }
+            outcome?;
+            summary.restored+=1;
+        }
+    }
+    for setting in SHARED_RESTORE_FILES {
+        let from=source.join(setting);
+        if !from.exists(){continue;}
+        let metadata=fs::symlink_metadata(&from).map_err(|e|e.to_string())?;
+        if metadata.file_type().is_symlink()||!metadata.is_file(){
+            return Err("El archivo de configuración antiguo no es seguro".into());
+        }
+        summary.other_files+=1;
+        let dest=root.join(setting);
+        if dest.exists(){summary.skipped+=1;continue;}
+        if !apply{continue;}
+        // create_new prevents overwriting settings written by another account.
+        let mut reader=File::open(from).map_err(|e|e.to_string())?;
+        let mut output=fs::OpenOptions::new().write(true).create_new(true)
+            .open(dest).map_err(|e|e.to_string())?;
+        std::io::copy(&mut reader,&mut output).map_err(|e|e.to_string())?;
+        summary.restored+=1;
+    }
+ }
+ Ok(summary)
+}
+
 fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,game_override:Option<&Path>,premium:Option<&PremiumIdentity>)->Result<LaunchResult,String>{
  let dir=instance_dir(data_root,username,ins)?;
  let game_dir=game_override.unwrap_or(&dir);
@@ -1261,6 +1384,31 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
   assert!(ins.share_game_data);
   let mut private=ins.clone();private.share_game_data=false;
   assert!(!private.share_game_data);
+ }
+ #[test]fn legacy_profile_recovery_keeps_original_and_never_replaces_worlds(){
+  let base=std::env::temp_dir().join(format!("vis-legacy-restore-{}-{}",
+      std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
+  let ins=Instance{name:"Shared".into(),project_id:"__personal__".into(),
+      game_dir:base.join("Instancias/shared").to_string_lossy().into_owned(),..Default::default()};
+  let root=instance_dir(&base,"owner",&ins).unwrap();
+  let sources=historical_shared_dirs(&base,"owner",&ins,"visitor").unwrap();
+  fs::create_dir_all(sources[0].join("saves/Antiguo")).unwrap();
+  fs::write(sources[0].join("saves/Antiguo/level.dat"),b"original").unwrap();
+  fs::write(sources[0].join("servers.dat"),b"old servers").unwrap();
+  let preview=shared_recovery(&base,"owner",&ins,"visitor",false).unwrap();
+  assert_eq!(preview.worlds,1);
+  assert_eq!(preview.restored,0);
+  let restored=shared_recovery(&base,"owner",&ins,"visitor",true).unwrap();
+  assert_eq!(restored.restored,2);
+  assert_eq!(fs::read(root.join("saves/Antiguo/level.dat")).unwrap(),b"original");
+  assert_eq!(fs::read(root.join("servers.dat")).unwrap(),b"old servers");
+  assert_eq!(fs::read(sources[0].join("saves/Antiguo/level.dat")).unwrap(),b"original");
+  fs::write(root.join("servers.dat"),b"owner's preferred servers").unwrap();
+  let again=shared_recovery(&base,"owner",&ins,"visitor",true).unwrap();
+  assert_eq!(again.restored,0);
+  assert!(again.skipped>=2);
+  assert_eq!(fs::read(root.join("servers.dat")).unwrap(),b"owner's preferred servers");
+  let _=fs::remove_dir_all(base);
  }
  #[cfg(unix)]
  #[test]fn resourcepacks_cannot_redirect_to_another_users_files(){
