@@ -54,6 +54,17 @@ struct Snapshot {
 }
 #[derive(Serialize)]
 struct AssetReply { path: String, data_url: String }
+#[derive(Serialize)]
+struct InstanceDestinationPreview {
+    root: String,
+    exists: bool,
+    has_worlds: bool,
+    contains_existing_vis: bool,
+    java_runtime: String,
+    java_versions: String,
+    mods: String,
+    saves: String,
+}
 
 /// Recent identities are labels only. Never persist passwords, sessions or OAuth tokens here.
 #[derive(Clone, Serialize, Deserialize)]
@@ -392,6 +403,41 @@ fn delete_project(state: State<'_, Mutex<Backend>>, project_id: String) -> Resul
     s.save_catalog(next)?;
     Ok(s.snapshot())
 }
+/// Read-only preflight for the instance wizard; no folder is created.
+#[tauri::command]
+fn preview_instance_destination(
+    state:State<'_,Mutex<Backend>>, project_id:String, name:String, game_dir:String
+) -> Result<InstanceDestinationPreview,String> {
+    if name.trim().is_empty() || name.len()>60 {
+        return Err("Indicá un nombre válido para esta instancia".into());
+    }
+    let s=locked(&state)?;
+    let username=s.username()?.to_owned();
+    let target=instance_guard::destination(Path::new(&game_dir))?;
+    for account in &s.storage.data.accounts {
+        for previous in s.storage.prefs(&account.username).instances {
+            if account.username==username && previous.project_id==project_id && previous.name==name {
+                continue;
+            }
+            if let Ok(folder)=minecraft::instance_dir(&s.data_root,&account.username,&previous) {
+                instance_guard::independent(&target,&folder)?;
+            }
+        }
+    }
+    let display=|rel:&str|target.join(rel).to_string_lossy().into_owned();
+    Ok(InstanceDestinationPreview{
+        root:target.to_string_lossy().into_owned(),
+        exists:target.is_dir(),
+        has_worlds:target.join("saves").is_dir(),
+        contains_existing_vis:target.join(".vslauncher/install.json").is_file()
+            || target.join(".vis/horizon.json").is_file(),
+        java_runtime:display(".vis/runtime"),
+        java_versions:display(".vis/runtime/versions"),
+        mods:display("mods"),
+        saves:display("saves"),
+    })
+}
+
 #[tauri::command]
 fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Result<Snapshot, String> {
     let s = locked(&state)?;
@@ -1116,7 +1162,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, ensure_project_instance, configure_shared_ram, delete_instance, sync_project_mods,
+            save_project, delete_project, save_instance, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             social::social_identity_info,
