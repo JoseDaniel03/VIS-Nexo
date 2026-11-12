@@ -29,10 +29,7 @@ const MAX_REPLY: u64 = 64*1024;
 struct DevicePending {
     code:String, expires:Instant, next_poll:Instant, interval:u64
 }
-#[derive(Clone)]
-pub(crate) struct MinecraftIdentity {
-    pub name:String, pub uuid:String, pub access_token:String
-}
+use crate::minecraft::PremiumIdentity as MinecraftIdentity;
 struct Verified {
     profile:MinecraftIdentity,
     expires:Instant,
@@ -218,9 +215,8 @@ pub(crate) async fn microsoft_poll(
        }
     }).await.map_err(|_|"La autorización de Microsoft se interrumpió")?;
     let (phase,verified): (TokenPoll,Option<(MinecraftIdentity,u64)>)=match response {
-      Ok(Ok(v))=>v,
-      Ok(Err(e))=>{state.lock().map_err(|_|"Estado Microsoft bloqueado")?.pending=None;return Err(e);},
-      Err(e)=>return Err(e),
+      Ok(value)=>value,
+      Err(e)=>{state.lock().map_err(|_|"Estado Microsoft bloqueado")?.pending=None;return Err(e);},
     };
     // A user can cancel or replace the code while the HTTP exchange is in
     // flight. The old exchange must not log them in after that cancellation.
