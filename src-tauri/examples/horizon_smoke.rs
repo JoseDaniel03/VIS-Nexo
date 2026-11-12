@@ -1,6 +1,7 @@
 //! Real Horizon resource preparation diagnostic using the production backend.
 //! Run with cargo run -p vslauncher-tauri --example horizon_smoke.
 #[path = "../src/accounts.rs"] mod accounts;
+#[path = "../src/instance_guard.rs"] mod instance_guard;
 #[path = "../src/minecraft.rs"] mod minecraft;
 #[path = "../src/horizon.rs"] mod horizon;
 #[path = "../src/horizon_download.rs"] mod horizon_download;
