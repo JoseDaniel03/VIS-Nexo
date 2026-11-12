@@ -1,0 +1,108 @@
+/* VIS Nexo 2.21 — Responsive hotfix: preserve reachable controls on narrow/short windows.
+   Keep native window resizing usable without forcing the entire document to overflow. */
+*,*::before,*::after{box-sizing:border-box}
+html,body,#app{min-width:0;max-width:100%;min-height:0}
+.app-shell,.main-column,.main-scroll,.content-inner,.profile-page{min-width:0}
+.main-scroll{overscroll-behavior:contain;overflow-x:hidden;min-width:0}
+.content-inner{width:100%;max-width:min(100%,1650px);min-width:0}
+:is(.surface-card,.instance-card,.project-card,.project-card-info,.project-lower,.page-heading,.hero-inner,.profile-banner,.project-actions,.project-admin-actions,.user-library-hero,.section-heading,.top-actions){min-width:0;max-width:100%}
+:is(.instance-descriptor,.instance-descriptor p,.profile-titles,.profile-titles h2,.friend-meta,.social-person,.person-left,.page-heading h1,.card-heading){min-width:0;overflow-wrap:anywhere}
+:is(.page-heading,.section-heading,.user-library-hero,.project-actions,.project-admin-actions,.asset-settings,.profile-actions,.mc-instance-actions,.modal-footer,.crop-actions){flex-wrap:wrap}
+:is(.mc-instance-actions,.profile-actions,.project-admin-actions,.section-tools){min-width:0;max-width:100%}
+.mc-instance-actions{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap;flex:0 1 auto}
+.mc-instance-actions>*{max-width:100%;min-width:0;flex-shrink:0}
+.instance-card{align-items:center;flex-wrap:wrap}
+.instance-descriptor{flex:1 1 210px}
+.instance-card .instance-descriptor p{white-space:normal}
+.instance-card .mc-instance-actions{flex:1 1 100%;justify-content:flex-start;margin-left:65px}
+.form-pair,.settings-grid,.project-lower,.premium-cosmetics-grid{min-width:0}
+.form-pair>*:is(label,div),.settings-grid>*,.premium-cosmetics-grid>*{min-width:0}
+.folder-row{min-width:0;max-width:100%;flex-wrap:wrap}
+.folder-row input{flex:1 1 160px;min-width:0}
+.dialog,.modal-medium,.modal-small,.avatar-modal,.crop-dialog{max-width:min(100%,900px);min-width:0;max-height:min(94dvh,950px);height:auto}
+.modal-backdrop{overflow-y:auto;overscroll-behavior:contain;align-items:safe center;max-width:100vw}
+.modal-head{gap:12px;min-width:0}
+.modal-head>div{min-width:0;overflow-wrap:anywhere}
+.modal-body,.avatar-dialog-body,.crop-body{min-width:0;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.modal-footer{flex-shrink:0;justify-content:flex-end;gap:8px}
+.modal-footer>button,.modal-footer-right>button{max-width:100%;white-space:normal}
+.wiz-fields input,.wiz-fields select,.wiz-fields textarea{max-width:100%;min-width:0}
+.wizard-steps{overflow-x:auto;min-width:0}
+.wizard-step{min-width:0}
+.chat-floating{min-width:0;max-width:calc(100vw - 85px);max-height:100dvh}
+.chat-floating>.chat-drawer,.chat-recent,.chat-send{min-width:0}
+.chat-floating .chat-send input{min-width:0;width:100%}
+.social-pane{max-width:100vw;min-height:0}
+.social-bottom{max-height:min(245px,40dvh);overflow-y:auto;flex-shrink:0}
+.social-bottom .friend-add-row{min-width:0}
+.social-bottom .friend-add-row input{min-width:0;flex:1}
+.social-bottom .friend-add-row button{flex-shrink:0}
+.auth-screen{min-height:100dvh;max-height:100dvh;overflow-y:auto;align-items:safe center}
+.auth-glass{max-height:none;min-width:0}
+.auth-switch{grid-template-columns:repeat(2,minmax(0,1fr))}
+.auth-switch .auth-choice{min-width:0;white-space:normal;overflow-wrap:anywhere}
+.auth-choice .ms-icon{flex:none}
+.profile-banner{min-height:0;flex-wrap:wrap}
+.profile-stat-row{min-width:0;max-width:100%}
+.premium-cosmetic-entry{min-width:0;flex-wrap:wrap}
+.premium-cosmetic-entry span{overflow-wrap:anywhere}
+.hidden-instance-list{margin-top:16px;display:grid;gap:8px;font-size:12px}
+.hidden-instance-list .request-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.hidden-instance-list span{overflow-wrap:anywhere;min-width:0}
+:where(button,input,select,textarea):focus-visible{outline:2px solid #bb90ff;outline-offset:2px}
+@media(max-width:1390px){
+ .app-shell.has-social,.app-shell{grid-template-columns:70px minmax(0,1fr)}
+ .social-pane:not(.is-hidden){position:fixed;right:0;top:0;bottom:0;width:min(338px,calc(100vw - 70px));box-shadow:-18px 0 55px #000a;z-index:20}
+ .social-pane.is-hidden{display:none}
+ .chat-floating{position:fixed;left:70px;right:min(338px,calc(100vw - 70px));top:0;bottom:0;width:auto;max-width:none;max-height:100dvh;z-index:30;grid-template-columns:minmax(116px,30%) minmax(0,1fr)}
+}
+@media(max-width:960px){
+ .mc-instance-actions>*{white-space:normal;text-align:center}
+ .profile-banner{padding:22px;gap:15px}
+ .auth-glass{max-width:476px}
+}
+@media(max-width:720px){
+ .app-shell,.app-shell.has-social,.app-shell:not(.has-social){grid-template-columns:62px minmax(0,1fr)}
+ .content-inner{padding:18px 13px 40px}
+ .instance-card{padding:12px;gap:10px}
+ .instance-visual{width:42px;height:42px}
+ .instance-card .mc-instance-actions{margin-left:0;flex-basis:100%}
+ .instance-card .mc-instance-actions .outline-btn,
+ .instance-card .mc-instance-actions .primary-btn{flex:1 1 125px}
+ .app-topbar{padding:0 8px;gap:5px}
+ .top-actions{gap:3px}
+ .top-left{flex:1 1 auto}
+ .top-actions .profile-chip{max-width:100px}
+ .top-actions .profile-chip .avatar{flex:none}
+ .social-pane:not(.is-hidden){width:min(100vw - 62px,340px)}
+ .chat-floating{left:62px;right:0;grid-template-columns:minmax(112px,30%) minmax(0,1fr)}
+ .modal-backdrop{padding:5px}
+ .modal-head{padding:14px 12px}
+ .modal-body{padding:14px 12px}
+ .modal-footer{padding:10px 12px}
+ .modal-footer>*{flex:1 1 auto}
+ .modal-footer .primary-btn,.modal-footer .danger-btn{flex:1 1 120px}
+ .profile-stat-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .auth-screen{padding:9px}
+ .auth-glass{padding:24px 18px}
+}
+@media(max-width:460px){
+ .profile-stat-row{grid-template-columns:1fr}
+ .chat-floating{display:flex;flex-direction:column}
+ .chat-floating .chat-recent{display:none}
+ .chat-floating>.chat-drawer{flex:1;min-height:0}
+ .auth-switch{gap:6px}
+ .auth-choice{font-size:11px;min-height:43px;padding:6px}
+ .modal-footer button{padding:8px 10px;line-height:1.25}
+ .wizard-step{font-size:0}
+}
+@media(max-height:650px){
+ .auth-screen{align-items:flex-start}
+ .auth-glass{margin:auto}
+ .dialog{max-height:calc(100dvh - 10px)}
+ .social-person{margin-bottom:5px}
+ .social-bottom{max-height:min(170px,36dvh)}
+ .modal-head{padding-top:10px;padding-bottom:10px}
+ .modal-body{padding-top:10px;padding-bottom:10px}
+ .modal-footer{padding-top:8px;padding-bottom:8px}
+}
