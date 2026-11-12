@@ -82,8 +82,8 @@ fn load(dir:&Path,project_id:&str)->Result<ManagedState,String>{
     if !path.exists() {return Ok(ManagedState::default());}
     let state:ManagedState=serde_json::from_slice(&fs::read(path).map_err(|e|e.to_string())?)
         .map_err(|_|"Manifiesto de mods dañado. Reparalo manualmente antes de continuar")?;
-    if state.project_id!=project_id || state.files.len()>64 ||
-       state.required_files.len()>64 ||
+    if state.project_id!=project_id || state.files.len()>256 ||
+       state.required_files.len()>256 ||
        state.files.iter().chain(state.required_files.iter()).any(|f| !clean_name(&f.name) ||
            f.sha1.len()!=40 || !f.sha1.bytes().all(|b|b.is_ascii_hexdigit())) {
         return Err("Manifiesto de mods no pertenece a esta instancia o está dañado".into());
@@ -150,6 +150,7 @@ pub fn sync(root:&Path,username:&str,ins:&Instance,ids:&[String])
             let (sha1,size)=fingerprint(&path)?;
             desired.insert(name.clone(),ManagedFile{name:name.clone(),sha1,size});
         }
+        if desired.len()>256 {return Err("El proyecto supera 256 archivos incluyendo dependencias de mods".into());}
         let old:BTreeMap<String,ManagedFile>=previous.files.iter()
             .map(|f|(f.name.clone(),f.clone())).collect();
         let live=dir.join("mods");
