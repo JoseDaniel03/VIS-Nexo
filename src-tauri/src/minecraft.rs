@@ -1160,6 +1160,45 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
   assert!(old.join("world.dat").is_file());
   fs::remove_dir_all(root).unwrap();
  }
+ #[test]fn shared_install_has_independent_save_folders_before_first_world(){
+  let root=std::env::temp_dir().join(format!("vis-isolation-{}-{}",
+      std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
+  let ins=Instance{name:"Coop Test".into(),project_id:"__personal__".into(),
+      game_dir:root.join("Instancias/coop").to_string_lossy().into_owned(),
+      ..Default::default()};
+  let owner=instance_dir(&root,"owner",&ins).unwrap();
+  prepare_player_directory(&owner).unwrap();
+  let alice=shared_game_directory(&root,"owner",&ins,"alice").unwrap();
+  let bob=shared_game_directory(&root,"owner",&ins,"bob").unwrap();
+  for folder in [&owner,&alice,&bob]{
+    for kind in ["resourcepacks","saves","shaderpacks","config","mods","logs","screenshots"] {
+      assert!(folder.join(kind).is_dir(),"{kind}: {}",folder.display());
+    }
+  }
+  assert_ne!(alice,bob);
+  assert_ne!(alice,owner);
+  assert_ne!(bob,owner);
+  fs::create_dir_all(alice.join("saves/Private World")).unwrap();
+  fs::write(alice.join("saves/Private World/level.dat"),b"Alice's world").unwrap();
+  assert!(!bob.join("saves/Private World/level.dat").exists());
+  assert!(!owner.join("saves/Private World/level.dat").exists());
+  assert_eq!(shared_game_directory(&root,"owner",&ins,"alice").unwrap(),alice);
+  assert_eq!(fs::read(alice.join("saves/Private World/level.dat")).unwrap(),b"Alice's world");
+  let _=fs::remove_dir_all(root);
+ }
+ #[cfg(unix)]
+ #[test]fn resourcepacks_cannot_redirect_to_another_users_files(){
+  use std::os::unix::fs::symlink;
+  let root=std::env::temp_dir().join(format!("vis-unsafe-packs-{}-{}",
+      std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
+  let game=root.join("Instancias/safe");
+  let other=root.join("foreign");
+  fs::create_dir_all(&game).unwrap();fs::create_dir_all(&other).unwrap();
+  symlink(&other,game.join("resourcepacks")).unwrap();
+  assert!(prepare_player_directory(&game).is_err());
+  assert!(fs::read_dir(&other).unwrap().next().is_none());
+  let _=fs::remove_dir_all(root);
+ }
  #[test]fn child_caches_and_temporary_files_are_instance_local(){
   let root=std::env::temp_dir().join(format!("vis-child-env-{}-{}",std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
   let mut cmd=Command::new("unused-test-command");
