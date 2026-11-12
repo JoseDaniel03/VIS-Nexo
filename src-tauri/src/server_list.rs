@@ -161,6 +161,7 @@ pub fn merge_from_old(game:&Path,legacy:&[PathBuf],apply:bool)->Result<MergeRepo
             .map_err(|e|e.to_string())?;
         out.write_all(&output).map_err(|e|e.to_string())?;
         out.sync_all().map_err(|e|e.to_string())?;
+        drop(out); // Windows may reject renaming a file that is still open.
         // fs::rename replaces the existing regular file without the unsafe
         // remove-then-rename window (Windows and Unix).
         if let Err(err)=fs::rename(&stage,&target){
