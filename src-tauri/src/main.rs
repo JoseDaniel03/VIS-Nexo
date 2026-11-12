@@ -185,7 +185,9 @@ impl Backend {
             if for_user == Some(account.username.as_str()) {continue}
             for mut instance in self.storage.prefs(&account.username).instances {
                 if hidden.contains(&Self::shared_key(&account.username,&instance.project_id,&instance.name)){continue;}
-                if instance.engine != "java" && for_user.is_none() {continue}
+                // Guest mode can start any already-installed engine, including
+                // Horizon. It receives no Microsoft credentials and uses its
+                // own isolated files; online-mode servers still require Premium.
                 let allowed = instance.project_id == PERSONAL_PROJECT_ID ||
                     self.project(&instance.project_id).is_some();
                 if !allowed {continue}
@@ -1082,31 +1084,64 @@ async fn horizon_probe(state:State<'_,Mutex<Backend>>,project_id:String,name:Str
     }).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
-async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<microsoft::MicrosoftState>>,project_id:String,name:String,session_file:String,source_owner:Option<String>)->Result<minecraft::LaunchResult,String>{
-    let (owner,instance,root,visitor,active,is_ms_profile)={
+async fn launch_horizon(
+    app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,
+    ms:State<'_,Mutex<microsoft::MicrosoftState>>,
+    project_id:String,name:String,session_file:String,source_owner:Option<String>
+)->Result<minecraft::LaunchResult,String>{
+    let (owner,mut instance,root,visitor,active,is_ms_profile,guest) = {
         let s=locked(&state)?;
-        let active=s.username()?.to_owned();
-        let is_ms_profile=s.storage.get(&active).is_some_and(|a|a.microsoft_linked);
-        let from=source_owner.as_deref().filter(|o|*o!=active);
-        let (owner,instance)=if let Some(other)=from {
-            let ins=s.machine_instances(Some(&active)).into_iter()
-                .find(|i|i.engine=="horizon"&&i.project_id==project_id&&i.name==name&&i.source_owner==other)
-                .ok_or("Horizon compartido no está instalado")?;
-            (other.to_owned(),ins)
-        }else{checked_instance(&s,&project_id,&name,true)?};
-        (owner,instance,s.data_root.clone(),from.map(|_|active.clone()),active,is_ms_profile)
+        if let Some(nick)=s.guest_name.as_ref(){
+            // Guest mode may use installed game resources, but cannot consume a
+            // Microsoft session. Every guest has separate saves and settings.
+            if !session_file.is_empty(){
+                return Err("El modo offline no admite sesiones Microsoft manuales".into());
+            }
+            let source=source_owner.as_deref().filter(|v|!v.is_empty())
+                .ok_or("Elegí la instancia Horizon instalada para jugar offline")?;
+            let ins=s.guest_instances().into_iter()
+                .find(|i|i.engine=="horizon"&&i.source_owner==source
+                    && i.name==name && i.project_id==project_id)
+                .ok_or("La instancia Horizon no está disponible para modo offline")?;
+            (source.to_owned(),ins,s.data_root.clone(),Some(nick.clone()),
+                String::new(),false,Some(nick.clone()))
+        }else{
+            let active=s.username()?.to_owned();
+            let is_ms_profile=s.storage.get(&active).is_some_and(|a|a.microsoft_linked);
+            let from=source_owner.as_deref().filter(|o|*o!=active);
+            let (owner,instance)=if let Some(other)=from {
+                let ins=s.machine_instances(Some(&active)).into_iter()
+                    .find(|i|i.engine=="horizon"&&i.project_id==project_id
+                        && i.name==name&&i.source_owner==other)
+                    .ok_or("Horizon compartido no está instalado")?;
+                (other.to_owned(),ins)
+            }else{checked_instance(&s,&project_id,&name,true)?};
+            (owner,instance,s.data_root.clone(),from.map(|_|active.clone()),
+                active,is_ms_profile,None)
+        }
     };
-    if instance.engine!="horizon" {return Err("No es una instancia Horizon".into())}
-    let credential=if session_file.is_empty(){
-        let identity=ms.lock().map_err(|_|"Sesión Microsoft bloqueada")?.game_identity(&active)?;
-        if is_ms_profile && identity.is_none(){
-            return Err("Volvé a conectar Microsoft para ejecutar Horizon en modo premium".into())
+    if instance.engine!="horizon"{return Err("No es una instancia Horizon".into());}
+    let credential=if guest.is_some() {
+        None
+    } else if session_file.is_empty() {
+        let identity=ms.lock().map_err(|_|"Sesión Microsoft bloqueada")?
+            .game_identity(&active)?;
+        if is_ms_profile&&identity.is_none(){
+            return Err("Volvé a conectar Microsoft para ejecutar Horizon en modo premium".into());
         }
         identity
     }else{None};
+    // The game supports --name but VIS previously omitted it when no per-
+    // instance override was configured; Horizon then generated Player000xx.
+    // Never overwrite the verified name from a Premium session.
+    if credential.is_none() && session_file.is_empty() {
+        let suggested=guest.as_deref().unwrap_or(&active);
+        instance.player_name=minecraft::offline_player_name(suggested,&instance.player_name)?;
+        if guest.is_some(){instance.player_name=suggested.to_owned();}
+    }
     tauri::async_runtime::spawn_blocking(move||{
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
-        let session_path=if let Some(ref auth)=credential{
+        let session_path=if let Some(ref auth)=credential {
             Some(microsoft::temporary_horizon_session(&root,auth)?)
         }else{None};
         let effective=session_path.as_ref()
@@ -1116,10 +1151,11 @@ async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms:S
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
             horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir)
         }else{horizon::launch(&app,&dir,&instance,&effective)};
-        if let Some(path)=session_path {let _=fs::remove_file(path);}
+        if let Some(path)=session_path{let _=fs::remove_file(path);}
         outcome
     }).await.map_err(|e|e.to_string())?
 }
+
 #[tauri::command]
 async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Snapshot,String>{
     let (username,instance,data_root,other_instances,curated_mods)={
