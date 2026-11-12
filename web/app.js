@@ -587,6 +587,10 @@ function avatarVisual(avatar,username,size=36,owned=false){
  const content=avatar&&preview(avatar)?`<img alt="" src="${preview(avatar)}"/>`:preset?`<span class="avatar-glyph">${I(preset==='orbit'?'circle':preset==='eclipse'?'moon':preset==='pulse'?'rocket':preset==='nebula'?'star':'layers',Math.round(size*.48))}</span>`:esc(username?.[0]?.toUpperCase()||'V');
  return `<span class="avatar avatar-style-${valid}" style="width:${size}px;height:${size}px">${content}${owned&&db.user?.avatar_layer&&preview(db.user.avatar_layer)?`<img class="avatar-layer-overlay" src="${preview(db.user.avatar_layer)}" alt=""/>`:''}</span>`;
 }
+function socialDisplayName(username){
+ const configured=social.state()?.display_name?.trim();
+ return configured&&configured!==username?configured:displayAccount(username);
+}
 function userAvatar(size=36){return socialAvatarHtml(db.user?.username,size,true)}
 function sidebar(){
  const personal = libraryMode==='user';
@@ -614,13 +618,13 @@ function socialPanel(){
  return `<aside class="social-pane ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
  <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
  <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
- <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(db.user?.username||'')}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')} ${social.state()?.public_id?`· ID: ${esc(social.state().public_id)}`:''}</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
+ <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(socialDisplayName(db.user?.username||''))}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')} · Cuenta VIS</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
 
  <div class="social-group-head"><span class="social-contacts-label">${I('users',15)} ${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'} ${db.incoming_requests?.length?`<span class="contact-notification" title="Solicitudes de amistad pendientes">${db.incoming_requests.length}</span>`:''} </span><span>${projectFriends.length}</span></div>
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
  ${socialTab==='projects'&&!projectId?`<p class="social-empty">Abrí un proyecto para ver contactos que también lo siguen.</p>`:''}
- ${projectFriends.filter(f=>(f.username+' '+(f.alias||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${socialAvatarHtml(f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span>${socialSkins.get(f.username)?.head?`<img class="friend-skin-thumb" src="${attr(socialSkins.get(f.username).head)}" alt="Skin VIS de ${attr(f.username)}" title="Skin compartida en VIS"/>`:''}<span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
+ ${projectFriends.filter(f=>(f.username+' '+(f.alias||'')+' '+(f.display_name||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${socialAvatarHtml(f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.display_name||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span>${socialSkins.get(f.username)?.head?`<img class="friend-skin-thumb" src="${attr(socialSkins.get(f.username).head)}" alt="Skin VIS de ${attr(f.username)}" title="Skin compartida en VIS"/>`:''}<span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
@@ -777,11 +781,11 @@ function profilePage(){
     '<div class="profile-portrait">'+userAvatar(104)+
        '<button type="button" class="avatar-overlay-edit" data-action="edit-avatar" aria-label="Cambiar avatar">'+I('edit',18)+'</button></div>'+
     '<div class="profile-titles"><span class="page-eyebrow">IDENTIDAD VIS</span>'+
-      '<h2>'+esc(displayAccount(username))+'</h2>'+
-      '<div class="vis-handle">@'+esc(username)+'</div>'+
+      '<h2>'+esc(socialDisplayName(username))+'</h2>'+
+      '<div class="vis-handle">Identidad pública de VIS Nexo</div>'+
       '<div class="vis-profile-chips"><span class="role-chip">'+humanRole(db.user?.role)+'</span>'+
         '<span class="role-chip ghost">'+esc(socialLabel)+'</span>'+
-        (socialId?'<span class="role-chip ghost">VIS ID '+esc(socialId)+'</span>':'')+'</div>'+
+        '</div>'+
     '</div><button class="outline-btn profile-share" data-action="social-copy-handle">'+I('copy',15)+' Copiar usuario VIS</button>'+
   '</section>'+
   '<div class="profile-overview"><div><strong>'+skins.length+'</strong><span>Instancias propias</span></div>'+
@@ -836,7 +840,8 @@ function profilePage(){
     '<div class="profile-status-rows"><div><span>Acceso</span><strong>'+
        esc(microsoftGamertag?'Microsoft Premium':db.mode==='offline'?'Offline':'VIS')+'</strong></div>'+
        '<div><span>Skin pública</span><strong>'+esc(publicSkin?.skin?'Visible para usuarios VIS':'No publicada')+'</strong></div></div>'+
-    '<div class="profile-quick-actions"><button class="outline-btn" data-action="edit-profile">'+I('edit',15)+' Personalizar</button>'+
+    '<details class="profile-advanced"><summary>Identificadores técnicos de mi cuenta</summary><p class="muted">Estos códigos sirven para soporte y amistad; no son una contraseña ni el nombre que se muestra.</p><p class="muted">Usuario VIS: @'+esc(username)+'</p>'+(socialId?'<p class="muted">ID VIS: '+esc(socialId)+'</p>':'')+'</details>'+
+   '<div class="profile-quick-actions"><button class="outline-btn" data-action="edit-profile">'+I('edit',15)+' Personalizar</button>'+
        '<button class="subtle-btn" data-action="logout">'+I('logout',15)+' Cerrar sesión</button></div>'+
    '</section>'+
   '</div>'+
@@ -851,8 +856,10 @@ function editProfileDialog(){
  '<button class="icon-btn" data-action="close-modal" aria-label="Cerrar">'+I('x',19)+'</button></header>'+
  '<div class="modal-body profile-edit-body">'+
  '<section><h3>'+I('user',18)+' Identidad visual</h3>'+
-  '<div class="profile-edit-preview">'+userAvatar(64)+'<span><strong>'+esc(displayAccount(user.username))+
+  '<div class="profile-edit-preview">'+userAvatar(64)+'<span><strong>'+esc(socialDisplayName(user.username))+
    '</strong><small>@'+esc(user.username)+'</small></span></div>'+
+  '<label class="vis-display-name-label">Nombre visible en VIS Portals <input id="social-display-name" type="text" minlength="2" maxlength="32" value="'+attr(social.state()?.display_name&&social.state()?.display_name!==user.username?social.state().display_name:socialDisplayName(user.username))+'" placeholder="Nombre visible" autocomplete="off" '+(connected?'':'disabled')+'/></label>'+
+  '<div class="profile-quick-actions"><button class="primary-btn" data-action="social-save-display-name" '+(connected?'':'disabled')+'>Guardar nombre visible</button></div>'+
   '<div class="profile-quick-actions"><button class="outline-btn" data-action="edit-avatar">'+I('edit',15)+' Avatar y emblemas</button>'+
   '<button class="outline-btn" data-action="import-profile-banner">'+I('image',15)+' Cambiar portada</button></div>'+
   '<div class="profile-quick-actions">'+(connected?'<button class="primary-btn" data-action="social-upload-avatar">'+I('upload',15)+' Publicar foto en VIS Social</button>':
@@ -1601,6 +1608,12 @@ root.addEventListener('click',async event=>{
      const path=await T.dialog.open({directory:false,multiple:false,title:'Skin oficial Minecraft PNG 64x64',filters:[{name:'Skin PNG',extensions:['png']}]});
      if(path)await changePremiumCosmetic('microsoft_upload_skin',{path,variant});
    }catch(error){message(String(error),true);}
+ }
+ else if(act==='social-save-display-name'){
+   const text=document.getElementById('social-display-name')?.value?.trim()||'';
+   if(!social.connected())return message('Conectá VIS Social para editar tu nombre visible.',true);
+   try{await social.setDisplayName(text);message('Nombre público actualizado. No cambia tu usuario técnico ni tus amigos.');render();}
+   catch(error){message(String(error),true);}
  }
  else if(act==='social-copy-handle'){
    const handle=db.user?.username||'';
