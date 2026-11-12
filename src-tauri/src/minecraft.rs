@@ -1086,7 +1086,10 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
   let old=root.join("shared-player-data/visitor/owner/personal/Test/saves");
   fs::create_dir_all(&old).unwrap();fs::write(old.join("world.dat"),b"saved world").unwrap();
   let local=shared_game_directory(&root,"owner",&ins,"visitor").unwrap();
-  assert!(local.starts_with(root.join("instance/.vis/players")));
+  // Windows canonicalize() may return the extended \\?\\ path prefix.
+  // Compare both paths after the same private-instance normalization.
+  let resolved=instance_dir(&root,"owner",&ins).unwrap();
+  assert!(local.starts_with(resolved.join(".vis/players")));
   assert_eq!(fs::read(local.join("saves/world.dat")).unwrap(),b"saved world");
   assert!(old.join("world.dat").is_file());
   fs::remove_dir_all(root).unwrap();
