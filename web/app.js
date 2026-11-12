@@ -16,6 +16,46 @@ const native = !!T?.core?.invoke;
 const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],mode:native?'local':'preview'});
 let db = empty();
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
+let microsoftTicket=null, microsoftPollGeneration=0;
+async function cancelMicrosoftLogin(){
+ microsoftPollGeneration++;
+ microsoftTicket=null;
+ if(native)try{await command('microsoft_cancel');}catch{/* Already cancelled. */}
+}
+async function beginMicrosoftLogin(){
+ if(!native){message('Microsoft requiere la aplicación de escritorio.',true);return;}
+ microsoftPollGeneration++;
+ const generation=microsoftPollGeneration;
+ authMode='login';authProvider='microsoft';microsoftTicket=null;authBusy=true;render();
+ try{
+   const ticket=await command('microsoft_begin');
+   if(generation!==microsoftPollGeneration){await command('microsoft_cancel');return;}
+   microsoftTicket=ticket;authBusy=false;render();
+   let interval=Number(ticket.interval||5);
+   while(generation===microsoftPollGeneration&&authProvider==='microsoft'&&!db.user){
+     await new Promise(resolve=>setTimeout(resolve,Math.max(3,interval)*1000));
+     if(generation!==microsoftPollGeneration||authProvider!=='microsoft'||db.user)break;
+     const result=await command('microsoft_poll');
+     if(result.status==='pending'){interval=Number(result.interval||5);continue;}
+     if(result.status==='connected'){
+       microsoftTicket=null;
+       db=result.snapshot;
+       page='home';await refreshAssets();render();
+       message('Microsoft conectado · Minecraft '+result.minecraft_name);
+       return;
+     }
+     if(result.status==='expired'||result.status==='denied'){
+       microsoftTicket=null;render();message(result.status==='expired'?
+         'El código Microsoft venció. Volvé a intentar.':
+         'Se canceló la autorización Microsoft.',true);return;
+     }
+     if(result.status==='idle'){microsoftTicket=null;render();return;}
+   }
+ }catch(error){
+   if(generation===microsoftPollGeneration){microsoftTicket=null;message(String(error),true);render();}
+ }finally{if(generation===microsoftPollGeneration){authBusy=false;render();}}
+}
+
 let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null, stateEditorOpen=false;
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
@@ -374,11 +414,19 @@ function loginView(){
       <div class="auth-switch" role="tablist" aria-label="Método de acceso">
         <button class="auth-choice ${!guest&&authProvider==='cloud'?'active':'inactive'}" data-action="auth-online" type="button" aria-selected="${!guest&&authProvider==='cloud'}">${I('cloud',17)}<span>Cuenta VIS</span></button>
         <button class="auth-choice ${!guest&&authProvider==='local'?'active':'inactive'}" data-action="auth-local" type="button" aria-selected="${!guest&&authProvider==='local'}">${I('user',17)}<span>Cuenta local</span></button>
-        <button class="auth-choice inactive" type="button" disabled aria-label="Microsoft OAuth no conectado">${msMark()}<span>Microsoft</span></button>
+        <button class="auth-choice ${authProvider==='microsoft'?'active':'inactive'}" data-action="auth-microsoft" type="button" aria-selected="${authProvider==='microsoft'}">${msMark()}<span>Microsoft</span></button>
         <button class="auth-choice ${guest?'active':'inactive'}" data-action="auth-offline" type="button" aria-selected="${guest}">${I('game',17)}<span>Offline</span></button>
       </div>
       ${!guest&&db.recent_accounts?.length?`<div class="recent-logins"><span class="field-label">ACCESO RÁPIDO · ÚLTIMAS 3 CUENTAS</span><div class="recent-account-list">${db.recent_accounts.slice(0,3).map(r=>`<button type="button" data-action="recent-account" data-id="${attr(r.username)}" class="recent-account">${I('user',16)}<span>${esc(r.username)}</span><small>${esc(r.provider==='microsoft'?'Microsoft':'Local')}</small></button>`).join('')}</div><small>Elegir una cuenta no omite su contraseña.</small></div>`:''}
-      <form id="auth-form" class="auth-form" autocomplete="on">
+      ${authProvider==='microsoft'?`<section class="microsoft-device-flow" aria-label="Inicio de sesión de Minecraft oficial">
+        <p>Iniciá sesión desde el navegador oficial de Microsoft. VIS Nexo nunca te solicita la contraseña de Microsoft.</p>
+        ${microsoftTicket?`<div class="ms-code" aria-label="Código Microsoft">${esc(microsoftTicket.user_code)}</div>
+        <button class="primary-btn" type="button" data-action="microsoft-open-verification">${I('external',18)} Abrir Microsoft y colocar el código</button>
+        <p class="muted">Código válido por ${Math.ceil(microsoftTicket.expires_in/60)} minutos. VIS Nexo verificará la autorización automáticamente.</p>
+        <button class="auth-footer" type="button" data-action="microsoft-cancel">Cancelar autorización</button>`:
+        `<p class="muted">${authBusy?'Solicitando código seguro…':'La autorización aún no comenzó.'}</p>
+        <button class="primary-btn" data-action="auth-microsoft" type="button" ${authBusy?'disabled':''}>Obtener nuevo código</button>`}</section>`:
+      `<form id="auth-form" class="auth-form" autocomplete="on">
         <label class="field-label" for="auth-name">${guest?'Nick offline':authProvider==='cloud'&&!reg?'ID o nombre de usuario':'Usuario'}</label>
         <div class="auth-input">${I('user',18)}<input required minlength="3" maxlength="${guest?16:24}" id="auth-name" name="${guest?'nickname':'username'}" autocomplete="${guest?'off':'username'}" placeholder="${guest?'Nick para Minecraft':authProvider==='cloud'&&!reg?'ID VIS o nombre de usuario':'Nombre de usuario'}" spellcheck="false" /></div>
         ${guest?'':`<div class="field-header"><label class="field-label" for="auth-password">Contraseña</label></div>
@@ -386,11 +434,11 @@ function loginView(){
         `}
         ${reg?`<label class="field-label" for="auth-repeat">Confirmar contraseña</label><div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" name="confirm" id="auth-repeat" autocomplete="new-password" placeholder="Repetí tu contraseña" /></div>`:''}
         <button class="primary-btn auth-submit" type="submit" ${authBusy?'disabled':''}>${authBusy?I('timer',20):I('arrow',20)}<span>${authBusy?'Validando...':guest?'Continuar sin cuenta':reg?'Crear cuenta':'Entrar al launcher'}</span></button>
-      </form>
-      ${guest?`<button class="auth-footer" data-action="auth-local" type="button">Volver al inicio de sesión</button>`:`<button class="auth-footer" data-action="switch-auth" type="button">${reg?'¿Ya tenés cuenta?':'¿Todavía no tenés cuenta?'} <strong>${reg?'Iniciá sesión':'Registrate'}</strong></button>`}
+      </form>`}
+      ${authProvider==='microsoft'?'':guest?`<button class="auth-footer" data-action="auth-local" type="button">Volver al inicio de sesión</button>`:`<button class="auth-footer" data-action="switch-auth" type="button">${reg?'¿Ya tenés cuenta?':'¿Todavía no tenés cuenta?'} <strong>${reg?'Iniciá sesión':'Registrate'}</strong></button>`}
       ${!native?`<p class="auth-preview">Vista previa en navegador · Los datos de prueba no se guardan.</p>`:''}
     </section>
-    <div class="auth-corner" aria-hidden="true">${I('shield',18)} <span>${guest?'ACCESO TEMPORAL':authProvider==='cloud'?'CUENTA VIS EN LA NUBE':'ACCESO LOCAL SEGURO'}</span></div>
+    <div class="auth-corner" aria-hidden="true">${I('shield',18)} <span>${guest?'ACCESO TEMPORAL':authProvider==='cloud'?'CUENTA VIS EN LA NUBE':authProvider==='microsoft'?'MICROSOFT + MINECRAFT OFICIAL':'ACCESO LOCAL SEGURO'}</span></div>
   </main>`;
 }
 function header(){
@@ -1049,10 +1097,20 @@ root.addEventListener('click',async event=>{
  const act=button.dataset.action,id=button.dataset.id||'',projectId=button.dataset.project||'';
  if(['create-project','edit-project','edit-avatar','open-instance','edit-instance','delete-instance','delete-project'].includes(act))lastDialogTrigger=button;
  if(act==='modal-backdrop'){if(event.target===button)closeDialog();return;}
- if(act==='auth-offline'){authMode='offline';showPassword=false;render();return;}
- if(act==='auth-online'){authProvider='cloud';authMode='login';showPassword=false;render();return;}
- if(act==='auth-local'){authProvider='local';authMode='login';showPassword=false;render();return;}
- if(act==='recent-account'){authMode='login';authProvider=(db.recent_accounts?.find(a=>a.username===id)?.provider==='vis-social')?'cloud':'local';render();const name=root.querySelector('#auth-name');if(name){name.value=id;root.querySelector('#auth-password')?.focus();}return;}
+ if(act==='auth-microsoft'){void beginMicrosoftLogin();return;}
+ if(act==='microsoft-open-verification'){
+   if(!microsoftTicket)return;
+   const uri=microsoftTicket.verification_uri;
+   if(!uri.startsWith('https://www.microsoft.com/')&&!uri.startsWith('https://microsoft.com/')&&!uri.startsWith('https://login.microsoftonline.com/'))
+       return message('Microsoft devolvió una URL inesperada',true);
+   try{await T.opener.openUrl(uri);}catch(e){message('No se pudo abrir el navegador Microsoft: '+String(e),true);}
+   return;
+ }
+ if(act==='microsoft-cancel'){void cancelMicrosoftLogin();authProvider='cloud';render();return;}
+ if(act==='auth-offline'){void cancelMicrosoftLogin();authMode='offline';authProvider='local';showPassword=false;render();return;}
+ if(act==='auth-online'){void cancelMicrosoftLogin();authProvider='cloud';authMode='login';showPassword=false;render();return;}
+ if(act==='auth-local'){void cancelMicrosoftLogin();authProvider='local';authMode='login';showPassword=false;render();return;}
+ if(act==='recent-account'){const recent=db.recent_accounts?.find(a=>a.username===id);if(recent?.provider==='microsoft'){void beginMicrosoftLogin();return;}authMode='login';authProvider=recent?.provider==='vis-social'?'cloud':'local';render();const name=root.querySelector('#auth-name');if(name){name.value=id;root.querySelector('#auth-password')?.focus();}return;}
  if(act==='switch-auth'){cancelPendingSectionChange();authMode=authMode==='login'?'register':'login';showPassword=false;render();return;}
  if(act==='toggle-password'){const input=document.querySelector('#auth-password'),repeat=document.querySelector('#auth-repeat');if(input){showPassword=!showPassword;input.type=showPassword?'text':'password';if(repeat)repeat.type=input.type;button.innerHTML=I(showPassword?'eyeoff':'eye',19);}return;}
  if(act==='close-modal'){closeDialog();return;}
