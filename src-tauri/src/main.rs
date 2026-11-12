@@ -2,6 +2,7 @@
 //! local accounts and VSUI catalogue; the web view never authorizes admin work.
 mod accounts;
 mod minecraft;
+mod microsoft;
 mod instance_guard;
 mod project_mods;
 mod maintenance;
@@ -293,7 +294,8 @@ fn login(state: State<'_, Mutex<Backend>>, username: String, password: String) -
     Ok(s.snapshot())
 }
 #[tauri::command]
-fn logout(state: State<'_, Mutex<Backend>>) -> Result<Snapshot, String> {
+fn logout(state: State<'_, Mutex<Backend>>,ms:State<'_,Mutex<microsoft::MicrosoftState>>) -> Result<Snapshot, String> {
+    ms.lock().map_err(|_| "Sesión Microsoft bloqueada")?.clear();
     let mut s = locked(&state)?;
     s.active_user = None;
     s.guest_name = None;
@@ -1158,6 +1160,7 @@ fn main() {
             let backend = init_backend(&app.handle()).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(backend));
             app.manage(Mutex::new(social::SocialSession::default()));
+            app.manage(Mutex::new(microsoft::MicrosoftState::default()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1165,6 +1168,8 @@ fn main() {
             save_project, delete_project, save_instance, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
+            microsoft::microsoft_begin, microsoft::microsoft_poll,
+            microsoft::microsoft_cancel,
             social::social_identity_info,
             social::social_cloud_register, social::social_cloud_login,
             social::social_enable_cloud_password,
