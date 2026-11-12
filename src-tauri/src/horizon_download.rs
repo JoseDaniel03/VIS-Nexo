@@ -365,6 +365,168 @@ pub fn install(app:&AppHandle,data_root:&Path,expected_tag:&str)->Result<Install
     Ok(Installed{tag:version.clone(),build_dir:saved.to_string_lossy().into_owned(),archive_sha256:hash})
 }
 
+
+// VIS Nexo game distribution from the owner's own Horizon fork. Unlike the
+// upstream Nightly channel above, our GitHub fork does not have the upstream
+// Ed25519 release signing key. Trust is explicitly GitHub HTTPS + GitHub's
+// SHA-256 asset digest + SHA256SUMS, and is NOT claimed to be an upstream
+// cryptographic signature. A later VIS release should pin a dedicated key.
+const VIS_FORK: &str = "JoseDaniel03/horizon-VISNEXO";
+const VIS_FORK_API: &str =
+    "https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/releases?per_page=15";
+#[derive(Deserialize)]
+struct ForkAsset {
+    name:String,
+    browser_download_url:String,
+    size:u64,
+    digest:Option<String>,
+}
+#[derive(Deserialize)]
+struct ForkRelease {
+    tag_name:String,
+    draft:bool,
+    assets:Vec<ForkAsset>,
+}
+fn fork_asset_name()->Result<&'static str,String>{
+    #[cfg(all(target_os="linux",target_arch="x86_64"))]
+    {return Ok("vis-horizon-linux-x86_64.tar.gz");}
+    #[cfg(all(target_os="windows",target_arch="x86_64"))]
+    {return Ok("vis-horizon-windows-x64.zip");}
+    #[allow(unreachable_code)]
+    Err("VIS Horizon portable se publica por ahora para Linux/Windows x64".into())
+}
+fn fork_tag_valid(tag:&str)->bool{
+    tag.strip_prefix("visgame-").is_some_and(|sha|
+        sha.len()==12 && sha.bytes().all(|b|b.is_ascii_hexdigit()))
+}
+fn fork_asset<'a>(release:&'a ForkRelease,name:&str)->Result<&'a ForkAsset,String>{
+    release.assets.iter().find(|a|a.name==name)
+        .ok_or_else(||format!("Build del fork {} sin {name}",release.tag_name))
+}
+fn fork_digest(asset:&ForkAsset)->Result<String,String>{
+    let sha=asset.digest.as_deref()
+        .and_then(|d|d.strip_prefix("sha256:"))
+        .ok_or("GitHub no informa digest SHA-256 verificable para este release")?;
+    if sha.len()!=64 || !sha.bytes().all(|b|b.is_ascii_hexdigit()){
+        return Err("Digest SHA-256 inválido para el juego Rust".into());
+    }
+    Ok(sha.to_ascii_lowercase())
+}
+fn fork_release<'a>(releases:&'a [ForkRelease],asset_name:&str)->Result<&'a ForkRelease,String>{
+    releases.iter().find(|r| !r.draft && fork_tag_valid(&r.tag_name) &&
+        r.assets.iter().any(|a|a.name==asset_name &&
+            a.browser_download_url==format!(
+                "https://github.com/{VIS_FORK}/releases/download/{}/{}",
+                r.tag_name,asset_name) &&
+            a.size>0 && a.size<=MAX_ARCHIVE && fork_digest(a).is_ok()))
+        .ok_or("El fork todavía no publicó el motor Horizon para este sistema. Comprobá GitHub Actions del fork.")
+}
+fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
+    let raw=fs::read(build.join("vis-horizon-source.json"))
+        .map_err(|_|"Falta el manifiesto del build compilado en el fork")?;
+    if raw.len()>256*1024 {return Err("Manifiesto Horizon demasiado grande".into());}
+    let data:serde_json::Value=serde_json::from_slice(&raw)
+        .map_err(|_|"Manifiesto VIS Horizon ilegible")?;
+    if data["source_repo"].as_str()!=Some("https://github.com/JoseDaniel03/horizon-VISNEXO.git") ||
+       data["minecraft_assets_included"]!=false {
+        return Err("Build Horizon no pertenece al fork VIS o incluye activos prohibidos".into());
+    }
+    let commit=data["source_commit"].as_str().ok_or("Falta commit del build")?;
+    if commit.len()!=40 || !commit.bytes().all(|b|b.is_ascii_hexdigit()) ||
+       !commit.starts_with(tag.strip_prefix("visgame-").unwrap_or("!")){
+        return Err("El commit Horizon no coincide con la versión publicada".into());
+    }
+    let hashes=data["sha256"].as_object().ok_or("El manifiesto no contiene SHA-256 de los archivos")?;
+    if hashes.len()<5 || hashes.len()>12000 {return Err("Manifiesto Horizon fuera de límites".into());}
+    for required in [
+        "research-lock.json",
+        if cfg!(target_os="windows"){"horizon-client.exe"}else{"horizon-client"},
+        if cfg!(target_os="windows"){"horizon-prepare.exe"}else{"horizon-prepare"},
+    ]{
+        if !hashes.contains_key(required){return Err(format!("Falta hash de {required}"))}
+    }
+    for (name,digest) in hashes{
+        let rel=safe_rel(Path::new(name))?;
+        let expected=digest.as_str().ok_or("Huella inválida de archivo Horizon")?;
+        if expected.len()!=64 || !expected.bytes().all(|b|b.is_ascii_hexdigit()) ||
+           sha256_file(&build.join(rel))?!=expected.to_ascii_lowercase(){
+            return Err(format!("Archivo del motor Horizon no coincide: {name}"));
+        }
+    }
+    Ok(())
+}
+/// Download Horizon only after the user selects an instance. All binaries live
+/// inside the instance, not inside the AppImage, AppData or ~/.minecraft.
+/// The new build is staged and verified before atomic publication.
+pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Installed,String>{
+    if minecraft_version!="26.3" {
+        return Err("El fork Horizon disponible implementa exclusivamente Minecraft 26.3".into())
+    }
+    let _guard=INSTALL_LOCK.lock().map_err(|_|"Ya hay una instalación Horizon en curso")?;
+    crate::instance_guard::private_paths(dir,&[".vis",".vis/horizon-engine"])?;
+    let archive=fork_asset_name()?;
+    let http=client()?;
+    let releases:Vec<ForkRelease>=http.get(VIS_FORK_API).send()
+        .and_then(|r|r.error_for_status()).map_err(|e|format!("No se pudo consultar el fork: {e}"))?
+        .json().map_err(|_|"El fork devolvió releases inválidos")?;
+    let release=fork_release(&releases,archive)?;
+    let tag=release.tag_name.clone();
+    let asset=fork_asset(release,archive)?;
+    let sha=fork_digest(asset)?;
+    let expected_url=format!(
+        "https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}"
+    );
+    if asset.browser_download_url!=expected_url || asset.size==0 || asset.size>MAX_ARCHIVE {
+        return Err("Metadatos Horizon inesperados".into());
+    }
+    let root=dir.join(".vis/horizon-engine");
+    fs::create_dir_all(&root).map_err(|e|e.to_string())?;
+    let final_dir=root.join(&tag);
+    if final_dir.exists(){
+        let record=fs::symlink_metadata(&final_dir).map_err(|e|e.to_string())?;
+        if !record.is_dir() || record.file_type().is_symlink(){
+            return Err("Un archivo ocupa la carpeta de la versión Horizon".into());
+        }
+        let pinned=fs::read_to_string(final_dir.join(".vis-release-sha256"))
+            .map_err(|_|"Build previo de Horizon sin procedencia comprobable; revisión manual necesaria")?;
+        if pinned.trim()!=sha {return Err("La publicación del fork cambió sin cambiar de versión".into());}
+        let existing=find_build(&final_dir)?;
+        fork_metadata(&existing,&tag)?;
+        if verify_managed_build(&existing)?!=true{
+            return Err("Build Horizon previamente instalado no tiene huellas verificadas".into());
+        }
+        return Ok(Installed{tag,build_dir:existing.to_string_lossy().into_owned(),archive_sha256:sha});
+    }
+    let stamp=SystemTime::now().duration_since(UNIX_EPOCH)
+        .unwrap_or_default().as_nanos();
+    let scratch=root.join(format!(".download-{}-{stamp}",std::process::id()));
+    fs::create_dir(&scratch).map_err(|e|e.to_string())?;
+    let _cleanup=TempGuard(scratch.clone());
+    let archive_path=scratch.join(archive);
+    emit(app,"Motor Rust",0,"Descargando Horizon desde el fork VIS (no incluye Minecraft ni su launcher)");
+    let response=http.get(&expected_url).send().and_then(|r|r.error_for_status())
+        .map_err(|e|format!("No se pudo descargar Horizon portable: {e}"))?;
+    download_stream(app,response,&archive_path,&sha,asset.size)?;
+    if fs::metadata(&archive_path).map_err(|e|e.to_string())?.len()!=asset.size {
+        return Err("La descarga del motor Rust tiene tamaño incorrecto".into());
+    }
+    let unpacked=scratch.join("unpacked");
+    fs::create_dir(&unpacked).map_err(|e|e.to_string())?;
+    emit(app,"Motor Rust",85,"Comprobando archivos y desempaquetando");
+    if archive.ends_with(".zip"){unpack_zip(&archive_path,&unpacked)?}
+    else{unpack_tar(&archive_path,&unpacked)?}
+    let built=find_build(&unpacked)?;
+    fork_metadata(&built,&tag)?;
+    executable_permissions(&built)?;
+    save_game_stamp(&built,&tag)?;
+    fs::write(unpacked.join(".vis-release-sha256"),&sha).map_err(|e|e.to_string())?;
+    let nested=built.strip_prefix(&unpacked).map_err(|e|e.to_string())?.to_path_buf();
+    fs::rename(&unpacked,&final_dir).map_err(|e|e.to_string())?;
+    let installed=final_dir.join(nested);
+    emit(app,"Motor Rust",100,"Horizon instalado dentro de la instancia. Preparando recursos oficiales.");
+    Ok(Installed{tag,build_dir:installed.to_string_lossy().into_owned(),archive_sha256:sha})
+}
+
 #[cfg(test)]
 mod tests{
     use super::*;
