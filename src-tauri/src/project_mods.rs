@@ -39,6 +39,29 @@ pub struct SyncReport {
 static MOD_UPDATE_GUARD: Mutex<()> = Mutex::new(());
 
 fn manifest(dir:&Path)->PathBuf {dir.join(".vslauncher/project-mods.json")}
+
+/// Free disk space used by abandoned downloads after crashes; never touch
+/// manually imported mods, retired versions or player saves.
+fn cleanup_abandoned_stages(dir:&Path)->Result<usize,String>{
+    let metadata=dir.join(".vslauncher");
+    if !metadata.is_dir(){return Ok(0);}
+    let cutoff=SystemTime::now();
+    let mut removed=0;
+    for entry in fs::read_dir(&metadata).map_err(|e|e.to_string())?.take(256){
+        let entry=entry.map_err(|e|e.to_string())?;
+        let name=entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("project-mods-stage-"){continue}
+        let info=fs::symlink_metadata(entry.path()).map_err(|e|e.to_string())?;
+        if !info.file_type().is_dir()||info.file_type().is_symlink(){continue}
+        let Ok(modified)=info.modified() else {continue};
+        let Ok(age)=cutoff.duration_since(modified) else {continue};
+        if age.as_secs()<7*24*60*60{continue}
+        fs::remove_dir_all(entry.path()).map_err(|e|e.to_string())?;
+        removed+=1;
+    }
+    Ok(removed)
+}
+
 fn clean_name(s:&str)->bool {
     !s.is_empty() && s.len()<=200 && s.ends_with(".jar")
         && s!="." && s!=".." && !s.contains('/') && !s.contains('\\')
@@ -116,6 +139,9 @@ pub fn sync(root:&Path,username:&str,ins:&Instance,ids:&[String])
             else {Err("Los mods de proyecto requieren Java con Fabric".into())};
     }
     let dir=minecraft::instance_dir(root,username,ins)?;
+    // Bounded cleanup runs only when the player explicitly installs or
+    // launches the project, never as an always-on background process.
+    cleanup_abandoned_stages(&dir)?;
     if !minecraft::installed(&dir,ins) {
         return Err("Instalá/Repará primero la base completa de Minecraft".into());
     }
