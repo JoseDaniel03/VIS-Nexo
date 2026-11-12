@@ -33,6 +33,9 @@ pub struct LaunchResult {pub pid:u32,pub log_file:String,pub offline:bool}
 pub struct LaunchExit {pub pid:u32,pub success:bool,pub exit_code:Option<i32>,pub log_file:String,pub error:String}
 
 pub fn configure_instance_environment(cmd:&mut Command,dir:&Path)->Result<(),String>{
+    crate::instance_guard::private_paths(dir,&[
+       ".vis/cache",".vis/config",".vis/data",".vis/tmp",".vis/cache/mesa"
+    ])?;
     for (name,relative) in [("XDG_CACHE_HOME",".vis/cache"),("XDG_CONFIG_HOME",".vis/config"),
         ("XDG_DATA_HOME",".vis/data"),("MESA_SHADER_CACHE_DIR",".vis/cache/mesa"),
         ("APPDATA",".vis/config"),("LOCALAPPDATA",".vis/cache"),
@@ -200,6 +203,17 @@ fn copy_verified_candidate(source:&Path,target:&Path,sha1:&str,max_bytes:u64)->R
  outcome
 }
 fn obtain_or_reuse(c:&Client,task:&Task,destination_root:&Path,sources:&[PathBuf])->Result<bool,String>{
+ // Untrusted libraries and asset indexes may contain arbitrary nested paths.
+ // Never follow an existing symlink in their destination ancestry.
+ let mut parent=task.path.parent().ok_or("Descarga sin carpeta destino")?;
+ if !parent.starts_with(destination_root){return Err("Recurso fuera de la instancia".into())}
+ loop{
+   if fs::symlink_metadata(parent).ok().is_some_and(|meta|meta.file_type().is_symlink()){
+     return Err("Ruta interna con enlace simbólico: descarga rechazada".into())
+   }
+   if parent==destination_root {break}
+   parent=parent.parent().ok_or("Descarga fuera de la instancia")?;
+ }
  if cached_file_valid(&task.path,task.sha1.as_deref(),task.max){return Ok(true)}
  if let Some(hash)=task.sha1.as_deref(){
   if hash.len()==40 && hash.bytes().all(|b|b.is_ascii_hexdigit()) {
@@ -289,6 +303,11 @@ fn sources_for_category(sources:&[PathBuf],category:&str)->Vec<PathBuf>{
 }
 pub fn installed(dir:&Path,ins:&Instance)->bool{
  if ins.engine=="horizon" {return crate::horizon::installed(dir,ins)}
+ if crate::instance_guard::private_paths(dir,&[
+     ".vslauncher",".vis/runtime/versions",".vis/runtime/libraries",
+     ".vis/runtime/assets/indexes",".vis/runtime/assets/objects",
+     ".vis/java-runtimes","mods"
+ ]).is_err(){return false}
  let Ok(data)=fs::read(installation_path(dir)) else {return false};
  let Ok(marker)=serde_json::from_slice::<LocalInstallation>(&data) else {return false};
  if marker.version!=ins.version || marker.loader!=ins.loader || marker.loader_version!=ins.loader_version {return false}
@@ -667,6 +686,11 @@ pub fn install(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,known_
  if ins.version.trim().is_empty(){return Err("Elegí una versión de Minecraft".into())}
  if !["vanilla","fabric"].contains(&ins.loader.as_str()){return Err("Elegí Vanilla o Fabric".into())}
  let c=client()?;let dir=instance_dir(data_root,username,ins)?;
+ crate::instance_guard::private_paths(&dir,&[
+     ".vslauncher",".vis/runtime/versions",".vis/runtime/libraries",
+     ".vis/runtime/assets/indexes",".vis/runtime/assets/objects",
+     ".vis/java-runtimes","mods"
+ ])?;
  fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
  let runtime=new_runtime(&dir);let lib_root=runtime.join("libraries");
  let source_roots=candidate_roots(data_root,known_instances,&runtime);
@@ -923,6 +947,7 @@ pub fn install_modrinth(data_root:&Path,username:&str,ins:&Instance,project_id:&
  if !["mod","resourcepack","shader"].contains(&kind){return Err("Tipo de contenido inválido".into())}
  if kind=="mod"&&ins.loader!="fabric"{return Err("Esta instalación de mods requiere Fabric".into())}
  let c=client()?;let dir=instance_dir(data_root,username,ins)?;
+ crate::instance_guard::private_paths(&dir,&["mods","resourcepacks","shaderpacks",".vslauncher"])?;
  let folder=match kind{"mod"=>"mods","resourcepack"=>"resourcepacks",_=>"shaderpacks"};
  let mut queue=vec![(project_id.to_owned(),None::<String>,0usize)];
  let mut chosen:HashMap<String,String>=HashMap::new();let mut resolved=Vec::new();
