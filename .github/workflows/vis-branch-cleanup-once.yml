@@ -1,0 +1,38 @@
+name: VIS Nexo - limpieza puntual de ramas integradas
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vis-branch-cleanup-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Eliminar solo ramas completamente integradas
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for branch in \
+            'feature/five-systems-no-builds' \
+            'feature/universe-distribution-ci-utf8'; do
+            if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+              echo "La rama $branch ya no existe."
+              continue
+            fi
+            git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+            if ! git merge-base --is-ancestor "refs/remotes/origin/$branch" HEAD; then
+              echo "::error::No se elimina $branch: su contenido no esta integrado en main."
+              exit 1
+            fi
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+            echo "Rama integrada eliminada: $branch"
+          done
