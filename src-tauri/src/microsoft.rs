@@ -306,14 +306,59 @@ fn public_cosmetics(profile:&Value)->Value{
     json!({"name":profile["name"],"uuid":profile["id"],
         "skins":list("skins"),"capes":list("capes")})
 }
+/// This is a private local *texture history*, not an invented Mojang
+/// inventory. Minecraft Services may expose only the currently equipped skin.
+fn minecraft_skin_history(
+    private_root:&std::path::Path,uuid:&str,official:&Value
+)->Result<Vec<Value>,String>{
+    if uuid.len()!=32||!uuid.bytes().all(|b|b.is_ascii_hexdigit()){
+        return Err("UUID Premium inválido para el historial de skins".into());
+    }
+    let dir=private_root.join("minecraft-skin-history");
+    crate::instance_guard::private_paths(private_root,&["minecraft-skin-history"])?;
+    let path=dir.join(format!("{}.json",uuid.to_ascii_lowercase()));
+    let mut entries:Vec<Value>=if path.exists(){
+        serde_json::from_slice(&std::fs::read(&path).map_err(|e|e.to_string())?)
+            .map_err(|_|"El historial de skins tiene datos inválidos; no se modificó".to_string())?
+    }else{Vec::new()};
+    entries.retain(|entry|entry["url"].as_str().is_some_and(|u|!safe_texture(u).is_empty()));
+    let mut changed=false;
+    if let Some(skins)=official["skins"].as_array(){
+        for skin in skins {
+            let raw=skin["url"].as_str().unwrap_or("");
+            let url=safe_texture(raw);
+            if url.is_empty(){continue;}
+            let variant=if skin["variant"]=="SLIM"{"SLIM"}else{"CLASSIC"};
+            if let Some(position)=entries.iter().position(|e|e["url"]==url) {
+                if entries[position]["variant"]!=variant {
+                    entries[position]["variant"]=json!(variant);changed=true;
+                }
+            }else{
+                entries.push(json!({"url":url,"variant":variant}));changed=true;
+            }
+        }
+    }
+    if entries.len()>32{entries.drain(..entries.len()-32);changed=true;}
+    if changed{
+        crate::accounts::atomic_json(&path,&entries)?;
+    }
+    entries.reverse();
+    Ok(entries)
+}
+
 #[tauri::command]
 pub(crate) async fn microsoft_cosmetics(
     backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>
 )->Result<Value,String>{
     let identity=premium_identity(&backend,&ms)?;
+    let private_root=backend.lock().map_err(|_|"Perfil VIS ocupado")?.data_root.clone();
     tauri::async_runtime::spawn_blocking(move||{
         let http=client()?;
-        Ok(public_cosmetics(&owned_profile(&http,&identity)?))
+        let profile=owned_profile(&http,&identity)?;
+        let history=minecraft_skin_history(&private_root,&identity.uuid,&profile)?;
+        let mut output=public_cosmetics(&profile);
+        output["history"]=json!(history);
+        Ok(output)
     }).await.map_err(|_|"La consulta de cosméticos se interrumpió".to_string())?
 }
 #[tauri::command]
@@ -370,6 +415,32 @@ pub(crate) async fn microsoft_use_skin(
         Ok(public_cosmetics(&owned_profile(&http,&identity)?))
     }).await.map_err(|_|"Cambio de skin interrumpido".to_string())?
 }
+#[tauri::command]
+pub(crate) async fn microsoft_use_saved_skin(
+    backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>,url:String
+)->Result<Value,String>{
+    let identity=premium_identity(&backend,&ms)?;
+    let private_root=backend.lock().map_err(|_|"Perfil VIS ocupado")?.data_root.clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        let http=client()?;
+        let profile=owned_profile(&http,&identity)?;
+        let history=minecraft_skin_history(&private_root,&identity.uuid,&profile)?;
+        let saved=history.iter().find(|entry|
+            entry["url"].as_str()==Some(url.as_str())&&safe_texture(&url)==url)
+            .ok_or("La skin no pertenece al historial local de esta cuenta Premium")?;
+        let variant=if saved["variant"]=="SLIM"{"slim"}else{"classic"};
+        let r=http.post("https://api.minecraftservices.com/minecraft/profile/skins")
+            .bearer_auth(&identity.access_token).json(&json!({"url":url,"variant":variant}))
+            .send().map_err(|_|"No se pudo conectar con Minecraft Services")?;
+        if !r.status().is_success(){return Err(format!("Minecraft rechazó la textura histórica (HTTP {})",r.status()));}
+        let next=owned_profile(&http,&identity)?;
+        let history=minecraft_skin_history(&private_root,&identity.uuid,&next)?;
+        let mut output=public_cosmetics(&next);
+        output["history"]=json!(history);
+        Ok(output)
+    }).await.map_err(|_|"Cambio de skin interrumpido".to_string())?
+}
+
 #[tauri::command]
 pub(crate) async fn microsoft_upload_skin(
     backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>,
