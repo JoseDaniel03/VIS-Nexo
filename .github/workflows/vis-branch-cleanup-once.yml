@@ -1,0 +1,38 @@
+name: VIS Nexo - limpieza final de ramas históricas
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vis-branch-cleanup-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Eliminar las dos ramas históricas, únicamente si están integradas en Git
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for branch in \
+            'feature/project-modpacks-instance-controls' \
+            'feature/ceibo-humile-cloudflare-social'; do
+            if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+              echo "$branch ya no existe."
+              continue
+            fi
+            git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+            if ! git merge-base --is-ancestor "refs/remotes/origin/$branch" HEAD; then
+              echo "::error::$branch contiene commits fuera de main. No se eliminará."
+              exit 1
+            fi
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+            echo "Rama histórica borrada, commits conservados: $branch"
+          done
