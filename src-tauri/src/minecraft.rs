@@ -1045,11 +1045,20 @@ pub fn shared_recovery(
         let dest=root.join(setting);
         if dest.exists(){summary.skipped+=1;continue;}
         if !apply{continue;}
-        // create_new prevents overwriting settings written by another account.
-        let mut reader=File::open(from).map_err(|e|e.to_string())?;
-        let mut output=fs::OpenOptions::new().write(true).create_new(true)
-            .open(dest).map_err(|e|e.to_string())?;
-        std::io::copy(&mut reader,&mut output).map_err(|e|e.to_string())?;
+        // Stage the entire settings file before promotion, never exposing
+        // half-copied servers.dat or options.txt to another account.
+        let stage=sibling_path(&dest,"restore-settings")?;
+        let copied=(||{
+            let mut reader=File::open(&from).map_err(|e|e.to_string())?;
+            let mut output=fs::OpenOptions::new().write(true).create_new(true)
+                .open(&stage).map_err(|e|e.to_string())?;
+            std::io::copy(&mut reader,&mut output).map_err(|e|e.to_string())?;
+            output.sync_all().map_err(|e|e.to_string())?;
+            if dest.exists(){return Err("El ajuste ya existe en la instancia compartida".into());}
+            fs::rename(&stage,&dest).map_err(|e|e.to_string())
+        })();
+        if copied.is_err(){let _=fs::remove_file(&stage);}
+        copied?;
         summary.restored+=1;
     }
  }
@@ -1432,6 +1441,16 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
   assert!(again.skipped>=2);
   assert_eq!(fs::read(root.join("servers.dat")).unwrap(),b"owner's preferred servers");
   let _=fs::remove_dir_all(base);
+ }
+ #[test]fn only_one_game_can_write_to_the_same_shared_world_at_a_time(){
+  let dir=std::env::temp_dir().join(format!("vis-guard-{}-{}",
+      std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
+  prepare_player_directory(&dir).unwrap();
+  let running=acquire_game_run(&dir).unwrap();
+  assert!(acquire_game_run(&dir).is_err());
+  drop(running);
+  assert!(acquire_game_run(&dir).is_ok());
+  let _=fs::remove_dir_all(dir);
  }
  #[cfg(unix)]
  #[test]fn resourcepacks_cannot_redirect_to_another_users_files(){
