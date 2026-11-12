@@ -4,6 +4,7 @@ mod accounts;
 mod minecraft;
 mod microsoft;
 mod instance_guard;
+mod instance_lock;
 mod project_mods;
 mod maintenance;
 mod cloud;
