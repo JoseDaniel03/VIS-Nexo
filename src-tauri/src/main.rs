@@ -884,7 +884,7 @@ async fn launch_horizon(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms:S
     tauri::async_runtime::spawn_blocking(move||{
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
         let session_path=if let Some(ref auth)=credential{
-            Some(microsoft::temporary_horizon_session(&dir,auth)?)
+            Some(microsoft::temporary_horizon_session(&root,auth)?)
         }else{None};
         let effective=session_path.as_ref()
             .map(|p|p.to_string_lossy().into_owned())
