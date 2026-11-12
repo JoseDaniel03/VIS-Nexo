@@ -938,6 +938,7 @@ function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const 
  return `<article class="instance-card">${bulkInstanceMode&&!isGuest()&&!i.source_owner?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · partidas separadas para tu perfil</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
  <div class="mc-instance-actions">${isGuest()||i.source_owner?'':`<button class="outline-btn" data-action="manage-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('settings',16)} Mods y archivos</button>
  <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?'Reparar':'Instalar'}</button>`}
+ <button class="icon-btn" data-action="open-instance-folder" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir carpeta de esta instancia" aria-label="Abrir carpeta de ${attr(i.name)}">${I('folder',17)}</button>
  <button class="primary-btn" data-action="launch-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" ${!i.installed||!allow||minecraftBusy?'disabled':''}>${I('play',17)} Jugar</button>
  ${i.source_owner&&!isGuest()?`<button class="outline-btn" data-action="hide-shared-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}" title="Solo oculta de tu biblioteca, no borra los mundos">${I('x',15)} Ocultar</button><button class="outline-btn" data-action="shared-ram" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}">${I('settings',16)} RAM</button>`:''}
  ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="export-worlds-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Exportar instancia completa a ZIP" aria-label="Exportar ${attr(i.name)}">${I('upload',16)}</button>`}
@@ -1904,6 +1905,15 @@ root.addEventListener('click',async event=>{
    const input=document.getElementById('horizon-build-dir');
    if(input)input.value=selected.build_dir;
    message(`Versión ${selected.tag} seleccionada. Guardá la instancia para fijarla y ejecutá el diagnóstico.`);
+ }
+ else if(act==='open-instance-folder'){
+   if(!native)return message('Esta acción requiere el launcher instalado.',true);
+   await onceOperation('folder:'+JSON.stringify([projectId,id,button.dataset.source||'']),async()=>{
+     try{
+       const path=await command('instance_folder',{projectId,name:id,sourceOwner:button.dataset.source||null});
+       await T.opener.openPath(path);
+     }catch(error){message('No se pudo abrir la carpeta: '+String(error),true);}
+   });
  }
  else if(act==='launch-minecraft'){await performLaunch(projectId,id,button.dataset.source||'');}
  else if(act==='manage-instance'){mcSelected={projectId,name:id};installedFiles=[];horizonChecks=[];navigate('minecraft');void refreshInstalledFiles();}
