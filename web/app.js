@@ -23,6 +23,7 @@ function resetAccountView(){
  mcSelected=null;modResults=[];installedFiles=[];horizonChecks=[];
  bulkInstanceMode=false;bulkInstanceSelection.clear();
  cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;
+  premiumSkinSync=true;premiumSkinModel='classic';
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;
 }
 async function onceOperation(key,operation){
@@ -33,6 +34,7 @@ async function onceOperation(key,operation){
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
 let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
 let premiumCosmetics=null, premiumCosmeticsBusy=false;
+let premiumSkinSync=true, premiumSkinModel='classic';
 async function cancelMicrosoftLogin(){
  microsoftPollGeneration++;
  microsoftTicket=null;
@@ -779,7 +781,7 @@ function premiumCosmeticsPanel(){
        '<details class="profile-advanced"><summary>Historial guardado por VIS Nexo ('+history.length+')</summary>'+
        '<small class="muted">VIS recuerda las texturas que consultás o equipás desde ahora. No puede recuperar automáticamente todas las skins usadas antes de VIS.</small>'+
        (savedRows||'<p class="muted">El historial se completará cuando consultes o uses nuevas skins.</p>')+'</details>'+
-       '<div class="profile-actions"><label>Modelo <select id="premium-skin-model"><option value="classic">Clásico</option><option value="slim">Delgado</option></select></label>'+
+       '<div class="profile-actions"><label>Modelo <select id="premium-skin-model"><option value="classic" '+(premiumSkinModel==='classic'?'selected':'')+'>Clásico</option><option value="slim" '+(premiumSkinModel==='slim'?'selected':'')+'>Delgado</option></select></label>'+
          '<button class="primary-btn" data-action="premium-upload-skin" '+(premiumCosmeticsBusy?'disabled':'')+'>'+I('upload',16)+' Guardar en VIS y Minecraft oficial</button></div></div>'+
      '<div class="premium-cosmetics-group"><h3>Capas oficiales ('+capes.length+')</h3>'+
        (capeRows||'<p class="muted">No tenés capas oficiales disponibles.</p>')+
@@ -854,8 +856,8 @@ function profilePage(){
        '<small>'+(publicSkin?.skin?'Otros usuarios pueden verla buscando @'+esc(username):
          'Importá una skin o publicá la que ya tenés.')+'</small>'+
       '</div></div>'+
-    (microsoftGamertag?'<div class="profile-quick-actions"><label><input type="checkbox" id="premium-auto-skin" checked/> Subir también a Minecraft oficial ('+esc(microsoftGamertag)+')</label>'+
-       '<label>Modelo <select id="premium-local-model"><option value="classic">Clásico · Steve</option><option value="slim">Delgado · Alex</option></select></label></div>':'')+
+    (microsoftGamertag?'<div class="profile-quick-actions"><label><input type="checkbox" id="premium-auto-skin" '+(premiumSkinSync?'checked':'')+'/> Subir también a Minecraft oficial ('+esc(microsoftGamertag)+')</label>'+
+       '<label>Modelo <select id="premium-local-model"><option value="classic" '+(premiumSkinModel==='classic'?'selected':'')+'>Clásico · Steve</option><option value="slim" '+(premiumSkinModel==='slim'?'selected':'')+'>Delgado · Alex</option></select></label></div>':'')+
     '<div class="profile-quick-actions">'+
       '<button class="outline-btn" data-action="import-skin">'+I('upload',15)+' Importar PNG</button>'+
       '<button class="primary-btn" data-action="publish-vis-skin" '+(!skinPath||!connected||skinSharingBusy?'disabled':'')+'>'+
@@ -908,8 +910,8 @@ function editProfileDialog(){
  '</section>'+
  '<section><h3>'+I('game',18)+' Minecraft en VIS</h3>'+
   '<p class="muted">Importá una skin PNG 64×64 o 64×32. VIS Social y Minecraft oficial son publicaciones distintas; en una cuenta Premium podés activar ambas.</p>'+
-  (microsoftGamertag?'<div class="profile-quick-actions"><label><input type="checkbox" id="premium-edit-auto-skin" checked/> Subir también a Minecraft oficial</label>'+
-     '<label>Modelo <select id="premium-edit-model"><option value="classic">Clásico · Steve</option><option value="slim">Delgado · Alex</option></select></label></div>':'')+
+  (microsoftGamertag?'<div class="profile-quick-actions"><label><input type="checkbox" id="premium-edit-auto-skin" '+(premiumSkinSync?'checked':'')+'/> Subir también a Minecraft oficial</label>'+
+     '<label>Modelo <select id="premium-edit-model"><option value="classic" '+(premiumSkinModel==='classic'?'selected':'')+'>Clásico · Steve</option><option value="slim" '+(premiumSkinModel==='slim'?'selected':'')+'>Delgado · Alex</option></select></label></div>':'')+
    '<div class="profile-quick-actions"><button class="outline-btn" data-action="import-skin">Importar skin local</button>'+
    '<button class="primary-btn" data-action="publish-vis-skin" '+(!user.skin||!connected||skinSharingBusy?'disabled':'')+'>Publicar en VIS</button>'+
    (skin?'<button class="subtle-btn" data-action="remove-vis-skin">Quitar pública</button>':'')+'</div>'+
@@ -1510,8 +1512,8 @@ async function chooseAsset(kind,field='',projectId='',forceOfficialSkin=false) {
      const editor=dialog?.type==='edit-profile';
      const opt=document.getElementById(editor?'premium-edit-auto-skin':'premium-auto-skin');
      const selectedModel=document.getElementById(forceOfficialSkin?'premium-skin-model':editor?'premium-edit-model':'premium-local-model');
-     const syncOfficial=premiumSkin&&(forceOfficialSkin||opt?.checked!==false);
-     const variant=selectedModel?.value==='slim'?'slim':'classic';
+     const syncOfficial=premiumSkin&&(forceOfficialSkin||(opt?.checked??premiumSkinSync));
+     const variant=(selectedModel?.value||premiumSkinModel)==='slim'?'slim':'classic';
      const generation=accountGeneration,owner=db.user?.username;
      const path=await T.dialog.open({multiple:false,directory:false,
        title:kind==='skin'?'Seleccionar skin PNG':'Seleccionar imagen',
@@ -2180,6 +2182,14 @@ root.addEventListener('click',async event=>{
    if(ok){dialog=null;mcSelected=null;render();}
  }
  }
+});
+root.addEventListener('change',event=>{
+ const control=event.target;
+ if(!control)return;
+ if(['premium-auto-skin','premium-edit-auto-skin'].includes(control.id))
+   premiumSkinSync=control.checked===true;
+ if(['premium-local-model','premium-edit-model','premium-skin-model'].includes(control.id))
+   premiumSkinModel=control.value==='slim'?'slim':'classic';
 });
 root.addEventListener('input',event=>{
  if(event.target?.id==='bulk-delete-confirm-input'){
