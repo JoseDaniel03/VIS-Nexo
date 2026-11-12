@@ -769,13 +769,21 @@ fn argument_text(value:&Value,placeholders:&[(&str,String)])->Vec<String>{
  }}
  out.into_iter().map(|mut s|{for(k,v) in placeholders{s=s.replace(*k,v.as_str())}s}).collect()
 }
+/// Verified premium profile. The token is held in the Rust process and is
+/// never persisted or returned to JavaScript.
+#[derive(Clone)]
+pub(crate) struct PremiumIdentity {
+    pub name:String,
+    pub uuid:String,
+    pub access_token:String
+}
 pub fn launch(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance)->Result<LaunchResult,String>{
  launch_with_game_directory(app,data_root,username,ins,None,None)
 }
 /// Launch a verified owned Minecraft profile. Token stays in native memory;
 /// the Minecraft Java main class requires its access token as an argument.
 pub fn launch_premium(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,
-    auth:&crate::microsoft::MinecraftIdentity)->Result<LaunchResult,String>{
+    auth:&PremiumIdentity)->Result<LaunchResult,String>{
     launch_with_game_directory(app,data_root,owner,ins,None,Some(auth))
 }
 pub fn launch_guest(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,guest:&str)->Result<LaunchResult,String>{
@@ -794,7 +802,7 @@ pub fn launch_shared(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,vis
 }
 /// Shared binaries, private visitor saves, authenticated Minecraft UUID.
 pub fn launch_shared_premium(app:&AppHandle,data_root:&Path,owner:&str,
-    ins:&Instance,visitor:&str,auth:&crate::microsoft::MinecraftIdentity)->Result<LaunchResult,String>{
+    ins:&Instance,visitor:&str,auth:&PremiumIdentity)->Result<LaunchResult,String>{
     if !clean_segment(visitor){return Err("Perfil de jugador VIS inválido".into());}
     let folder=shared_game_directory(data_root,owner,ins,visitor)?;
     launch_with_game_directory(app,data_root,owner,ins,Some(&folder),Some(auth))
@@ -812,7 +820,7 @@ pub fn shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&s
     }
     Ok(target)
 }
-fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,game_override:Option<&Path>,premium:Option<&crate::microsoft::MinecraftIdentity>)->Result<LaunchResult,String>{
+fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,game_override:Option<&Path>,premium:Option<&PremiumIdentity>)->Result<LaunchResult,String>{
  let dir=instance_dir(data_root,username,ins)?;
  let game_dir=game_override.unwrap_or(&dir);
  if !installed(&dir,ins){return Err("Primero instalá la instancia".into())}
