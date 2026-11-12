@@ -408,6 +408,17 @@ fn delete_project(state: State<'_, Mutex<Backend>>, project_id: String) -> Resul
     s.save_catalog(next)?;
     Ok(s.snapshot())
 }
+/// Resolve a new instance's dedicated subdirectory without creating files.
+/// Already installed instances keep their existing paths when edited.
+#[tauri::command]
+fn suggest_instance_directory(
+    state:State<'_,Mutex<Backend>>,library:String,name:String
+)->Result<String,String>{
+    locked(&state)?.username()?;
+    Ok(instance_guard::managed_child(Path::new(&library),&name)?
+        .to_string_lossy().into_owned())
+}
+
 /// Read-only preflight for the instance wizard; no folder is created.
 #[tauri::command]
 fn preview_instance_destination(
@@ -1202,7 +1213,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
