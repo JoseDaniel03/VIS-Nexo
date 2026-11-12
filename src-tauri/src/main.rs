@@ -353,6 +353,22 @@ fn save_project(state: State<'_, Mutex<Backend>>, mut project: GameProject) -> R
         if project.loader=="vanilla" {project.loader_version.clear();}
         if project.loader=="fabric" && project.loader_version.trim().is_empty(){return Err("Elegí una versión de Fabric Loader para el proyecto".into());}
     }
+    // An official project owns its curated mod list; the client cannot inject
+    // URLs or absolute paths into another player's install.
+    if project.modrinth_mods.len()>32 {return Err("Máximo 32 mods Modrinth por proyecto".into());}
+    let mut mod_ids=std::collections::BTreeSet::new();
+    for id in &project.modrinth_mods {
+        if !(3..=64).contains(&id.len()) ||
+            !id.bytes().all(|byte|byte.is_ascii_alphanumeric() || byte==b'-' || byte==b'_') {
+            return Err("ID de mod Modrinth inválido".into());
+        }
+        if !mod_ids.insert(id.to_ascii_lowercase()) {
+            return Err("El proyecto incluye mods duplicados".into());
+        }
+    }
+    if !project.modrinth_mods.is_empty() && !(project.engine=="java" && project.loader=="fabric") {
+        return Err("Los mods de proyecto requieren Minecraft Java con Fabric; Horizon usa su propio motor".into());
+    }
     if project.installable && project.mc_version.trim().is_empty(){return Err("Seleccioná la versión del juego antes de habilitar el proyecto".into());}
     if project.id.is_empty() { project.id = slug(&project.title); }
     if project.id.is_empty() || slug(&project.id) != project.id { return Err("ID de proyecto inválido".into()); }
