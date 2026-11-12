@@ -185,12 +185,68 @@ function mockCommand(name,args){
 function rememberMockAccount(username){
  db.recent_accounts=[{username,provider:'local'},...(db.recent_accounts||[]).filter(x=>x.username!==username)].slice(0,3);
 }
+// Full-size originals stay on disk. Cache reduced in-memory WebP previews;
+// loading hundreds of 12-MB images concurrently caused large UI RAM spikes.
+const previewLoading=new Map();
+const previewFailed=new Set();
+let previewBackgroundBusy=false;
+async function compactPreview(path,source){
+  if(typeof source!=='string'||!source.startsWith('data:image/')||source.length<512*1024)return source;
+  if([db.user?.skin,db.user?.cape,db.user?.avatar_layer].includes(path))return source;
+  try{
+    const img=new Image();img.src=source;await img.decode();
+    const icon=db.projects.some(p=>p.icon_path===path);
+    const max=icon?512:1920;
+    const ratio=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(img.naturalWidth*ratio));
+    canvas.height=Math.max(1,Math.round(img.naturalHeight*ratio));
+    const ctx=canvas.getContext('2d');
+    if(!ctx||canvas.width*canvas.height>4_000_000)return source;
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    const webp=canvas.toDataURL('image/webp',0.84);
+    return webp.startsWith('data:image/webp;')&&webp.length<source.length?webp:source;
+  }catch{return source;}
+}
+async function fetchPreview(path){
+  if(!path||assetCache[path]||previewFailed.has(path))return;
+  if(previewLoading.has(path))return previewLoading.get(path);
+  const pending=(async()=>{
+    try{
+      const source=await command('preview_asset',{path});
+      assetCache[path]=await compactPreview(path,source);
+    }catch{previewFailed.add(path);}
+    finally{previewLoading.delete(path);}
+  })();
+  previewLoading.set(path,pending);
+  return pending;
+}
 async function refreshAssets(){
   if(!native||!db.user)return;
-  const paths = new Set([db.user.avatar,db.user.skin,db.user.cape,db.user.avatar_layer,db.user.profile_banner,db.branding.launcher_logo,db.branding.home_image,
-    ...db.projects.flatMap(p=>[p.icon_path,p.banner_path,p.logo_path])].filter(Boolean));
-  const missing=[...paths].filter(p=>!assetCache[p]);
-  await Promise.all(missing.map(async p=>{try{assetCache[p]=await command('preview_asset',{path:p})}catch{}}));
+  const selected=db.projects.find(p=>p.id===selectedId);
+  const vital=[db.user.avatar,db.user.skin,db.user.cape,db.user.avatar_layer,
+    db.user.profile_banner,db.branding.launcher_logo,db.branding.home_image,
+    selected?.icon_path,selected?.banner_path,selected?.logo_path,
+    ...db.projects.slice(0,8).flatMap(p=>[p.icon_path,p.banner_path])].filter(Boolean);
+  // Only a small visible set blocks login or navigation.
+  const immediate=[...new Set(vital)];
+  for(let i=0;i<immediate.length;i+=3) {
+    await Promise.all(immediate.slice(i,i+3).map(fetchPreview));
+  }
+  if(previewBackgroundBusy)return;
+  previewBackgroundBusy=true;
+  const remaining=[...new Set(db.projects.flatMap(p=>
+    [p.icon_path,p.banner_path,p.logo_path]).filter(Boolean))]
+    .filter(p=>!assetCache[p]&&!previewFailed.has(p));
+  void (async()=>{
+    for(let i=0;i<remaining.length;i+=2){
+      await Promise.all(remaining.slice(i,i+2).map(fetchPreview));
+      // At most one full DOM update per eight images, not one per picture.
+      if(i%8===0)scheduleSocialRender();
+    }
+    previewBackgroundBusy=false;
+    scheduleSocialRender();
+  })();
 }
 let socialMode = 'disconnected', socialError = '', socialOverlay = null;
 const socialAvatars=new Map(), avatarLoads=new Set();
@@ -817,6 +873,10 @@ function render(){
  }
 }
 function navigate(to,id='') {
+ if(to==='project'&&native&&db.user){
+   // Current project images are prioritized; lazy prefetch runs asynchronously.
+   void Promise.resolve().then(()=>refreshAssets()).then(scheduleSocialRender).catch(()=>{});
+ }
  const nextId=id||selectedId;
  if(db.user && page===to && (to!=='project'||nextId===selectedId)){
    root.querySelector('#main-scroll')?.scrollTo({top:0,behavior:prefs.reducedMotion?'instant':'smooth'});
