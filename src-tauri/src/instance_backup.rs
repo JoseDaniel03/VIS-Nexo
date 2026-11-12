@@ -232,6 +232,26 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test] fn backup_restore_keeps_files_and_original_rollback(){
+        let root=std::env::temp_dir().join(format!("vis-backup-roundtrip-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("saves/My World")).unwrap();
+        fs::write(root.join("saves/My World/level.dat"),b"first world").unwrap();
+        fs::write(root.join("servers.dat"),b"old servers").unwrap();
+        let backup=create(&root).unwrap();
+        assert_eq!(list(&root).unwrap().len(),1);
+        fs::write(root.join("saves/My World/level.dat"),b"later world").unwrap();
+        let nonreplace=restore(&root,&backup.name,false).unwrap();
+        assert_eq!(nonreplace.restored,0);
+        assert!(nonreplace.preserved>0);
+        assert_eq!(fs::read(root.join("saves/My World/level.dat")).unwrap(),b"later world");
+        let replace=restore(&root,&backup.name,true).unwrap();
+        assert!(replace.replaced>0);
+        assert_eq!(fs::read(root.join("saves/My World/level.dat")).unwrap(),b"first world");
+        assert!(Path::new(&replace.safety_copy).join("saves/My World/level.dat").is_file());
+        assert_eq!(fs::read(Path::new(&replace.safety_copy).join("saves/My World/level.dat")).unwrap(),b"later world");
+        let _=fs::remove_dir_all(root);
+    }
     #[test] fn rejects_zip_slip_and_unsafe_categories(){
         assert!(valid_member("../passwd").is_err());
         assert!(valid_member("/etc/passwd").is_err());
