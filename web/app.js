@@ -16,7 +16,7 @@ const native = !!T?.core?.invoke;
 const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],mode:native?'local':'preview'});
 let db = empty();
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
-let microsoftTicket=null, microsoftPollGeneration=0;
+let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
 async function cancelMicrosoftLogin(){
  microsoftPollGeneration++;
  microsoftTicket=null;
@@ -40,6 +40,7 @@ async function beginMicrosoftLogin(){
      if(result.status==='connected'){
        microsoftTicket=null;
        db=result.snapshot;
+       microsoftGamertag=result.minecraft_name;
        page='home';await refreshAssets();render();
        message('Microsoft conectado · Minecraft '+result.minecraft_name);
        return;
@@ -102,7 +103,8 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 const esc = (v) => String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 const attr=esc;
 const humanRole = (role) => role === 'admin'?'Administrador':'Jugador';
-const displayAccount = (name) => name==='vis_studios' ? 'VIS STUDIOS' : name;
+const displayAccount = (name) => name==='vis_studios' ? 'VIS STUDIOS' :
+  (name?.startsWith('msa_')&&microsoftGamertag?microsoftGamertag:name);
 const isAdmin = () => db.user?.role === 'admin';
 const currentProject = () => db.projects.find(p=>p.id===selectedId);
 const isCurrent = (p) => selectedId===p.id;
@@ -1219,7 +1221,7 @@ root.addEventListener('click',async event=>{
   else try{await social.acceptFriend(id);message('Solicitud aceptada');}
   catch(e){message(String(e),true);}
  }
- else if(act==='logout'){cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
+ else if(act==='logout'){microsoftGamertag=null;cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
  else if(act==='create-project'){startProject();void loadMinecraftVersions();}
  else if(act==='quick-publish'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind||'news'};render();}
  else if(act==='edit-publication'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind,index:Number(button.dataset.index)};render();}
