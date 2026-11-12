@@ -587,6 +587,9 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
             instance_guard::independent(&dir,&previous_dir)?;
         }
     }
+    // Create every per-player data folder when the instance is saved, not
+    // only when a world is first opened in Java/Horizon.
+    minecraft::prepare_player_directory(&dir)?;
     if let Some(i) = prefs.instances.iter().position(|p| p.name == instance.name && p.project_id == instance.project_id) {
         prefs.instances[i] = instance;
     } else { prefs.instances.push(instance); }
@@ -646,6 +649,7 @@ fn ensure_project_instance(state:State<'_,Mutex<Backend>>,project_id:String,game
         }
     }
     ins.installed=minecraft::installed(&dir,&ins);
+    minecraft::prepare_player_directory(&dir)?;
     if let Some(index)=already {prefs.instances[index]=ins;} else {prefs.instances.push(ins);}
     s.storage.save_prefs(&username,&prefs)?;
     Ok(s.snapshot())
