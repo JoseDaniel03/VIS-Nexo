@@ -43,6 +43,33 @@ pub fn configure_instance_environment(cmd:&mut Command,dir:&Path)->Result<(),Str
         let path=dir.join(relative);fs::create_dir_all(&path).map_err(|e|e.to_string())?;
         cmd.env(name,path);
     }
+    // Minecraft may invoke the desktop's Open Resource Pack Folder action.
+    // An AppImage can inject GTK/GIO/Qt libraries and paths that make
+    // xdg-open/gio fail even though Dolphin works from Konsole. Restore only
+    // the host opener environment; all game saves remain in --gameDir.
+    #[cfg(target_os="linux")]
+    if std::env::var_os("APPDIR").is_some() || std::env::var_os("APPIMAGE").is_some() {
+        let appdir=std::env::var("APPDIR").unwrap_or_default();
+        let filtered=|value:String|{
+            value.split(':').filter(|item|
+                !item.is_empty() && !item.starts_with("/tmp/.mount_")
+                && (appdir.is_empty() || !item.starts_with(&appdir))
+            ).collect::<Vec<_>>().join(":")
+        };
+        for key in ["APPDIR","APPIMAGE","ARGV0","LD_LIBRARY_PATH","LD_PRELOAD",
+            "LD_AUDIT","GIO_EXTRA_MODULES","GIO_MODULE_DIR","GTK_PATH",
+            "GTK_EXE_PREFIX","GTK_DATA_PREFIX","QT_PLUGIN_PATH",
+            "QT_QPA_PLATFORM_PLUGIN_PATH","GDK_PIXBUF_MODULE_FILE",
+            "GDK_PIXBUF_MODULEDIR"]{
+                cmd.env_remove(key);
+        }
+        let path=filtered(std::env::var("PATH").unwrap_or_default());
+        cmd.env("PATH",if path.is_empty(){"/usr/local/bin:/usr/bin:/bin"}else{&path});
+        if let Ok(xdg)=std::env::var("XDG_DATA_DIRS") {
+            let clean=filtered(xdg);
+            cmd.env("XDG_DATA_DIRS",if clean.is_empty(){"/usr/local/share:/usr/share"}else{&clean});
+        }
+    }
     Ok(())
 }
 
