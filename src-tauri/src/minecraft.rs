@@ -847,22 +847,38 @@ pub fn launch_guest(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,gues
  // Keep all saves/config/logs in the guest sandbox, never inside owner saves.
  launch_with_game_directory(app,data_root,owner,ins,Some(&folder),None)
 }
-/// Shared installations are immutable to the visiting VIS profile. A second
-/// profile reuses validated game binaries but writes saves/options/logs separately.
+/// The Minecraft identity changes between VIS accounts; the installed
+/// instance's saves, servers.dat, options, packs and first-run state do not.
+/// Profiles can explicitly opt into separate game data in instance settings.
 pub fn launch_shared(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<LaunchResult,String>{
     if !clean_segment(visitor){return Err("Perfil VIS inválido".into());}
     let folder=shared_game_directory(data_root,owner,ins,visitor)?;
     let mut isolated=ins.clone();isolated.player_name=visitor.to_owned();
     launch_with_game_directory(app,data_root,owner,&isolated,Some(&folder),None)
 }
-/// Shared binaries, private visitor saves, authenticated Minecraft UUID.
+/// Shared instance content, verified Premium UUID remains account-specific.
 pub fn launch_shared_premium(app:&AppHandle,data_root:&Path,owner:&str,
     ins:&Instance,visitor:&str,auth:&PremiumIdentity)->Result<LaunchResult,String>{
     if !clean_segment(visitor){return Err("Perfil de jugador VIS inválido".into());}
     let folder=shared_game_directory(data_root,owner,ins,visitor)?;
     launch_with_game_directory(app,data_root,owner,ins,Some(&folder),Some(auth))
 }
+/// Shared game data is the default: switching VIS profiles should never
+/// reset the worlds list, multiplayer server list or first-run presentation.
+/// Previously isolated profile folders remain untouched for recovery.
 pub fn shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<PathBuf,String>{
+    if !clean_segment(visitor) {
+        return Err("Perfil VIS inválido".into());
+    }
+    if ins.share_game_data {
+        let root=instance_dir(data_root,owner,ins)?;
+        prepare_player_directory(&root)?;
+        return Ok(root);
+    }
+    private_shared_game_directory(data_root,owner,ins,visitor)
+}
+/// Opt-in private profile layout and historical location for data recovery.
+pub fn private_shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<PathBuf,String>{
     // Two UI operations (e.g. Abrir carpeta + Jugar) must never race to
     // migrate the same old world. Serializing also prevents overwrites.
     let _layout_guard=SHARED_PLAYER_LAYOUT_GUARD.lock()
@@ -1180,7 +1196,7 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
 #[cfg(test)]mod tests{use super::*;
  #[test]fn shared_saves_are_copied_into_instance_without_deleting_original(){
   let root=std::env::temp_dir().join(format!("vis-player-migration-{}-{}",std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
-  let ins=Instance{name:"Test".into(),project_id:"personal".into(),game_dir:root.join("instance").to_string_lossy().into_owned(),..Default::default()};
+  let ins=Instance{name:"Test".into(),project_id:"personal".into(),game_dir:root.join("instance").to_string_lossy().into_owned(),share_game_data:false,..Default::default()};
   let old=root.join("shared-player-data/visitor/owner/personal/Test/saves");
   fs::create_dir_all(&old).unwrap();fs::write(old.join("world.dat"),b"saved world").unwrap();
   let local=shared_game_directory(&root,"owner",&ins,"visitor").unwrap();
@@ -1197,7 +1213,7 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
       std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
   let ins=Instance{name:"Coop Test".into(),project_id:"__personal__".into(),
       game_dir:root.join("Instancias/coop").to_string_lossy().into_owned(),
-      ..Default::default()};
+      share_game_data:false,..Default::default()};
   let owner=instance_dir(&root,"owner",&ins).unwrap();
   prepare_player_directory(&owner).unwrap();
   let alice=shared_game_directory(&root,"owner",&ins,"alice").unwrap();
@@ -1217,6 +1233,34 @@ pub fn remove_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&
   assert_eq!(shared_game_directory(&root,"owner",&ins,"alice").unwrap(),alice);
   assert_eq!(fs::read(alice.join("saves/Private World/level.dat")).unwrap(),b"Alice's world");
   let _=fs::remove_dir_all(root);
+ }
+ #[test]fn switching_vis_accounts_preserves_the_same_worlds_servers_and_first_launch(){
+  let root=std::env::temp_dir().join(format!("vis-shared-content-{}-{}",
+      std::process::id(),DOWNLOAD_NONCE.fetch_add(1,Ordering::Relaxed)));
+  let ins=Instance{name:"Servidor de amigos".into(),project_id:"__personal__".into(),
+      game_dir:root.join("Instancias/servidor-amigos").to_string_lossy().into_owned(),
+      ..Default::default()};
+  let owner=instance_dir(&root,"owner",&ins).unwrap();
+  prepare_player_directory(&owner).unwrap();
+  fs::create_dir_all(owner.join("saves/Mi Mundo")).unwrap();
+  fs::write(owner.join("saves/Mi Mundo/level.dat"),b"World 1").unwrap();
+  fs::write(owner.join("servers.dat"),b"Fake-NBT-for-path-test").unwrap();
+  fs::write(owner.join("options.txt"),b"joinedFirstServer:true").unwrap();
+  let profile_b=shared_game_directory(&root,"owner",&ins,"other").unwrap();
+  let profile_c=shared_game_directory(&root,"owner",&ins,"third").unwrap();
+  assert_eq!(profile_b,owner);
+  assert_eq!(profile_c,owner);
+  assert_eq!(fs::read(profile_b.join("saves/Mi Mundo/level.dat")).unwrap(),b"World 1");
+  assert_eq!(fs::read(profile_c.join("servers.dat")).unwrap(),b"Fake-NBT-for-path-test");
+  assert_eq!(fs::read(profile_c.join("options.txt")).unwrap(),b"joinedFirstServer:true");
+  let _=fs::remove_dir_all(root);
+ }
+ #[test]fn old_instance_without_shared_flag_defaults_to_shared_data(){
+  let legacy=serde_json::json!({"name":"Legacy","project_id":"__personal__"});
+  let ins:Instance=serde_json::from_value(legacy).unwrap();
+  assert!(ins.share_game_data);
+  let mut private=ins.clone();private.share_game_data=false;
+  assert!(!private.share_game_data);
  }
  #[cfg(unix)]
  #[test]fn resourcepacks_cannot_redirect_to_another_users_files(){
