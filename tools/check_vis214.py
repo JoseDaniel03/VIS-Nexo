@@ -13,7 +13,7 @@ checks={
  'Backward compatible marker deserialization': '#[serde(default)] lock_sha256:String' in h,
  'Progress monotonic': 'completed=completed.max(' in h,
  'Child killed on token-pipe failure': 'let _=child.kill();let _=child.wait();' in h,
- 'Offline sharing preserved': 'offline-guests' in (p/'src-tauri/src/minecraft.rs').read_text(),
+ 'Offline guest identity uses shared instance data': 'pub fn launch_guest' in (p/'src-tauri/src/minecraft.rs').read_text() and 'shared_game_directory(data_root,owner,ins,guest)' in (p/'src-tauri/src/minecraft.rs').read_text(),
  'Local build discovery bounded': 'entries.take(60)' in h and 'found.truncate(20)' in h,
  'Diagnostics registered': 'fn horizon_diagnostics(' in main and 'horizon_diagnostics, horizon_source_build, horizon_local_builds,' in main,
  'Diagnostics escaped in UI': '${esc(c.label)}' in ui and '${esc(c.detail)}' in ui,
