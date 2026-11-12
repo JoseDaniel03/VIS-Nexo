@@ -4,10 +4,9 @@
   "version": "2.19.0",
   "identifier": "com.virgoland.vslauncher",
   "build": {
-    "beforeDevCommand": "node tools/prepare_horizon.mjs build && node tools/dev.mjs",
+    "beforeDevCommand": "node tools/dev.mjs",
     "devUrl": "http://127.0.0.1:1420",
-    "frontendDist": "../web",
-    "beforeBuildCommand": "node tools/prepare_horizon.mjs build"
+    "frontendDist": "../web"
   },
   "app": {
     "withGlobalTauri": true,
@@ -37,9 +36,6 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
-    "createUpdaterArtifacts": true,
-    "resources": {
-      "resources/horizon/": "horizon/"
-    }
+    "createUpdaterArtifacts": true
   }
 }
