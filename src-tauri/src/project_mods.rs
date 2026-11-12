@@ -22,7 +22,10 @@ struct ManagedState {
     mc_version:String,
     loader:String,
     selected_ids:Vec<String>,
+    /// Managed files that this updater may retire or replace.
     files:Vec<ManagedFile>,
+    /// All required files, including identical player-owned copies.
+    required_files:Vec<ManagedFile>,
 }
 #[derive(Debug,Clone,Serialize)]
 pub struct SyncReport {
@@ -80,7 +83,8 @@ fn load(dir:&Path,project_id:&str)->Result<ManagedState,String>{
     let state:ManagedState=serde_json::from_slice(&fs::read(path).map_err(|e|e.to_string())?)
         .map_err(|_|"Manifiesto de mods dañado. Reparalo manualmente antes de continuar")?;
     if state.project_id!=project_id || state.files.len()>64 ||
-       state.files.iter().any(|f| !clean_name(&f.name) ||
+       state.required_files.len()>64 ||
+       state.files.iter().chain(state.required_files.iter()).any(|f| !clean_name(&f.name) ||
            f.sha1.len()!=40 || !f.sha1.bytes().all(|b|b.is_ascii_hexdigit())) {
         return Err("Manifiesto de mods no pertenece a esta instancia o está dañado".into());
     }
@@ -89,8 +93,8 @@ fn load(dir:&Path,project_id:&str)->Result<ManagedState,String>{
 fn current(dir:&Path,ins:&Instance,ids:&[String],state:&ManagedState)->bool {
     state.project_id==ins.project_id &&
     state.mc_version==ins.version && state.loader==ins.loader &&
-    state.selected_ids==ids &&
-    state.files.iter().all(|file|{
+    state.selected_ids==ids && (ids.is_empty() || !state.required_files.is_empty()) &&
+    state.required_files.iter().all(|file|{
         normal_file(&dir.join("mods").join(&file.name))
             .ok().flatten().is_some_and(|size|size==file.size)
     })
@@ -205,7 +209,8 @@ pub fn sync(root:&Path,username:&str,ins:&Instance,ids:&[String])
             }
             let state=ManagedState{
                 project_id:ins.project_id.clone(),mc_version:ins.version.clone(),
-                loader:ins.loader.clone(),selected_ids:ids.to_vec(),files:tracked
+                loader:ins.loader.clone(),selected_ids:ids.to_vec(),files:tracked,
+                required_files:desired.values().cloned().collect()
             };
             atomic_json(&manifest(&dir),&state)?;
             Ok(state)
@@ -270,7 +275,8 @@ mod tests {
         let prev=ManagedState{
             project_id:ins.project_id.clone(),mc_version:ins.version.clone(),
             loader:ins.loader.clone(),selected_ids:vec!["oldmod".into()],
-            files:vec![ManagedFile{name:"managed.jar".into(),sha1,size}]
+            files:vec![ManagedFile{name:"managed.jar".into(),sha1:sha1.clone(),size}],
+            required_files:vec![ManagedFile{name:"managed.jar".into(),sha1,size}]
         };
         atomic_json(&manifest(&dir),&prev).unwrap();
         let report=sync(&root,"player",&ins,&[]).unwrap();
