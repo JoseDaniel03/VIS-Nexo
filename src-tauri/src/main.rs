@@ -5,6 +5,9 @@ mod minecraft;
 mod microsoft;
 mod instance_guard;
 mod instance_lock;
+mod instance_backup;
+mod instance_health;
+mod server_list;
 mod project_mods;
 mod maintenance;
 mod cloud;
@@ -744,6 +747,95 @@ async fn recover_shared_instance(
     tauri::async_runtime::spawn_blocking(move||{
         minecraft::shared_recovery(&root,&owner,&instance,&visitor,apply)
     }).await.map_err(|_|"Recuperación de partidas interrumpida".to_string())?
+}
+// All user-facing backup and repair actions derive the location from an
+// authorized installed instance, never an arbitrary filesystem path in JS.
+fn game_location_for_operation(
+ s:&Backend,project_id:&str,name:&str,source_owner:Option<&str>,owner_only:bool
+)->Result<PathBuf,String>{
+ let active=s.username()?;
+ if owner_only&&source_owner.is_some_and(|owner|!owner.is_empty()&&owner!=active){
+    return Err("Solo el propietario puede restaurar o reparar esta instancia".into());
+ }
+ resolve_player_game_dir(s,project_id,name,source_owner)
+}
+#[tauri::command]
+async fn instance_backups(
+ state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
+)->Result<Vec<instance_backup::BackupInfo>,String>{
+ let dir={
+   let s=locked(&state)?;
+   game_location_for_operation(&s,&project_id,&name,source_owner.as_deref(),false)?
+ };
+ tauri::async_runtime::spawn_blocking(move||instance_backup::list(&dir))
+    .await.map_err(|_|"No se pudieron consultar las copias".to_string())?
+}
+#[tauri::command]
+async fn backup_instance_data(
+ state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
+)->Result<instance_backup::BackupInfo,String>{
+ let dir={
+   let s=locked(&state)?;
+   game_location_for_operation(&s,&project_id,&name,source_owner.as_deref(),false)?
+ };
+ tauri::async_runtime::spawn_blocking(move||instance_backup::create(&dir))
+    .await.map_err(|_|"La copia se interrumpió".to_string())?
+}
+#[tauri::command]
+async fn restore_instance_data(
+ state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>,
+ backup_name:String,replace:bool,confirmation:String
+)->Result<instance_backup::RestoreInfo,String>{
+ if confirmation!="RESTAURAR"{return Err("Escribí RESTAURAR para continuar".into());}
+ let dir={
+   let s=locked(&state)?;
+   game_location_for_operation(&s,&project_id,&name,source_owner.as_deref(),true)?
+ };
+ tauri::async_runtime::spawn_blocking(move||instance_backup::restore(&dir,&backup_name,replace))
+    .await.map_err(|_|"La restauración se interrumpió".to_string())?
+}
+#[tauri::command]
+async fn inspect_instance_data(
+ state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
+)->Result<instance_health::HealthReport,String>{
+ let dir={
+   let s=locked(&state)?;
+   game_location_for_operation(&s,&project_id,&name,source_owner.as_deref(),false)?
+ };
+ tauri::async_runtime::spawn_blocking(move||instance_health::inspect(&dir))
+    .await.map_err(|_|"La revisión se interrumpió".to_string())?
+}
+#[tauri::command]
+async fn repair_instance_data(
+ state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
+)->Result<instance_health::HealthReport,String>{
+ let dir={
+   let s=locked(&state)?;
+   game_location_for_operation(&s,&project_id,&name,source_owner.as_deref(),true)?
+ };
+ tauri::async_runtime::spawn_blocking(move||instance_health::repair_missing(&dir))
+    .await.map_err(|_|"La reparación se interrumpió".to_string())?
+}
+#[tauri::command]
+async fn merge_shared_servers(
+ state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:String,apply:bool
+)->Result<server_list::MergeReport,String>{
+ let (dir,legacy)={
+   let s=locked(&state)?;
+   let active=s.username()?.to_owned();
+   if source_owner.is_empty()||source_owner==active{
+       return Err("Elegí una instancia instalada por otro perfil".into());
+   }
+   let ins=s.machine_instances(Some(&active)).into_iter().find(|ins|
+       ins.source_owner==source_owner&&ins.project_id==project_id&&ins.name==name)
+       .ok_or("La instancia compartida no pertenece a esta biblioteca")?;
+   if !ins.share_game_data{return Err("Los datos de esta instancia son privados por perfil".into());}
+   let dir=minecraft::instance_dir(&s.data_root,&source_owner,&ins)?;
+   let legacy=minecraft::recovery_sources(&s.data_root,&source_owner,&ins,&active)?;
+   (dir,legacy)
+ };
+ tauri::async_runtime::spawn_blocking(move||server_list::merge_from_old(&dir,&legacy,apply))
+    .await.map_err(|_|"La fusión de servidores se interrumpió".to_string())?
 }
 #[tauri::command]
 fn instance_folder(
@@ -1634,7 +1726,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
