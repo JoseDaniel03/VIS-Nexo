@@ -132,7 +132,7 @@ let horizonLibraryBuilds = [];
 let mcSelected = null, modKind = 'mod', modSearchQuery = '', installProgress = null, minecraftBusy = false;
 let bulkInstanceMode=false;
 const bulkInstanceSelection=new Set();
-const instanceSelectionKey=(instance)=>JSON.stringify([instance.project_id,instance.name]);
+const instanceSelectionKey=(instance)=>JSON.stringify([instance.source_owner||'',instance.project_id,instance.name]);
 let lastDialogTrigger = null;
 let prefs = {reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches};
 let demoAccounts=[];
@@ -689,8 +689,8 @@ function personalHomePage(){
  return `<div class="content-inner home-page user-library-page">${modeSelector()}
  <div class="user-library-hero"><div><span class="page-eyebrow">BIBLIOTECA PERSONAL</span><h1>Tu Minecraft, a tu manera.</h1><p>Creá varias versiones Vanilla, Fabric o Horizon Rust, instalá mods compatibles y mantené cada mundo separado de los proyectos oficiales.</p></div>
  ${!isGuest()?`<button class="primary-btn" data-action="new-personal-instance">${I('plus',18)} Crear instancia</button>`:''}</div>
- <div class="section-heading"><div><span class="page-eyebrow">MIS PERFILES</span><h2>Instancias personales <small>${items.length}</small></h2></div><div class="vis-instance-toolbar">${items.some(i=>!i.source_owner)?`<button class="outline-btn" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar'}</button>`:''}<button class="outline-btn" data-action="go-instances">${I('layers',16)} Ver todas</button></div></div>
- ${bulkInstanceMode?bulkInstanceToolbar(items.filter(i=>!i.source_owner)):''}
+ <div class="section-heading"><div><span class="page-eyebrow">MIS PERFILES</span><h2>Instancias personales <small>${items.length}</small></h2></div><div class="vis-instance-toolbar">${items.length?`<button class="outline-btn" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar'}</button>`:''}<button class="outline-btn" data-action="go-instances">${I('layers',16)} Ver todas</button></div></div>
+ ${bulkInstanceMode?bulkInstanceToolbar(items):''}
  ${items.length?`<div class="instance-list">${items.map(instanceLine).join('')}</div>`:quietEmpty('Todavía no creaste instancias personales',isGuest()?'Las cuentas offline solo pueden iniciar instancias ya instaladas.':'Elegí la versión de Minecraft, Vanilla o Fabric, configurá la RAM y empezá sin crear un proyecto oficial.')}
  ${isGuest()?`<button class="outline-btn" data-action="go-instances">${I('play',16)} Ver juegos offline disponibles</button>`:''}
  </div>`;
@@ -942,7 +942,7 @@ function selectedMcInstance(){
      ||(libraryMode==='user'?personalInstances():officialInstances()).find(i=>!i.source_owner)||null;
 }
 function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const allow=i.project_id===PERSONAL_PROJECT_ID || isExecutionEnabled(p);
- return `<article class="instance-card">${bulkInstanceMode&&!isGuest()&&!i.source_owner?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · ${i.share_game_data!==false?'mundos y servidores compartidos':'datos separados por cuenta'}</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
+ return `<article class="instance-card">${bulkInstanceMode&&!isGuest()?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" data-source="${attr(i.source_owner||'')}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · ${i.share_game_data!==false?'mundos y servidores compartidos':'datos separados por cuenta'}</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
  <div class="mc-instance-actions">${isGuest()||i.source_owner?'':`<button class="outline-btn" data-action="manage-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('settings',16)} Mods y archivos</button>
  <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?'Reparar':'Instalar'}</button>`}
  <button class="icon-btn" data-action="open-instance-folder" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir carpeta de juego de esta instancia" aria-label="Abrir carpeta de ${attr(i.name)}">${I('folder',17)}</button>
@@ -963,8 +963,8 @@ function minecraftExitNotice(){
  <button class="outline-btn" data-action="dismiss-launch-diagnostic">Cerrar diagnóstico</button>
  </section>`;
 }
-function instancesPage(){const items=isGuest()?db.instances:(libraryMode==='user'?personalInstances():officialInstances());const owned=items.filter(i=>!i.source_owner);return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">MINECRAFT / INSTANCIAS</span><h1>${libraryMode==='user'?'Mis instancias':'Instancias de Universe'}</h1><p>${isGuest()?'Instancias instaladas por los perfiles VIS de esta computadora. Todos los perfiles ven los mismos mundos y servidores de una instancia compartida, salvo que se configure lo contrario.':'Instalá Minecraft Java (Vanilla/Fabric) o prepará Horizon Rust Edition sin utilizar su launcher.'}</p></div><div class="vis-instance-toolbar">${!isGuest()&&owned.length?`<button class="outline-btn ${bulkInstanceMode?'danger':''}" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar para quitar'}</button>`:''}${isGuest()?'':`<button class="outline-btn" data-action="import-worlds-instance">${I('upload',18)} Importar ZIP VIS</button>`}<button class="primary-btn" data-action="open-instance" ${!isGuest()&&(libraryMode==='user'||db.projects.length)?'':'disabled'}>${I('plus',18)} Nueva instancia</button></div></div>
- ${bulkInstanceMode&&!isGuest()?bulkInstanceToolbar(owned):''}
+function instancesPage(){const items=isGuest()?db.instances:(libraryMode==='user'?personalInstances():officialInstances());return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">MINECRAFT / INSTANCIAS</span><h1>${libraryMode==='user'?'Mis instancias':'Instancias de Universe'}</h1><p>${isGuest()?'Instancias instaladas por los perfiles VIS de esta computadora. Todos los perfiles ven los mismos mundos y servidores de una instancia compartida, salvo que se configure lo contrario.':'Instalá Minecraft Java (Vanilla/Fabric) o prepará Horizon Rust Edition sin utilizar su launcher.'}</p></div><div class="vis-instance-toolbar">${!isGuest()&&items.length?`<button class="outline-btn ${bulkInstanceMode?'danger':''}" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar para quitar'}</button>`:''}${isGuest()?'':`<button class="outline-btn" data-action="import-worlds-instance">${I('upload',18)} Importar ZIP VIS</button>`}<button class="primary-btn" data-action="open-instance" ${!isGuest()&&(libraryMode==='user'||db.projects.length)?'':'disabled'}>${I('plus',18)} Nueva instancia</button></div></div>
+ ${bulkInstanceMode&&!isGuest()?bulkInstanceToolbar(items):''}
  ${minecraftBusy?`<div class="mc-progress" id="minecraft-progress">${I('upload',16)} ${esc(installProgress?.detail||'Preparando descarga...')}</div>`:''}
  <aside class="vis-smart-tip">${I('info',17)} <div><strong>VIS Smart Install</strong><span>Si ya tenés esta versión en Minecraft oficial, CurseForge, Prism o VIS Worlds, se intentarán copiar únicamente los archivos comprobados por SHA-1. El resto se descarga normalmente.</span></div></aside>
  ${minecraftExitNotice()}
@@ -973,16 +973,17 @@ function bulkInstanceToolbar(available){
  const count=available.filter(i=>bulkInstanceSelection.has(instanceSelectionKey(i))).length;
  return '<div class="bulk-instance-toolbar" role="group" aria-label="Selección de instancias">'+
  '<strong>'+count+' seleccionada'+(count===1?'':'s')+'</strong>'+
- '<span class="muted">Solo se pueden seleccionar tus instancias. Las compartidas pertenecen a otro perfil.</span>'+
+ '<span class="muted">Las propias se quitan; las compartidas se ocultan solo para tu cuenta.</span>'+
  '<button type="button" class="outline-btn" data-action="bulk-instance-select-all">Seleccionar todas</button>'+
  '<button type="button" class="danger-btn" data-action="bulk-instance-confirm" '+(count?'':'disabled')+'>'+
  I('trash',16)+' Quitar '+count+'</button></div>';
 }
 function bulkInstanceDeleteDialog(){
  const keys=[...bulkInstanceSelection];
- const instances=(db.instances||[]).filter(i=>!i.source_owner&&keys.includes(instanceSelectionKey(i)));
+ const instances=(db.instances||[]).filter(i=>keys.includes(instanceSelectionKey(i)));
+ const hasShared=instances.some(i=>!!i.source_owner);
  const rows=instances.map(i=>'<li><strong>'+esc(i.name)+'</strong><small> · '+esc(i.engine==='horizon'?'Horizon Rust':'Minecraft Java')+
-   ' · '+esc(i.game_dir||'Carpeta administrada')+'</small></li>').join('');
+   ' · '+esc(i.source_owner?'Compartida por '+i.source_owner:'Propia')+'</small></li>').join('');
  return '<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-medium" role="alertdialog" aria-modal="true" aria-label="Confirmar eliminación múltiple">'+
  '<header class="modal-head"><div><span class="page-eyebrow">OPERACIÓN IRREVERSIBLE SI BORRÁS ARCHIVOS</span><h2>Quitar '+instances.length+
  ' instancia'+(instances.length===1?'':'s')+'</h2></div>'+
@@ -991,7 +992,7 @@ function bulkInstanceDeleteDialog(){
  '<ul class="bulk-instance-summary">'+rows+'</ul>'+
  '<label class="toggle-line large"><span><b>Borrar también los mundos y archivos del disco</b>'+
  '<small>De forma predeterminada, los mundos se conservan. Si activás esta opción, el borrado es irreversible y solo se permite en Instancias/&lt;nombre&gt; administradas por VIS. Cerrá Minecraft antes.</small></span>'+
- '<input type="checkbox" id="bulk-delete-files"/></label>'+
+ '<input type="checkbox" id="bulk-delete-files" '+(hasShared?'disabled':'')+'/></label>'+
  '<label class="bulk-confirm-label">Escribí <strong>CONFIRMAR</strong> para continuar'+
  '<input id="bulk-delete-confirm-input" type="text" spellcheck="false" autocomplete="off" placeholder="CONFIRMAR" maxlength="20" aria-label="Escribir CONFIRMAR" autofocus/></label>'+
  '</div><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button>'+
@@ -1975,15 +1976,16 @@ root.addEventListener('click',async event=>{
    bulkInstanceMode=!bulkInstanceMode;bulkInstanceSelection.clear();render();
  }
  else if(act==='bulk-instance-toggle'){
-   const key=JSON.stringify([projectId,id]);
-   const exists=db.instances.some(i=>!i.source_owner&&i.project_id===projectId&&i.name===id);
+   const sourceOwner=button.dataset.source||'';
+   const key=JSON.stringify([sourceOwner,projectId,id]);
+   const exists=db.instances.some(i=>(i.source_owner||'')===sourceOwner&&i.project_id===projectId&&i.name===id);
    if(!exists)return;
    if(button.checked)bulkInstanceSelection.add(key);else bulkInstanceSelection.delete(key);
    render();
  }
  else if(act==='bulk-instance-select-all'){
    const relevant=(page==='instances'?
-     (libraryMode==='user'?personalInstances():officialInstances()):personalInstances()).filter(i=>!i.source_owner);
+     (libraryMode==='user'?personalInstances():officialInstances()):personalInstances());
    if(relevant.length>50)return message('Seleccioná hasta 50 instancias por tanda.',true);
    for(const i of relevant)bulkInstanceSelection.add(instanceSelectionKey(i));
    render();
@@ -1995,14 +1997,15 @@ root.addEventListener('click',async event=>{
  else if(act==='bulk-delete-execute'){
    if(document.getElementById('bulk-delete-confirm-input')?.value!=='CONFIRMAR')
      return message('Escribí exactamente CONFIRMAR para continuar.',true);
-   const entries=db.instances.filter(i=>!i.source_owner&&bulkInstanceSelection.has(instanceSelectionKey(i)))
-     .map(i=>({project_id:i.project_id,name:i.name}));
+   const entries=db.instances.filter(i=>bulkInstanceSelection.has(instanceSelectionKey(i)))
+     .map(i=>({project_id:i.project_id,name:i.name,source_owner:i.source_owner||''}));
    if(entries.length!==bulkInstanceSelection.size)return message('La selección cambió; revisá las instancias.',true);
    const eraseFiles=document.getElementById('bulk-delete-files')?.checked===true;
+   if(eraseFiles&&entries.some(i=>i.source_owner))return message('No podés borrar archivos de otro perfil.',true);
    const ok=await apply('delete_instances_batch',{
        instances:entries,eraseFiles,confirmation:'CONFIRMAR'},
        eraseFiles?'Se eliminaron las instancias seleccionadas y sus archivos VIS':
-         'Las instancias fueron quitadas de VIS; tus mundos permanecen en el disco');
+         'Instancias propias quitadas y compartidas ocultas para tu cuenta; mundos conservados.');
    if(ok){bulkInstanceSelection.clear();bulkInstanceMode=false;dialog=null;mcSelected=null;render();}
  }
  else if(act==='delete-instance'){dialog={type:'confirm',kind:'instance',name:id,projectId,label:id};render();}
