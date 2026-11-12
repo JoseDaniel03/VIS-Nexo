@@ -62,9 +62,34 @@ jobs:
           cargo test --workspace --bins --lib --locked
       - name: Build installer
         run: npm run build -- --bundles ${{ matrix.bundles }} --config src-tauri/tauri.unsigned.json
+      - name: Create portable Windows launcher (no installer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'target/release/vslauncher-tauri.exe',
+            'target/release/VIS Nexo.exe'
+          )
+          $binary = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $binary) { throw 'No se encontró el ejecutable nativo de VIS Nexo' }
+          $dir = Join-Path $env:RUNNER_TEMP 'VIS-Nexo-Portable'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item -LiteralPath $binary -Destination (Join-Path $dir 'VIS-Nexo.exe')
+          @'
+          VIS Nexo - versión portable para Windows x64
+          -----------------------------------------------
+          Ejecutá VIS-Nexo.exe sin instalar el launcher.
+          Windows 10/11 requiere Microsoft Edge WebView2 Runtime.
+          Minecraft Java y Horizon se descargan por instancia;
+          nunca se incluyen en este ZIP ni se instalan en AppData/.minecraft.
+          '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
+          Compress-Archive -Path (Join-Path $dir '*') -DestinationPath 'target/release/VIS-Nexo-Windows-Portable.zip' -Force
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vis-nexo-${{ matrix.name }}
-          path: ${{ matrix.name == 'linux' && 'target/release/bundle/appimage/**' || 'target/release/bundle/nsis/**' }}
+          path: |
+            target/release/bundle/appimage/**
+            target/release/bundle/nsis/**
+            target/release/VIS-Nexo-Windows-Portable.zip
           if-no-files-found: error
