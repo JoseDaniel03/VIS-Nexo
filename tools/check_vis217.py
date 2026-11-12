@@ -19,7 +19,7 @@ checks = {
   'Local accounts do not share credential stores': 'We never copy account credentials' in main,
   'Shared Java worlds and options are isolated': 'pub fn launch_shared(' in world and '.vis/players' in world,
   'Horizon uses visitor-specific world directory and session': 'pub fn launch_shared(' in horizon and 'launch_in_directory' in horizon and 'source_owner:Option<String>' in main,
-  'Horizon game binary is provisioned by VIS': 'horizon::bundled_source_path()?' in main and 'horizon::prepare(&cloned_app' in main,
+  'Horizon game binary is provisioned per instance': 'horizon_download::install_fork(&cloned_app,&dir,&chosen.version)' in main and 'horizon::prepare(&cloned_app' in main,
   'Minecraft server/client and JDK are provisioned by VIS for Horizon': 'pub fn horizon_prerequisites(' in world and 'Temurin JDK' in world,
   'UI only exposes RAM and folder in project install form': 'id="vis-project-install-form"' in ui and 'name="ram_mb"' in ui and 'vis-project-install-folder' in ui,
   'UI chains installation and actual launch commands': all(x in ui for x in ['ensure_project_instance','install_minecraft','launch_minecraft','launch_horizon']),
