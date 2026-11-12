@@ -679,6 +679,91 @@ fn delete_instance(
     s.storage.save_prefs(&username,&prefs)?;
     Ok(s.snapshot())
 }
+/// Explicit two-step bulk removal. Unlinking never touches Minecraft files.
+/// Physical removal is separately opted-in and allowed only for safely
+/// recognized VIS-managed Instancias/<name> directories after full preflight.
+#[derive(Deserialize)]
+struct InstanceDeleteKey { project_id:String, name:String }
+#[tauri::command]
+fn delete_instances_batch(
+    state: State<'_,Mutex<Backend>>, instances:Vec<InstanceDeleteKey>,
+    erase_files:bool, confirmation:String
+)->Result<Snapshot,String>{
+    if confirmation!="CONFIRMAR" {
+        return Err("Escribí exactamente CONFIRMAR antes de eliminar instancias".into());
+    }
+    if instances.is_empty() || instances.len()>50 {
+        return Err("Seleccioná entre 1 y 50 instancias".into());
+    }
+    let s=locked(&state)?;
+    let owner=s.username()?.to_owned();
+    let mut prefs=s.storage.prefs(&owner);
+    let mut seen=std::collections::BTreeSet::<(String,String)>::new();
+    let mut chosen=Vec::new();
+    for key in &instances {
+        if key.name.is_empty() || key.name.len()>80 || key.project_id.len()>130 {
+            return Err("Identificador de instancia inválido".into());
+        }
+        if !seen.insert((key.project_id.clone(),key.name.clone())) {
+            return Err("Hay instancias seleccionadas repetidas".into());
+        }
+        let item=prefs.instances.iter()
+            .find(|p|p.project_id==key.project_id&&p.name==key.name)
+            .ok_or("Una instancia seleccionada ya no pertenece a este perfil")?;
+        if !item.source_owner.is_empty() {
+            return Err("No podés borrar las instancias de otro usuario".into());
+        }
+        chosen.push(item.clone());
+    }
+    let mut folders=Vec::new();
+    if erase_files {
+        for instance in &chosen {
+            let dir=minecraft::instance_dir(&s.data_root,&owner,instance)?;
+            let parent=dir.parent().ok_or("Carpeta de instancia inválida")?;
+            if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
+                return Err("La eliminación física solo permite instancias nuevas de VIS bajo Instancias/<nombre>. Desmarcá borrar archivos para conservar las instalaciones antiguas.".into());
+            }
+            let library=parent.parent().ok_or("Biblioteca inválida")?;
+            if instance_guard::managed_child(library,&instance.name)?!=dir {
+                return Err("La carpeta seleccionada no corresponde con una instancia VIS administrada".into());
+            }
+            // A saved game may be owned/referenced by another local account.
+            for account in &s.storage.data.accounts {
+                for other in s.storage.prefs(&account.username).instances {
+                    if account.username==owner && other.project_id==instance.project_id
+                        && other.name==instance.name {continue;}
+                    let other_dir=minecraft::instance_dir(&s.data_root,&account.username,&other)?;
+                    instance_guard::independent(&dir,&other_dir)?;
+                }
+            }
+            if dir.exists() {
+                let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
+                if meta.file_type().is_symlink()||!meta.is_dir(){
+                    return Err("La carpeta no es un directorio seguro".into());
+                }
+                let marked=dir.join(".vis/instance.json").is_file()
+                    ||dir.join(".vslauncher/install.json").is_file()
+                    ||dir.join(".vis/horizon.json").is_file();
+                if !marked && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
+                    return Err("Una carpeta contiene archivos sin marca VIS. No se eliminarán; usá quitar de la biblioteca.".into());
+                }
+            }
+            folders.push(dir);
+        }
+    }
+    // No filesystem deletion can begin until EVERY selected folder passes
+    // preflight. The selection itself cannot include shared/foreign games.
+    for folder in &folders {
+        if folder.exists(){
+            fs::remove_dir_all(folder)
+                .map_err(|e|format!("No se pudo eliminar {}: {e}. Revisá el estado antes de reintentar.",folder.display()))?;
+        }
+    }
+    prefs.instances.retain(|item|!seen.contains(&(item.project_id.clone(),item.name.clone())));
+    s.storage.save_prefs(&owner,&prefs)?;
+    Ok(s.snapshot())
+}
+
 #[tauri::command]
 fn request_friend(state: State<'_, Mutex<Backend>>, username: String) -> Result<Snapshot, String> {
     let mut s = locked(&state)?;
@@ -1290,7 +1375,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
