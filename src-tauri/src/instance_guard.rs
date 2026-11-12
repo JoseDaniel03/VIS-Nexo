@@ -45,6 +45,33 @@ pub fn destination(path:&Path)->Result<PathBuf,String>{
     Ok(resolved)
 }
 
+/// The player chooses a *library root*. VIS then creates
+/// <root>/Instancias/<name> for new instances, without touching existing
+/// instances whose absolute paths were already saved in older versions.
+pub fn managed_child(library:&Path,name:&str)->Result<PathBuf,String>{
+    let trimmed=name.trim();
+    if trimmed.is_empty() || trimmed.chars().count()>60{
+        return Err("Elegí un nombre de instancia de hasta 60 caracteres".into());
+    }
+    let mut slug=String::new();
+    for character in trimmed.chars(){
+        if character.is_alphanumeric(){
+            slug.extend(character.to_lowercase());
+        }else if (character.is_whitespace() || character=='-' || character=='_')
+            && !slug.ends_with('-') && !slug.is_empty(){
+            slug.push('-');
+        }
+        if slug.chars().count()>=48{break;}
+    }
+    let mut slug=slug.trim_matches('-').to_owned();
+    if slug.is_empty(){return Err("El nombre no tiene letras ni números válidos".into());}
+    if ["con","prn","aux","nul","com1","com2","lpt1","lpt2"].contains(&slug.as_str()){
+        slug=format!("vis-{slug}");
+    }
+    let target=library.join("Instancias").join(slug);
+    destination(&target)
+}
+
 /// Protect every parent of a game-owned path from symlink redirection.
 /// A symlink to the global .minecraft hidden inside .vis/runtime is still an
 /// external dependency, even if the instance root itself was checked.
@@ -93,6 +120,19 @@ mod tests{
         assert!(independent(&home.join("Pack"),&home.join("Pack/save")).is_err());
         assert!(independent(&home.join("Pack"),&home.join("OtherPack")).is_ok());
         let _=fs::remove_dir_all(home);
+    }
+    #[test]
+    fn new_instances_get_independent_named_children(){
+        let root=std::env::temp_dir().join(format!("vis-library-test-{}",std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let one=managed_child(&root,"Rust desde VIS").unwrap();
+        let two=managed_child(&root,"Minecraft Java").unwrap();
+        assert!(one.ends_with("Instancias/rust-desde-vis"));
+        assert!(two.ends_with("Instancias/minecraft-java"));
+        assert!(independent(&one,&two).is_ok());
+        assert!(managed_child(&root,"../").is_err());
+        assert!(managed_child(&root,"A/B").is_ok()); // path separators become safe characters
+        let _=fs::remove_dir_all(&root);
     }
     #[cfg(unix)]
     #[test]
