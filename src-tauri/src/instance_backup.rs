@@ -132,7 +132,8 @@ fn valid_member(name:&str)->Result<PathBuf,String>{
 }
 fn merge_restored_files(
     stage:&Path,game:&Path,rollback:&Path,current:&Path,replace:bool,
-    restored:&mut usize,preserved:&mut usize,replaced:&mut usize,depth:usize
+    restored:&mut usize,preserved:&mut usize,replaced:&mut usize,depth:usize,
+    applied:&mut Vec<(PathBuf,Option<PathBuf>)>
 )->Result<(),String>{
     if depth>MAX_DEPTH{return Err("Restauración con carpetas demasiado profundas".into());}
     for entry in fs::read_dir(current).map_err(|e|e.to_string())?{
@@ -144,7 +145,7 @@ fn merge_restored_files(
             crate::instance_guard::private_paths(game,&[relative.to_string_lossy().as_ref()])?;
             fs::create_dir_all(&target).map_err(|e|e.to_string())?;
             merge_restored_files(stage,game,rollback,&entry.path(),replace,
-                restored,preserved,replaced,depth+1)?;
+                restored,preserved,replaced,depth+1,applied)?;
         } else if kind.is_file(){
             crate::instance_guard::private_paths(game,&[relative.to_string_lossy().as_ref()])?;
             if let Some(parent)=target.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
@@ -158,8 +159,10 @@ fn merge_restored_files(
                     let _=fs::rename(&prev,&target);
                     return Err(format!("No se pudo restaurar archivo: {e}"));
                 }
+                applied.push((target,Some(prev)));
             }else{
                 fs::rename(entry.path(),&target).map_err(|e|e.to_string())?;
+                applied.push((target,None));
             }
             *restored+=1;
         }else{
@@ -167,6 +170,37 @@ fn merge_restored_files(
         }
     }
     Ok(())
+}
+// Reverse the files successfully installed before any I/O error. Originals
+// are moved back from rollback; if that fails we preserve the rollback folder
+// and expose a path for manual recovery instead of deleting evidence.
+fn revert_applied(applied:&[(PathBuf,Option<PathBuf>)])->Result<(),String>{
+    let mut errors=Vec::new();
+    for (target,original) in applied.iter().rev(){
+        match fs::symlink_metadata(target) {
+            Ok(meta) if meta.is_file()||meta.file_type().is_symlink()=>{
+                if let Err(e)=fs::remove_file(target){
+                    errors.push(format!("{}: {e}",target.display()));
+                    continue;
+                }
+            }
+            Ok(_)=>{
+                errors.push(format!("{} no es un archivo seguro",target.display()));
+                continue;
+            }
+            Err(e) if e.kind()==std::io::ErrorKind::NotFound=>{}
+            Err(e)=>{
+                errors.push(format!("{}: {e}",target.display()));
+                continue;
+            }
+        }
+        if let Some(previous)=original {
+            if let Err(e)=fs::rename(previous,target){
+                errors.push(format!("{}: {e}",previous.display()));
+            }
+        }
+    }
+    if errors.is_empty(){Ok(())}else{Err(errors.join("; "))}
 }
 /// Preview and extraction support archives created by VIS only. Restore never
 /// deletes a world. In replace mode old data is moved into a rollback directory.
@@ -201,6 +235,7 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
     if stage.exists()||rollback.exists(){return Err("Ya hay una restauración pendiente".into());}
     fs::create_dir(&stage).map_err(|e|e.to_string())?;
     let mut restored=0;let mut preserved=0;let mut replaced=0;
+    let mut applied=Vec::new();
     let result=(||{
         for i in 0..archive.len(){
             let mut entry=archive.by_index(i).map_err(|e|e.to_string())?;
@@ -221,12 +256,22 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
         // created saves/ and resourcepacks/, so directory-level skipping would
         // incorrectly restore nothing on a fresh instance.
         merge_restored_files(&stage,game,&rollback,&stage,replace,
-            &mut restored,&mut preserved,&mut replaced,0)?;
+            &mut restored,&mut preserved,&mut replaced,0,&mut applied)?;
         Ok(RestoreInfo{restored,preserved,replaced,
             safety_copy:if replaced>0{rollback.to_string_lossy().to_string()}else{String::new()}})
     })();
+    if let Err(ref cause)=result {
+        let recovery=revert_applied(&applied);
+        let _=fs::remove_dir_all(&stage);
+        return match recovery {
+            Ok(())=>Err(format!("Restauración interrumpida: {cause}. Los archivos modificados se revirtieron.")),
+            Err(err)=>Err(format!(
+                "Restauración interrumpida: {cause}. Recuperación incompleta: {err}. Originales en {}",
+                rollback.display()
+            ))
+        };
+    }
     let _=fs::remove_dir_all(&stage);
-    // On partial failure, never delete rollback: it contains the originals.
     result
 }
 #[cfg(test)]
@@ -251,6 +296,23 @@ mod tests{
         assert!(Path::new(&replace.safety_copy).join("saves/My World/level.dat").is_file());
         assert_eq!(fs::read(Path::new(&replace.safety_copy).join("saves/My World/level.dat")).unwrap(),b"later world");
         let _=fs::remove_dir_all(root);
+    }
+    #[test] fn reverts_completed_file_replacements_on_failure(){
+        let root=std::env::temp_dir().join(format!("vis-rollback-revert-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("original")).unwrap();
+        fs::create_dir_all(root.join("live")).unwrap();
+        let previous=root.join("original/world.dat");
+        let live=root.join("live/world.dat");
+        let added=root.join("live/new.dat");
+        fs::write(&previous,b"saved").unwrap();
+        fs::write(&live,b"new").unwrap();
+        fs::write(&added,b"extra").unwrap();
+        revert_applied(&[(live.clone(),Some(previous.clone())),(added.clone(),None)]).unwrap();
+        assert_eq!(fs::read(&live).unwrap(),b"saved");
+        assert!(!added.exists());
+        assert!(!previous.exists());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test] fn rejects_zip_slip_and_unsafe_categories(){
         assert!(valid_member("../passwd").is_err());
