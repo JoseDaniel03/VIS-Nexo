@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 
-REPOSITORY = 'https://github.com/horizon-rust/horizon.git'
+REPOSITORY = 'https://github.com/JoseDaniel03/horizon-VISNEXO.git'
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / 'src-tauri' / 'resources' / 'horizon'
 CACHE = ROOT / '.vis-build-cache' / 'horizon'
