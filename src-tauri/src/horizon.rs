@@ -4,7 +4,7 @@
 use crate::{accounts::Instance, minecraft::{LaunchExit,LaunchResult,Progress}};
 use serde::{Deserialize,Serialize};
 use serde_json::Value;
-use std::{env,fs::{self,File},io::{BufRead,BufReader,Read,Write},path::{Path,PathBuf},process::{Command,Stdio},sync::OnceLock,thread,time::{Duration,Instant}};
+use std::{env,fs::{self,File},io::{BufRead,BufReader,Read,Write},path::{Path,PathBuf},process::{Command,Stdio},sync::OnceLock,thread,time::{Duration,Instant,SystemTime,UNIX_EPOCH}};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle,Emitter,Manager};
 
@@ -535,6 +535,13 @@ impl Drop for SensitiveBytes {
 /// The account session is supplied by the owner as a temporary JSON file.
 /// It is never kept in VIS profiles, arguments or logs. Horizon reads it once
 /// from stdin. Production OAuth is still pending in Ceibo.
+/// Logs belong to the active player and each launch gets a distinct file.
+/// The previous fixed horizon-launch.log was overwritten on every start.
+fn next_horizon_log(game_dir:&Path)->PathBuf{
+    let epoch=SystemTime::now().duration_since(UNIX_EPOCH)
+        .unwrap_or_default().as_nanos();
+    game_dir.join(".vis").join(format!("horizon-launch-{epoch}-{}.log",std::process::id()))
+}
 pub fn launch(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str)->Result<LaunchResult,String>{
     launch_in_directory(app,dir,ins,session_file,dir)
 }
@@ -550,7 +557,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     if session_file.is_empty(){
         fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
         let folder=build_folder(ins)?;
-        let log_path=game_dir.join(".vis/horizon-launch.log");
+        let log_path=next_horizon_log(game_dir);
         let log=File::create(&log_path).map_err(|e|e.to_string())?;
         let mut cmd=Command::new(executable(&folder,"horizon-client"));
         crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
@@ -598,11 +605,13 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     drop(session);
     let folder=build_folder(ins)?;
     fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
-    let log_path=game_dir.join(".vis").join("horizon-launch.log");
+    let log_path=next_horizon_log(game_dir);
     let log=File::create(&log_path).map_err(|e|e.to_string())?;
     let mut cmd=Command::new(executable(&folder,"horizon-client"));
     crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
-    cmd.current_dir(&folder).arg("--resources").arg(resources(dir))
+    // Keep any relative game writes in this player's folder. The engine
+    // executable and --resources remain absolute paths in the owner install.
+    cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
         .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir).arg("--session-stdin");
     if ins.fullscreen{cmd.arg("--fullscreen");}
     let mut child=cmd.stdin(Stdio::piped()).stdout(Stdio::from(log.try_clone().map_err(|e|e.to_string())?))
