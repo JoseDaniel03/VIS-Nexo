@@ -270,7 +270,7 @@ fn owned_profile(http:&Client,identity:&MinecraftIdentity)->Result<Value,String>
     let reply=http.get(MINECRAFT_PROFILE).bearer_auth(&identity.access_token)
         .send().map_err(|_|"No se pudo consultar Minecraft Services")?;
     let profile=checked_json(reply,"Perfil Minecraft")?;
-    if profile["id"].as_str()!=Some(identity.uuid.as_str()){
+    if !profile["id"].as_str().is_some_and(|id|id.eq_ignore_ascii_case(&identity.uuid)){
         return Err("El perfil Minecraft cambió durante la sesión; volvé a iniciar sesión".into());
     }
     Ok(profile)
@@ -502,5 +502,28 @@ mod tests{
  #[test]fn errors_never_include_oauth_token(){
     let payload=json!({"error":"invalid_grant","error_description":"secret"});
     assert_eq!(safe_error(&payload),"invalid_grant");
+ }
+ #[test]fn cosmetics_only_exposes_owned_metadata(){
+    assert!(safe_texture("http://textures.minecraft.net/texture/abcdef123").starts_with("https://"));
+    assert_eq!(safe_texture("https://evil.example/texture/abcdef"),"");
+    assert_eq!(safe_texture("https://textures.minecraft.net/texture/../../secret"),"");
+    let raw=json!({"id":"0011","name":"TestPremium","skins":[
+        {"id":"skin","url":"https://textures.minecraft.net/texture/abcdef123","state":"ACTIVE","variant":"SLIM"}
+    ],"capes":[{"id":"cape","alias":"Founder","state":"INACTIVE"}],"access_token":"untrusted-secret"});
+    let output=public_cosmetics(&raw).to_string();
+    assert!(!output.contains("untrusted-secret"));
+    assert!(output.contains("TestPremium"));
+ }
+ #[cfg(unix)]
+ #[test]fn premium_ticket_is_private_and_not_inside_minecraft(){
+    use std::os::unix::fs::PermissionsExt;
+    let library=std::env::temp_dir().join(format!("vis-auth-unit-{}",std::process::id()));
+    std::fs::create_dir_all(&library).unwrap();
+    let identity=MinecraftIdentity{name:"Tester".into(),uuid:"0123456789abcdef0123456789abcdef".into(),access_token:"local-secret".into()};
+    let path=temporary_horizon_session(&library,&identity).unwrap();
+    assert!(path.starts_with(library.join("private-ms-sessions")));
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode()&0o777,0o600);
+    assert_eq!(std::fs::metadata(path.parent().unwrap()).unwrap().permissions().mode()&0o777,0o700);
+    std::fs::remove_dir_all(library).unwrap();
  }
 }
