@@ -72,3 +72,22 @@
 .microsoft-device-flow>.primary-btn{display:flex;justify-content:center;gap:10px;align-items:center;white-space:normal;line-height:1.3}
 .microsoft-device-flow>.auth-footer{align-self:center;margin-top:2px}
 @media(max-width:600px){.microsoft-device-flow .ms-code{letter-spacing:.08em}}
+
+/* Minecraft Premium is an account-level panel, not a VIS Social avatar editor. */
+.premium-cosmetics{margin:18px 0 20px;display:flex;flex-direction:column;gap:13px}
+.premium-cosmetics>.card-heading{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.premium-cosmetics>.card-heading .outline-btn{margin-left:auto}
+.premium-cosmetics-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.premium-cosmetics-group{display:flex;flex-direction:column;gap:10px;min-width:0;border:1px solid #4b3b61;border-radius:12px;padding:14px;background:#211b31}
+.premium-cosmetics-group h3{font-size:13px;margin:0 0 4px}
+.premium-cosmetic-entry{display:flex;align-items:center;gap:11px;min-width:0;border:1px solid #443655;background:#281f38;padding:9px;border-radius:10px}
+.premium-cosmetic-entry img{width:48px;height:48px;flex:none;image-rendering:pixelated;object-fit:contain;border-radius:5px;background:#191425}
+.premium-cosmetic-entry span{flex:1;min-width:0;font-size:12px;display:flex;flex-direction:column;gap:4px}
+.premium-cosmetic-entry small{color:#b5a4c9;font-size:11px}
+.premium-cosmetic-entry button{flex:none}
+.premium-cosmetics-group .profile-actions{align-items:center;display:flex;flex-wrap:wrap;gap:8px}
+.premium-cosmetics-group label{font-size:11px;display:flex;align-items:center;gap:7px}
+.premium-cosmetics-group select{min-height:36px;border-radius:8px;border:1px solid #6b5385;background:#2b223e;color:#eee5fb;padding:7px}
+.social-bottom>[data-action="social-copy-handle"]{display:flex;align-items:center;gap:7px;margin:0 0 9px;width:100%;justify-content:center}
+.social-bottom>.muted{display:block;margin:8px 0 2px;color:#9f91b3;line-height:1.45;font-size:10px}
+@media(max-width:880px){.premium-cosmetics-grid{grid-template-columns:1fr}}
