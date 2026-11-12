@@ -863,10 +863,13 @@ pub fn launch_premium(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,
     launch_with_game_directory(app,data_root,owner,ins,None,Some(auth))
 }
 pub fn launch_guest(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,guest:&str)->Result<LaunchResult,String>{
- if !clean_segment(guest) || !ins.game_dir.is_empty() || !ins.share_offline {return Err("La instancia no está compartida con el modo offline".into())}
- let folder=instance_dir(data_root,owner,ins)?.join(".vis/offline-guests").join(guest);
- // Keep all saves/config/logs in the guest sandbox, never inside owner saves.
- launch_with_game_directory(app,data_root,owner,ins,Some(&folder),None)
+ if !clean_segment(guest) {return Err("Nombre offline inválido".into())}
+ // Guest players retain their own offline UUID/name, but opening the same
+ // installed instance uses the same worlds and server list by default.
+ let folder=shared_game_directory(data_root,owner,ins,guest)?;
+ let mut offline=ins.clone();
+ offline.player_name=guest.to_owned();
+ launch_with_game_directory(app,data_root,owner,&offline,Some(&folder),None)
 }
 /// The Minecraft identity changes between VIS accounts; the installed
 /// instance's saves, servers.dat, options, packs and first-run state do not.
