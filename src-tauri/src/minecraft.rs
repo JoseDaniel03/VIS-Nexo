@@ -996,6 +996,9 @@ pub fn shared_recovery(
  if apply {
     prepare_player_directory(&root)?;
  }
+ // A running world must never be copied over while Minecraft is writing.
+ // Hold the same per-instance guard as Java/Horizon launch until recovery ends.
+ let _exclusive_recovery=if apply{Some(acquire_game_run(&root)?)}else{None};
  // The mutex serializes repeated recovery clicks and concurrent legacy
  // migrations, but preview remains a read-only operation.
  let _guard=SHARED_PLAYER_LAYOUT_GUARD.lock()
