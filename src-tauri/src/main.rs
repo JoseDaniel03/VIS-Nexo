@@ -950,12 +950,12 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
         let guest_name=s.guest_name.clone();
         let project_mod_list=if s.guest_name.is_none() &&
             source_owner.as_deref().is_none_or(|owner|owner==s.username().unwrap_or("")) {
-            s.project(&project_id).filter(|p|p.engine=="java" &&
-                p.mc_version==s.storage.prefs(s.username().unwrap_or(""))
-                .instances.iter().find(|i|i.project_id==project_id&&i.name==name)
-                .map(|i|i.version.as_str()).unwrap_or("") &&
-                p.loader==p.loader)
-                .map(|p|p.modrinth_mods.clone())
+            let owned=s.storage.prefs(s.username().unwrap_or("")).instances.into_iter()
+                .find(|i|i.project_id==project_id&&i.name==name);
+            owned.as_ref().and_then(|instance|s.project(&project_id).filter(|p|
+                p.engine=="java" && p.mc_version==instance.version &&
+                p.loader==instance.loader && p.loader_version==instance.loader_version
+            )).map(|p|p.modrinth_mods.clone())
         } else {None};
         let (owner,ins)=if let Some(guest)=s.guest_name.as_deref() {
             let source=source_owner.ok_or("Elegí una instancia instalada")?;
