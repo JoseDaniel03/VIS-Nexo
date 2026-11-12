@@ -157,8 +157,7 @@ impl Backend {
             .and_then(|u|self.storage.get(u)).is_some_and(|a|a.role==Role::Admin);
         if admin { self.catalog.projects.iter().find(|p|p.id==id)
             .or_else(||self.remote_projects.iter().find(|p|p.id==id)) }
-        else { self.remote_projects.iter().find(|p|p.id==id)
-            .or_else(||self.catalog.projects.iter().find(|p|p.id==id)) }
+        else { self.remote_projects.iter().find(|p|p.id==id) }
     }
     fn add_recent(&mut self, username: &str, provider: &str) -> Result<(), String> {
         self.recent_accounts.retain(|entry| entry.username != username || entry.provider != provider);
@@ -248,11 +247,15 @@ impl Backend {
                 own.append(&mut other);
                 own
             };
-        let mut projects=self.catalog.projects.clone();
         let admin=user.as_ref().is_some_and(|u|u.role==Role::Admin);
+        // Public Universe is always cloud-authoritative. Local catalogs are
+        // drafts for the VIS administrator only: older offline demo projects
+        // must never leak into a regular player's online library.
+        let mut projects=if admin{self.catalog.projects.clone()}else{Vec::new()};
         for published in &self.remote_projects {
             if let Some(existing)=projects.iter_mut().find(|p|p.id==published.id){
-                if !admin {*existing=published.clone();}
+                // New publication always wins over a locally cached draft.
+                *existing=published.clone();
             } else {projects.push(published.clone());}
         }
         Snapshot { user, projects, instances,
