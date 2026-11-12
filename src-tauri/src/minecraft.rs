@@ -214,6 +214,9 @@ fn obtain_or_reuse(c:&Client,task:&Task,destination_root:&Path,sources:&[PathBuf
    if parent==destination_root {break}
    parent=parent.parent().ok_or("Descarga fuera de la instancia")?;
  }
+ if fs::symlink_metadata(&task.path).ok().is_some_and(|meta|meta.file_type().is_symlink()){
+     return Err("Un recurso Minecraft no puede ser enlace simbólico".into())
+ }
  if cached_file_valid(&task.path,task.sha1.as_deref(),task.max){return Ok(true)}
  if let Some(hash)=task.sha1.as_deref(){
   if hash.len()==40 && hash.bytes().all(|b|b.is_ascii_hexdigit()) {
@@ -306,7 +309,7 @@ pub fn installed(dir:&Path,ins:&Instance)->bool{
  if crate::instance_guard::private_paths(dir,&[
      ".vslauncher",".vis/runtime/versions",".vis/runtime/libraries",
      ".vis/runtime/assets/indexes",".vis/runtime/assets/objects",
-     ".vis/java-runtimes","mods"
+     ".vis/java-runtimes",".vslauncher/natives","mods"
  ]).is_err(){return false}
  let Ok(data)=fs::read(installation_path(dir)) else {return false};
  let Ok(marker)=serde_json::from_slice::<LocalInstallation>(&data) else {return false};
@@ -689,7 +692,7 @@ pub fn install(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,known_
  crate::instance_guard::private_paths(&dir,&[
      ".vslauncher",".vis/runtime/versions",".vis/runtime/libraries",
      ".vis/runtime/assets/indexes",".vis/runtime/assets/objects",
-     ".vis/java-runtimes","mods"
+     ".vis/java-runtimes",".vslauncher/natives","mods"
  ])?;
  fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
  let runtime=new_runtime(&dir);let lib_root=runtime.join("libraries");
