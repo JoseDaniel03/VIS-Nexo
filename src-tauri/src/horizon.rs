@@ -167,7 +167,45 @@ fn api(folder:&Path,exe:&str)->Result<Value,String>{
 }
 fn resources(dir:&Path)->PathBuf{dir.join(".vis").join("horizon-resources")}
 fn marker(dir:&Path)->PathBuf{dir.join(".vis").join("horizon.json")}
+/// The Horizon game must not depend on an existing .minecraft elsewhere.
+/// Cheap structural validation is performed on every "installed" check; the
+/// checksummed Minecraft downloader handles full repair on demand.
+fn private_mojang_ready(dir:&Path,ins:&Instance)->bool{
+    let base=dir.join(".vis/minecraft-base");
+    let runtime=base.join(".vis/runtime");
+    let mc=Path::new(&ins.horizon_minecraft_dir);
+    let server=Path::new(&ins.horizon_server_jar);
+    let jdk=Path::new(&ins.java_path);
+    if mc!=base || server!=base.join(".vis/minecraft-server.jar") ||
+       !jdk.starts_with(base.join(".vis/java-runtimes/temurin-25")) {
+        return false;
+    }
+    // Symlinks cannot redirect the apparent local game root to an external
+    // installation. Compare canonical paths only after verifying existence.
+    let Ok(actual_base)=fs::canonicalize(&base) else{return false};
+    let Ok(actual_dir)=fs::canonicalize(dir) else{return false};
+    if !actual_base.starts_with(&actual_dir){return false}
+    let jar=runtime.join("versions").join(&ins.version).join(format!("{}.jar",ins.version));
+    if !jar.is_file() || !server.is_file() || !runtime.join("libraries").is_dir() {
+        return false
+    }
+    let Ok(raw)=fs::read(base.join(".vslauncher/version.json")) else{return false};
+    let Ok(profile)=serde_json::from_slice::<Value>(&raw) else{return false};
+    let Some(index)=profile["assetIndex"]["id"].as_str() else{return false};
+    if index.is_empty() || index.len()>100 ||
+       !index.bytes().all(|b|b.is_ascii_alphanumeric()||b"._-".contains(&b)) {
+        return false
+    }
+    if !runtime.join("assets/indexes").join(format!("{index}.json")).is_file() {
+        return false
+    }
+    let java=jdk.join("bin").join(if cfg!(target_os="windows"){"java.exe"}else{"java"});
+    let javac=jdk.join("bin").join(if cfg!(target_os="windows"){"javac.exe"}else{"javac"});
+    java.is_file()&&javac.is_file()
+}
 fn valid_marker(dir:&Path,ins:&Instance)->bool{
+    if !private_mojang_ready(dir,ins){return false}
+
     let Ok(bytes)=fs::read(marker(dir)) else{return false};
     let Ok(record)=serde_json::from_slice::<Installed>(&bytes) else{return false};
     if record.build_dir!=ins.horizon_build_dir||record.minecraft!=ins.version||!resources(dir).is_dir(){return false}
