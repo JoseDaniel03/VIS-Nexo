@@ -917,14 +917,15 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
         let mut chosen=chosen;
         if chosen.engine=="horizon" {
             let dir=minecraft::instance_dir(&data_root,&user,&chosen)?;
-            chosen.horizon_build_dir=horizon::install_instance_engine(&dir,&chosen)?;
-            // Horizon game binaries are downloaded to VIS itself, never via horizon-launcher.
-            if chosen.horizon_build_dir.is_empty(){
-                // Use the game compiled from horizon-rust/horizon during VIS build.
-                // No Nightly download and no Horizon Launcher in the player's PC.
-                horizon::bundled_source_path()?;
-                chosen.horizon_build_dir=horizon::SOURCE_BUILD_ID.into();
+            // Lite launcher: no Horizon game in AppImage or Windows installer.
+            // Fetch only when a player installs the Rust instance; the fork
+            // publishes both platform binaries and does not contain Mojang IP.
+            if chosen.horizon_build_dir.is_empty()
+                || chosen.horizon_build_dir==horizon::SOURCE_BUILD_ID {
+                let game=horizon_download::install_fork(&cloned_app,&dir,&chosen.version)?;
+                chosen.horizon_build_dir=game.build_dir;
             }
+            chosen.horizon_build_dir=horizon::install_instance_engine(&dir,&chosen)?;
             if !horizon::private_mojang_ready(&dir,&chosen){
                 let (mc,server,jdk)=minecraft::horizon_prerequisites(&cloned_app,&data_root,&user,&chosen,&other_instances)?;
                 chosen.horizon_minecraft_dir=mc;
