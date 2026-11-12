@@ -94,6 +94,9 @@ assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
 const bob = await account('bob');
+assert.equal((await call('/v1/account/display',{display_name:'Mi Cuenta Premium'},alice.token)).status,200);
+assert.equal((await call('/v1/account/display',{display_name:'  '},alice.token)).status,400);
+assert.equal((await call('/v1/state',undefined,alice.token)).data.display_name,'Mi Cuenta Premium');
 assert.equal((await call('/v1/keys', {public_key: 'not_a_key'}, alice.token)).status, 400);
 assert.equal((await call('/v1/friends/request', {username: 'bob'}, alice.token)).status, 201);
 response = await call('/v1/state', undefined, bob.token);
