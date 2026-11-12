@@ -171,6 +171,15 @@ fn marker(dir:&Path)->PathBuf{dir.join(".vis").join("horizon.json")}
 /// Cheap structural validation is performed on every "installed" check; the
 /// checksummed Minecraft downloader handles full repair on demand.
 pub(crate) fn private_mojang_ready(dir:&Path,ins:&Instance)->bool{
+    if crate::instance_guard::private_paths(dir,&[
+      ".vis/horizon-engine",".vis/horizon-resources",
+      ".vis/horizon-preparation",".vis/minecraft-base",
+      ".vis/minecraft-base/.vis/runtime/versions",
+      ".vis/minecraft-base/.vis/runtime/libraries",
+      ".vis/minecraft-base/.vis/runtime/assets/indexes",
+      ".vis/minecraft-base/.vis/runtime/assets/objects",
+      ".vis/minecraft-base/.vis/java-runtimes"
+    ]).is_err(){return false}
     let base=dir.join(".vis/minecraft-base");
     let runtime=base.join(".vis/runtime");
     let mc=Path::new(&ins.horizon_minecraft_dir);
