@@ -545,15 +545,17 @@ fn next_horizon_log(game_dir:&Path)->PathBuf{
 pub fn launch(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str)->Result<LaunchResult,String>{
     launch_in_directory(app,dir,ins,session_file,dir)
 }
-/// Share the Horizon game build/resources, never Microsoft credentials or worlds.
+/// Reuse Horizon build/resources and (by default) the same instance data,
+/// while keeping Microsoft authentication tied to the active account.
 pub fn launch_shared(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,visitor_dir:&Path)->Result<LaunchResult,String>{
     launch_in_directory(app,dir,ins,session_file,visitor_dir)
 }
 fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,game_dir:&Path)->Result<LaunchResult,String>{
     let probe=inspect(dir,ins)?;
     if !probe.resources_ready{return Err("Prepará y verificá los recursos de Horizon antes de jugar".into())}
-    // Shared installs resolve game_dir to the VIS player's isolated folder.
+    // Java and Horizon now share game data per instance by default.
     crate::minecraft::prepare_player_directory(game_dir)?;
+    let game_run=crate::minecraft::acquire_game_run(game_dir)?;
     if session_file.is_empty(){
         fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
         let folder=build_folder(ins)?;
@@ -570,6 +572,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
         let pid=child.id();let log_file=log_path.to_string_lossy().into_owned();
         let emitter=app.clone();let exit_log=log_file.clone();
         thread::spawn(move||{
+            let _active_instance=game_run;
             let event=match child.wait(){
                 Ok(status)=>LaunchExit{pid,success:status.success(),exit_code:status.code(),log_file:exit_log,error:String::new()},
                 Err(error)=>LaunchExit{pid,success:false,exit_code:None,log_file:exit_log,error:error.to_string()}
@@ -628,7 +631,8 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     let pid=child.id();let log_file=log_path.to_string_lossy().to_string();
     let emitter=app.clone();let exit_log=log_file.clone();
     std::thread::spawn(move||{
-        let event=match child.wait(){
+        let _active_instance=game_run;
+            let event=match child.wait(){
             Ok(status)=>LaunchExit{pid,success:status.success(),exit_code:status.code(),log_file:exit_log,error:String::new()},
             Err(error)=>LaunchExit{pid,success:false,exit_code:None,log_file:exit_log,error:error.to_string()}
         };
