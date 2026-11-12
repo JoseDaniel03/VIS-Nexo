@@ -322,7 +322,8 @@ async function currentState(db, user) {
   return reply({
     projects,
     username: user.username, public_id: user.public_id, avatar_version:user.avatar_version,
-    cloud_login_enabled: !!user.cloud_login_enabled, presence: user.presence, role: user.role,
+    cloud_login_enabled: !!user.cloud_login_enabled,
+    developer: await canDevelop(db,user), presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
     public_key: user.encryption_public_key,
     friends: visible,
@@ -448,6 +449,15 @@ function projectId(value) {
   return id;
 }
 function isSuper(user) { return user.role === "super_admin"; }
+async function canDevelop(db, user) {
+  if (isSuper(user)) return true;
+  const grant=await db.prepare("SELECT user_id FROM developer_grants WHERE user_id=?")
+    .bind(user.id).first();
+  return !!grant;
+}
+async function requireDeveloper(db,user) {
+  if (!await canDevelop(db,user)) bad(403,"Super developer permission required");
+}
 function requireSuper(user) {
   if (!isSuper(user)) bad(403, "Super administrator permission required");
 }
@@ -464,6 +474,9 @@ async function accountInfo(db, user) {
   return reply({ account: {
     username: row.username, public_id: row.public_id, avatar_version:row.avatar_version, role: row.role,
     cloud_login_enabled: !!row.password_hash,
+    cloud_credential_public_key: row.password_hash?.startsWith("ed25519:")
+      ? row.password_hash.slice(8) : null,
+    developer: await canDevelop(db,user),
     signing_public_key: row.signing_public_key, created_at: row.created_at
   } });
 }
@@ -478,7 +491,7 @@ async function getProjects(db, user) {
     "WHERE p.visibility='published' OR (?=1 AND p.visibility!='published') " +
     "OR st.user_id IS NOT NULL " +
     "ORDER BY p.updated_at DESC LIMIT 200"
-  ).bind(user.id,user.id,isSuper(user)?1:0).all();
+  ).bind(user.id,user.id,await canDevelop(db,user)?1:0).all();
   return (projects.results || []).map(p=>({
     id:p.id,title:p.title,summary:p.summary,visibility:p.visibility,
     subscribed:!!p.subscribed,staff_role:p.staff_role,updated_at:p.updated_at
@@ -514,7 +527,7 @@ async function projectSubscription(request, db, user, action) {
   return reply({ok:true,project_id:id,subscribed:action==="subscribe"});
 }
 async function adminProjectUpsert(request, db, user) {
-  requireSuper(user);
+  await requireDeveloper(db,user);
   await rateLimit(db, request, "admin-project:" + user.id, 40);
   const data = await parseBody(request);
   const id=projectId(data.id);
@@ -537,7 +550,7 @@ async function adminProjectUpsert(request, db, user) {
   return reply({ok:true,project_id:id,visibility});
 }
 async function adminProjectStaff(request, db, user) {
-  requireSuper(user);
+  await requireDeveloper(db,user);
   const data = await parseBody(request);
   const id=projectId(data.project_id);
   const username=normalName(data.username);
@@ -674,15 +687,15 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','developer_grants')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
           "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 11 &&
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 12 &&
           new Set((columns.results || []).map(x=>x.name)).size === 5;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 5 : 0 },
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 6 : 0 },
           ready ? 200 : 503);
       }
       if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
