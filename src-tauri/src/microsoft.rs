@@ -253,6 +253,175 @@ pub(crate) async fn microsoft_poll(
       TokenPoll::Access(_)=>Err("Estado OAuth inesperado".into())
     }
 }
+// Official Minecraft Java profile management. Unlike VIS Social avatars,
+// these operations change only skins/capes that the Microsoft account owns.
+// Credentials never leave Rust; the frontend receives cosmetic metadata only.
+// Keep the token in memory and never include it in serialized responses.
+fn premium_identity(
+    backend:&State<'_,Mutex<Backend>>,ms:&State<'_,Mutex<MicrosoftState>>
+)->Result<MinecraftIdentity,String>{
+    let user=backend.lock().map_err(|_|"Perfil VIS ocupado")?
+        .active_user.clone().ok_or("Iniciá sesión con Microsoft")?;
+    let session=ms.lock().map_err(|_|"Sesión Premium bloqueada")?;
+    session.game_identity(&user)?
+        .ok_or_else(||"Iniciá sesión con Microsoft Premium para editar tu skin o capa".into())
+}
+fn owned_profile(http:&Client,identity:&MinecraftIdentity)->Result<Value,String>{
+    let reply=http.get(MINECRAFT_PROFILE).bearer_auth(&identity.access_token)
+        .send().map_err(|_|"No se pudo consultar Minecraft Services")?;
+    let profile=checked_json(reply,"Perfil Minecraft")?;
+    if profile["id"].as_str()!=Some(identity.uuid.as_str()){
+        return Err("El perfil Minecraft cambió durante la sesión; volvé a iniciar sesión".into());
+    }
+    Ok(profile)
+}
+fn safe_texture(value:&str)->String{
+    let Ok(url)=url::Url::parse(value) else{return String::new()};
+    let path=url.path();
+    if !["http","https"].contains(&url.scheme())
+        || url.host_str()!=Some("textures.minecraft.net")
+        || url.port().is_some() || !url.username().is_empty()
+        || url.password().is_some() || url.query().is_some()
+        || !path.starts_with("/texture/") {
+        return String::new();
+    }
+    let token=&path["/texture/".len()..];
+    if token.is_empty() || token.len()>128 || !token.bytes().all(|c|c.is_ascii_hexdigit()){
+        return String::new();
+    }
+    format!("https://textures.minecraft.net{path}")
+}
+fn public_cosmetics(profile:&Value)->Value{
+    let list=|key:&str|{
+        profile[key].as_array().map(|arr|arr.iter().take(100).map(|item|{
+            json!({
+                "id":item["id"].as_str().unwrap_or(""),
+                "state":item["state"].as_str().unwrap_or("INACTIVE"),
+                "variant":item["variant"].as_str().unwrap_or("CLASSIC"),
+                "alias":item["alias"].as_str().unwrap_or(""),
+                "url":safe_texture(item["url"].as_str().unwrap_or(""))
+            })
+        }).collect::<Vec<_>>()).unwrap_or_default()
+    };
+    json!({"name":profile["name"],"uuid":profile["id"],
+        "skins":list("skins"),"capes":list("capes")})
+}
+#[tauri::command]
+pub(crate) async fn microsoft_cosmetics(
+    backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>
+)->Result<Value,String>{
+    let identity=premium_identity(&backend,&ms)?;
+    tauri::async_runtime::spawn_blocking(move||{
+        let http=client()?;
+        Ok(public_cosmetics(&owned_profile(&http,&identity)?))
+    }).await.map_err(|_|"La consulta de cosméticos se interrumpió".to_string())?
+}
+#[tauri::command]
+pub(crate) async fn microsoft_set_cape(
+    backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>,cape_id:String
+)->Result<Value,String>{
+    let identity=premium_identity(&backend,&ms)?;
+    tauri::async_runtime::spawn_blocking(move||{
+        let http=client()?;
+        let owned=owned_profile(&http,&identity)?;
+        if !owned["capes"].as_array().is_some_and(|list|
+            list.iter().any(|cape|cape["id"].as_str()==Some(cape_id.as_str()))){
+            return Err("La capa no pertenece a esta cuenta Minecraft".into());
+        }
+        let r=http.put("https://api.minecraftservices.com/minecraft/profile/capes/active")
+            .bearer_auth(&identity.access_token).json(&json!({"capeId":cape_id}))
+            .send().map_err(|_|"No se pudo conectar con Minecraft Services")?;
+        if !r.status().is_success(){return Err(format!("Minecraft rechazó la capa (HTTP {})",r.status()));}
+        Ok(public_cosmetics(&owned_profile(&http,&identity)?))
+    }).await.map_err(|_|"Cambio de capa interrumpido".to_string())?
+}
+#[tauri::command]
+pub(crate) async fn microsoft_hide_cape(
+    backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>
+)->Result<Value,String>{
+    let identity=premium_identity(&backend,&ms)?;
+    tauri::async_runtime::spawn_blocking(move||{
+        let http=client()?;
+        let r=http.delete("https://api.minecraftservices.com/minecraft/profile/capes/active")
+            .bearer_auth(&identity.access_token)
+            .send().map_err(|_|"No se pudo conectar con Minecraft Services")?;
+        if !r.status().is_success(){return Err(format!("Minecraft rechazó el cambio (HTTP {})",r.status()));}
+        Ok(public_cosmetics(&owned_profile(&http,&identity)?))
+    }).await.map_err(|_|"Cambio de capa interrumpido".to_string())?
+}
+#[tauri::command]
+pub(crate) async fn microsoft_use_skin(
+    backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>,skin_id:String
+)->Result<Value,String>{
+    let identity=premium_identity(&backend,&ms)?;
+    tauri::async_runtime::spawn_blocking(move||{
+        let http=client()?;
+        let owned=owned_profile(&http,&identity)?;
+        let item=owned["skins"].as_array().and_then(|skins|
+            skins.iter().find(|skin|skin["id"].as_str()==Some(skin_id.as_str())))
+            .ok_or("La skin no pertenece a esta cuenta Minecraft")?;
+        let url=safe_texture(item["url"].as_str().unwrap_or(""));
+        if url.is_empty(){return Err("La skin histórica no tiene una textura oficial válida".into());}
+        let variant=if item["variant"].as_str()==Some("SLIM"){"slim"}else{"classic"};
+        let r=http.post("https://api.minecraftservices.com/minecraft/profile/skins")
+            .bearer_auth(&identity.access_token).json(&json!({"url":url,"variant":variant}))
+            .send().map_err(|_|"No se pudo conectar con Minecraft Services")?;
+        if !r.status().is_success(){return Err(format!("Minecraft rechazó la skin (HTTP {})",r.status()));}
+        Ok(public_cosmetics(&owned_profile(&http,&identity)?))
+    }).await.map_err(|_|"Cambio de skin interrumpido".to_string())?
+}
+#[tauri::command]
+pub(crate) async fn microsoft_upload_skin(
+    backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>,
+    path:String,variant:String
+)->Result<Value,String>{
+    let identity=premium_identity(&backend,&ms)?;
+    if variant!="classic"&&variant!="slim" {
+        return Err("Elegí modelo clásico o delgado".into());
+    }
+    tauri::async_runtime::spawn_blocking(move||{
+        use std::{fs,io::Write};
+        use rand_core::{OsRng,RngCore};
+        let selected=std::path::Path::new(&path);
+        if !selected.is_absolute() || selected.extension().and_then(|x|x.to_str())
+            .is_none_or(|ext|!ext.eq_ignore_ascii_case("png")){
+            return Err("Seleccioná un PNG local de skin Minecraft".into());
+        }
+        let metadata=fs::metadata(selected).map_err(|_|"No se encontró el PNG seleccionado")?;
+        if !metadata.is_file()||metadata.len()>1024*1024||metadata.len()<24{
+            return Err("La skin supera 1 MB o no es un PNG válido".into());
+        }
+        let bytes=fs::read(selected).map_err(|_|"No se pudo leer la skin PNG")?;
+        if !bytes.starts_with(&[137,80,78,71,13,10,26,10])
+            || &bytes[12..16]!=b"IHDR"{
+            return Err("El archivo no es una skin PNG válida".into());
+        }
+        let width=u32::from_be_bytes([bytes[16],bytes[17],bytes[18],bytes[19]]);
+        let height=u32::from_be_bytes([bytes[20],bytes[21],bytes[22],bytes[23]]);
+        if width!=64 || ![32,64].contains(&height){
+            return Err("La skin debe ser PNG 64×64 o 64×32".into());
+        }
+        let mut nonce=[0u8;16];OsRng.fill_bytes(&mut nonce);
+        let boundary=format!("VISNexo{}",uuid::Uuid::from_bytes(nonce).simple());
+        nonce.fill(0);
+        let mut form=Vec::with_capacity(bytes.len()+512);
+        write!(&mut form,
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"variant\"\r\n\r\n{variant}\r\n\
+             --{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"skin.png\"\r\n\
+             Content-Type: image/png\r\n\r\n"
+        ).map_err(|_|"No se pudo preparar el formulario")?;
+        form.extend_from_slice(&bytes);
+        write!(&mut form,"\r\n--{boundary}--\r\n").map_err(|_|"No se pudo cerrar el formulario")?;
+        let http=client()?;
+        let r=http.post("https://api.minecraftservices.com/minecraft/profile/skins")
+            .bearer_auth(&identity.access_token)
+            .header(reqwest::header::CONTENT_TYPE,format!("multipart/form-data; boundary={boundary}"))
+            .body(form).send().map_err(|_|"No se pudo enviar la skin a Minecraft Services")?;
+        if !r.status().is_success(){return Err(format!("Minecraft rechazó la skin (HTTP {})",r.status()));}
+        Ok(public_cosmetics(&owned_profile(&http,&identity)?))
+    }).await.map_err(|_|"Carga de skin interrumpida".to_string())?
+}
+
 /// Experimental Horizon Launch API 0.1 accepts the session via a one-time
 /// local JSON file that horizon.rs sends to the game via stdin. Never persist
 /// this file or expose the access token to JavaScript, console or game args.
