@@ -297,6 +297,8 @@ async function refreshAssets(){
 }
 let socialMode = 'disconnected', socialError = '', socialOverlay = null;
 const socialAvatars=new Map(), avatarLoads=new Set();
+const socialSkins=new Map(), skinLoads=new Set();
+let publicSkinLookup=null, skinSharingBusy=false;
 let socialRenderScheduled=false;
 function scheduleSocialRender(){
   if(socialRenderScheduled||!db.user||document.hidden)return;
@@ -312,6 +314,8 @@ document.addEventListener('visibilitychange',()=>{
 function socialAvatarHtml(username,size=34,owned=false) {
  const entry=socialAvatars.get(username);
  if(entry?.url)return `<span class="avatar" style="width:${size}px;height:${size}px"><img alt="" src="${attr(entry.url)}"/></span>`;
+ const head=socialSkins.get(username)?.head;
+ if(head)return `<span class="avatar vis-skin-head" style="width:${size}px;height:${size}px"><img alt="Skin VIS de ${attr(username)}" src="${attr(head)}"/></span>`;
  return owned?avatarVisual(db.user?.avatar,username,size,true):avatarVisual('',username,size);
 }
 function refreshSocialAvatars(snapshot) {
@@ -330,6 +334,111 @@ function refreshSocialAvatars(snapshot) {
  }
 }
 
+function skinHeadPreview(dataUrl){
+ return new Promise((resolve,reject)=>{
+   if(!/^data:image\/png;base64,[A-Za-z0-9+/]*={0,2}$/.test(dataUrl)||dataUrl.length>87500){
+     reject(Error('PNG de skin inválido'));return;
+   }
+   const image=new Image();
+   image.onload=()=>{
+     if(image.naturalWidth!==64||![32,64].includes(image.naturalHeight)){
+       reject(Error('La skin debe medir 64×64 o 64×32'));return;
+     }
+     const canvas=document.createElement('canvas');canvas.width=8;canvas.height=8;
+     const ctx=canvas.getContext('2d');if(!ctx){reject(Error('Vista previa no disponible'));return;}
+     ctx.imageSmoothingEnabled=false;
+     ctx.drawImage(image,8,8,8,8,0,0,8,8);
+     ctx.drawImage(image,40,8,8,8,0,0,8,8);
+     resolve(canvas.toDataURL('image/png'));
+   };
+   image.onerror=()=>reject(Error('No se pudo decodificar la skin'));
+   image.src=dataUrl;
+ });
+}
+function refreshSocialSkins(snapshot){
+ const entries=[{username:snapshot.username,skin_version:snapshot.skin_version},...(snapshot.friends||[])].slice(0,41);
+ for(const entry of entries){
+   const username=entry.username,version=Number(entry.skin_version||0);
+   if(!username||!Number.isFinite(version)||version<0)continue;
+   if(socialSkins.get(username)?.version===version)continue;
+   if(version===0){socialSkins.set(username,{version,skin:null,head:''});continue;}
+   const key=username+':'+version;if(skinLoads.has(key))continue;
+   skinLoads.add(key);
+   void social.getSkin(username).then(async result=>{
+     const png=result.skin||null;
+     if(png&&(!png.startsWith('data:image/png;base64,')||png.length>87500))return;
+     const head=png?await skinHeadPreview(png):'';
+     socialSkins.set(username,{version,skin:png,head});
+     scheduleSocialRender();
+   }).catch(()=>{}).finally(()=>skinLoads.delete(key));
+ }
+}
+async function normalizeSkinForSocial(dataUrl){
+ if(!dataUrl){
+   const path=db.user?.skin;
+   if(!path)throw Error('Importá una skin PNG antes de compartirla');
+   dataUrl=preview(path)||(native?await command('preview_asset',{path}):'');
+ }
+ // Browser decoding and re-encoding strips untrusted ancillary metadata from
+ // uploaded PNGs while preserving 64x64/64x32 alpha pixel layouts.
+ const image=new Image();
+ image.src=dataUrl;
+ await new Promise((resolve,reject)=>{
+   if(image.complete&&image.naturalWidth)return resolve();
+   image.onload=resolve;image.onerror=()=>reject(Error('PNG de skin inválido'));
+ });
+ if(image.naturalWidth!==64||![32,64].includes(image.naturalHeight))
+   throw Error('La skin debe medir 64×64 o 64×32');
+ const canvas=document.createElement('canvas');canvas.width=64;canvas.height=image.naturalHeight;
+ const ctx=canvas.getContext('2d');
+ if(!ctx)throw Error('No se pudo procesar la skin');
+ ctx.imageSmoothingEnabled=false;ctx.drawImage(image,0,0);
+ const clean=canvas.toDataURL('image/png');
+ if(clean.length>87500)throw Error('La skin supera 64 KiB; optimizá su textura antes de publicarla');
+ return clean;
+}
+async function publishLocalSkin(dataUrl=null){
+ if(skinSharingBusy)return;
+ if(!social.connected()){
+   message('Skin guardada localmente. Conectá VIS Social para publicarla a otros jugadores.',true);return;
+ }
+ skinSharingBusy=true;render();
+ try{
+   const clean=await normalizeSkinForSocial(dataUrl);
+   await social.uploadSkin(clean);
+   socialSkins.delete(db.user.username);
+   const result=await social.getSkin(db.user.username);
+   const head=result.skin?await skinHeadPreview(result.skin):'';
+   socialSkins.set(db.user.username,{version:Number(result.skin_version||0),skin:result.skin||null,head});
+   message('Skin VIS publicada. Otros jugadores conectados pueden verla por tu usuario VIS.');
+ }catch(error){message('No se pudo publicar la skin: '+String(error),true);}
+ finally{skinSharingBusy=false;render();}
+}
+async function removePublicSkin(){
+ if(!social.connected())return message('Conectá VIS Social para quitar la skin pública.',true);
+ if(!window.confirm('¿Dejar de mostrar tu skin VIS a otros jugadores? La skin local se conserva.'))return;
+ try{
+   await social.deleteSkin();
+   socialSkins.delete(db.user.username);
+   message('La skin pública ya no está disponible. Tu skin local sigue intacta.');
+   render();
+ }catch(error){message(String(error),true);}
+}
+async function lookupPublicSkin(username){
+ if(!social.connected())return message('Conectá VIS Social para buscar skins públicas.',true);
+ const handle=String(username||'').trim().toLowerCase();
+ if(!/^[a-z0-9_]{3,24}$/.test(handle))return message('Ingresá un usuario VIS válido.',true);
+ publicSkinLookup={username:handle,loading:true,skin:null,head:'',error:''};
+ dialog={type:'vis-skin'};render();
+ try{
+   const skin=await social.getSkin(handle);
+   const head=skin.skin?await skinHeadPreview(skin.skin):'';
+   socialSkins.set(handle,{version:Number(skin.skin_version||0),skin:skin.skin||null,head});
+   if(publicSkinLookup?.username===handle){publicSkinLookup={username:handle,skin:skin.skin||null,head,loading:false,error:''};render();}
+ }catch(error){
+   if(publicSkinLookup?.username===handle){publicSkinLookup={username:handle,skin:null,head:'',loading:false,error:String(error)};render();}
+ }
+}
 function mergeSocialView() {
   if (!socialOverlay || !db.user || socialOverlay.username !== db.user.username) return;
   db.friends = socialOverlay.friends;
@@ -344,6 +453,7 @@ const social = createSocialRemote(command, (snapshot, messages) => {
     messages:messages||[] };
   mergeSocialView();
   refreshSocialAvatars(snapshot);
+  refreshSocialSkins(snapshot);
   scheduleSocialRender();
 }, (mode, error) => {
   if (socialMode === mode && socialError === (error||'')) return;
@@ -1309,7 +1419,7 @@ root.addEventListener('click',async event=>{
   else try{await social.acceptFriend(id);message('Solicitud aceptada');}
   catch(e){message(String(e),true);}
  }
- else if(act==='logout'){microsoftGamertag=null;premiumCosmetics=null;cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
+ else if(act==='logout'){microsoftGamertag=null;premiumCosmetics=null;cancelPendingSectionChange();social.setChatActive(false);await social.stop();socialOverlay=null;socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;db=await command('logout');page='home';dialog=null;authMode='login';showPassword=false;render();}
  else if(act==='create-project'){startProject();void loadMinecraftVersions();}
  else if(act==='quick-publish'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind||'news'};render();}
  else if(act==='edit-publication'){if(!isAdmin())return;dialog={type:'quick-post',projectId:selectedId,kind:button.dataset.kind,index:Number(button.dataset.index)};render();}
