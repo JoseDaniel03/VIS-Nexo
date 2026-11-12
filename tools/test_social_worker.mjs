@@ -273,6 +273,20 @@ const cloud=await call('/v1/accounts/register',cloudReg);
 assert.equal(cloud.status,200,JSON.stringify(cloud));
 assert.match(cloud.data.public_id,/^[0-9a-f]{24}$/);
 assert.equal((await call('/v1/accounts/register',cloudReg)).status,409);
+
+// Cloud-only accounts have no device key yet. A partial unique index must
+// permit many of them without weakening the uniqueness of actual device keys.
+const secondCloudKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const secondCloudSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const secondCloudPub=to64(await crypto.subtle.exportKey('raw',secondCloudKey.publicKey));
+const secondCloud=await call('/v1/accounts/register',{
+  username:'cloudsecond',password_salt:secondCloudSalt,password_public_key:secondCloudPub,
+  registration_signature:to64(await sign(secondCloudKey.privateKey,
+    'VIS-CLOUD-REGISTER-V2\ncloudsecond\n'+secondCloudSalt))
+});
+assert.equal(secondCloud.status,200,'independent cloud-only accounts must coexist');
+assert.notEqual(secondCloud.data.public_id,cloud.data.public_id);
+
 const challenge=await call('/v1/accounts/login/challenge',{
   identifier:cloud.data.public_id
 });
