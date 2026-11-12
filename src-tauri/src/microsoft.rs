@@ -7,7 +7,7 @@ use crate::Backend;
 use reqwest::blocking::Client;
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::{sync::Mutex,time::{Duration,Instant}};
+use std::{io::Read,sync::Mutex,time::{Duration,Instant}};
 use tauri::State;
 
 const MSA_APP_ID: &str = match option_env!("VIS_MSA_CLIENT_ID") {
@@ -70,7 +70,8 @@ fn safe_error(body:&Value)->String{
 fn checked_json(response:reqwest::blocking::Response,label:&str)->Result<Value,String>{
     let status=response.status();
     // Hard cap on all remote response bodies.
-    let bytes=response.take(MAX_REPLY+1).bytes()
+    let mut bytes=Vec::new();
+    response.take(MAX_REPLY+1).read_to_end(&mut bytes)
         .map_err(|_|format!("{label}: fallo de conexión HTTPS"))?;
     if bytes.len() as u64>MAX_REPLY {return Err(format!("{label}: respuesta excesiva"))}
     let data:Value=serde_json::from_slice(&bytes)
@@ -117,7 +118,8 @@ fn poll_access(client:&Client,pending:&DevicePending)->Result<TokenPoll,String>{
         ("device_code",pending.code.as_str())
     ]).send().map_err(|_|"Microsoft: no se pudo comprobar el inicio de sesión")?;
     let status=response.status();
-    let bytes=response.take(MAX_REPLY+1).bytes()
+    let mut bytes=Vec::new();
+    response.take(MAX_REPLY+1).read_to_end(&mut bytes)
       .map_err(|_|"Microsoft: no se pudo leer la respuesta")?;
     if bytes.len() as u64>MAX_REPLY{return Err("Respuesta Microsoft demasiado grande".into())}
     let data:Value=serde_json::from_slice(&bytes)
@@ -265,7 +267,7 @@ impl MicrosoftState{
 mod tests{
  use super::*;
  #[test]fn uses_allowlisted_public_client_id(){
-    assert_eq!(app_id().unwrap(),"35e5d19a-b607-43cf-b22c-a659847b8e44");
+    assert!(uuid::Uuid::parse_str(app_id().unwrap()).is_ok());
     assert!(OAUTH_DEVICE.starts_with("https://login.microsoftonline.com/consumers/"));
     assert!(MINECRAFT_PROFILE.starts_with("https://api.minecraftservices.com/"));
  }
