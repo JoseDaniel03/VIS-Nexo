@@ -770,13 +770,19 @@ fn argument_text(value:&Value,placeholders:&[(&str,String)])->Vec<String>{
  out.into_iter().map(|mut s|{for(k,v) in placeholders{s=s.replace(*k,v.as_str())}s}).collect()
 }
 pub fn launch(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance)->Result<LaunchResult,String>{
- launch_with_game_directory(app,data_root,username,ins,None)
+ launch_with_game_directory(app,data_root,username,ins,None,None)
+}
+/// Launch a verified owned Minecraft profile. Token stays in native memory;
+/// the Minecraft Java main class requires its access token as an argument.
+pub fn launch_premium(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,
+    auth:&crate::microsoft::MinecraftIdentity)->Result<LaunchResult,String>{
+    launch_with_game_directory(app,data_root,owner,ins,None,Some(auth))
 }
 pub fn launch_guest(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,guest:&str)->Result<LaunchResult,String>{
  if !clean_segment(guest) || !ins.game_dir.is_empty() || !ins.share_offline {return Err("La instancia no está compartida con el modo offline".into())}
  let folder=instance_dir(data_root,owner,ins)?.join(".vis/offline-guests").join(guest);
  // Keep all saves/config/logs in the guest sandbox, never inside owner saves.
- launch_with_game_directory(app,data_root,owner,ins,Some(&folder))
+ launch_with_game_directory(app,data_root,owner,ins,Some(&folder),None)
 }
 /// Shared installations are immutable to the visiting VIS profile. A second
 /// profile reuses validated game binaries but writes saves/options/logs separately.
@@ -784,7 +790,14 @@ pub fn launch_shared(app:&AppHandle,data_root:&Path,owner:&str,ins:&Instance,vis
     if !clean_segment(visitor){return Err("Perfil VIS inválido".into());}
     let folder=shared_game_directory(data_root,owner,ins,visitor)?;
     let mut isolated=ins.clone();isolated.player_name=visitor.to_owned();
-    launch_with_game_directory(app,data_root,owner,&isolated,Some(&folder))
+    launch_with_game_directory(app,data_root,owner,&isolated,Some(&folder),None)
+}
+/// Shared binaries, private visitor saves, authenticated Minecraft UUID.
+pub fn launch_shared_premium(app:&AppHandle,data_root:&Path,owner:&str,
+    ins:&Instance,visitor:&str,auth:&crate::microsoft::MinecraftIdentity)->Result<LaunchResult,String>{
+    if !clean_segment(visitor){return Err("Perfil de jugador VIS inválido".into());}
+    let folder=shared_game_directory(data_root,owner,ins,visitor)?;
+    launch_with_game_directory(app,data_root,owner,ins,Some(&folder),Some(auth))
 }
 pub fn shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<PathBuf,String>{
     let relative=PathBuf::from(visitor).join(owner).join(&ins.project_id).join(ins.name.replace(' ',"-"));
@@ -799,7 +812,7 @@ pub fn shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&s
     }
     Ok(target)
 }
-fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,game_override:Option<&Path>)->Result<LaunchResult,String>{
+fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,game_override:Option<&Path>,premium:Option<&crate::microsoft::MinecraftIdentity>)->Result<LaunchResult,String>{
  let dir=instance_dir(data_root,username,ins)?;
  let game_dir=game_override.unwrap_or(&dir);
  if !installed(&dir,ins){return Err("Primero instalá la instancia".into())}
@@ -817,15 +830,15 @@ fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&
  let main_class=if ins.loader=="fabric"{fabric["mainClass"].as_str().unwrap_or("net.fabricmc.loader.impl.launch.knot.KnotClient")}
  else{profile["mainClass"].as_str().ok_or("Falta mainClass")?};
  let asset_index=profile["assetIndex"]["id"].as_str().ok_or("Falta índice de assets")?;
- let player_name=if ins.player_name.trim().is_empty(){username}else{ins.player_name.trim()};
+ let player_name=if let Some(auth)=premium{auth.name.as_str()}else if ins.player_name.trim().is_empty(){username}else{ins.player_name.trim()};
  if player_name.len()>16 || player_name.len()<3 || !player_name.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_'){
      return Err("El nick local de Minecraft debe tener 3–16 letras, números o guión bajo. Cambialo en Instancias.".into());
  }
  let mut offline_bytes=md5::compute(format!("OfflinePlayer:{player_name}").as_bytes()).0;
  offline_bytes[6]=(offline_bytes[6]&0x0f)|0x30;offline_bytes[8]=(offline_bytes[8]&0x3f)|0x80;
- let uuid=uuid::Uuid::from_bytes(offline_bytes).simple().to_string();
+ let uuid=premium.map(|a|a.uuid.clone()).unwrap_or_else(||uuid::Uuid::from_bytes(offline_bytes).simple().to_string());
  let placeholders=[("${auth_player_name}",player_name.to_owned()),("${version_name}",ins.version.clone()),("${game_directory}",game_dir.to_string_lossy().into_owned()),("${assets_root}",runtime.join("assets").to_string_lossy().into_owned()),("${assets_index_name}",asset_index.into()),("${auth_uuid}",uuid),
-  ("${auth_access_token}","0".into()),("${clientid}","".into()),("${auth_xuid}","".into()),("${user_type}","legacy".into()),("${version_type}","VIS-Nexo-local".into()),("${user_properties}","{}".into())];
+  ("${auth_access_token}",premium.map(|a|a.access_token.clone()).unwrap_or_else(||"0".into())),("${clientid}","".into()),("${auth_xuid}","".into()),("${user_type}",if premium.is_some(){"msa".into()}else{"legacy".into()}),("${version_type}","VIS-Nexo".into()),("${user_properties}","{}".into())];
  let required_java=profile["javaVersion"]["majorVersion"].as_u64().unwrap_or(8);
  // No fallback to PATH, AppData or other installations: game is self-contained.
  // Explicit custom Java is retained as a user opt-in, never selected automatically.
