@@ -720,6 +720,30 @@ fn resolve_player_game_dir(
 }
 /// Return the precise save/resource directory for the current player, not the
 /// installation owner's location. Useful for copy-path and file import flows.
+/// Opt-in recovery of worlds/settings created by older per-profile game
+/// directories. Only the currently signed-in VIS profile may recover its own
+/// historic files; owner data is never replaced or removed.
+#[tauri::command]
+async fn recover_shared_instance(
+    state:State<'_,Mutex<Backend>>,
+    project_id:String,name:String,source_owner:String,apply:bool
+)->Result<minecraft::SharedRecovery,String>{
+    let (root,owner,instance,visitor)={
+        let s=locked(&state)?;
+        let visitor=s.username()?.to_owned();
+        if source_owner.is_empty()||source_owner==visitor{
+            return Err("Elegí una instancia compartida de otro perfil".into());
+        }
+        let instance=s.machine_instances(Some(&visitor)).into_iter()
+            .find(|ins|ins.source_owner==source_owner
+                &&ins.project_id==project_id&&ins.name==name)
+            .ok_or("Esta instalación compartida no está disponible para tu perfil")?;
+        (s.data_root.clone(),source_owner,instance,visitor)
+    };
+    tauri::async_runtime::spawn_blocking(move||{
+        minecraft::shared_recovery(&root,&owner,&instance,&visitor,apply)
+    }).await.map_err(|_|"Recuperación de partidas interrumpida".to_string())?
+}
 #[tauri::command]
 fn instance_folder(
     state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
@@ -1609,7 +1633,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
