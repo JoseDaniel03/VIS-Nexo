@@ -445,6 +445,8 @@ pub fn relocate_imported(dir:&Path,ins:&mut Instance)->Result<(),String>{
 }
 
 pub fn prepare(app:&AppHandle,dir:&Path,ins:&Instance)->Result<Probe,String>{
+    // Resource packs, saves and config must exist before Horizon's first world.
+    crate::minecraft::prepare_player_directory(dir)?;
     let folder=build_folder(ins)?;
     // Verify both executables agree before running the expensive preparer.
     let (_,prep)=probe_apis(&folder,ins)?;
@@ -543,6 +545,8 @@ pub fn launch_shared(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,vi
 fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,game_dir:&Path)->Result<LaunchResult,String>{
     let probe=inspect(dir,ins)?;
     if !probe.resources_ready{return Err("Prepará y verificá los recursos de Horizon antes de jugar".into())}
+    // Shared installs resolve game_dir to the VIS player's isolated folder.
+    crate::minecraft::prepare_player_directory(game_dir)?;
     if session_file.is_empty(){
         fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
         let folder=build_folder(ins)?;
