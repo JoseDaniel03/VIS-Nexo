@@ -5,7 +5,7 @@ use argon2::{
 };
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, path::{Path, PathBuf}};
+use std::{collections::{BTreeMap,BTreeSet}, fs, path::{Path, PathBuf}};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +93,9 @@ pub struct PlayerPrefs {
     pub locale: String,
     /// RAM overrides for other VIS profiles' installations on this OS user.
     #[serde(default)] pub shared_ram: BTreeMap<String,u32>,
+    /// Per-VIS-profile visibility only. Does not affect the other profile's
+    /// installation, files, save data, or public project visibility.
+    #[serde(default)] pub hidden_shared: BTreeSet<String>,
 }
 
 pub struct LocalStore {
