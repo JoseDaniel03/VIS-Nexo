@@ -993,7 +993,7 @@ async fn import_worlds_instance(state:State<'_,Mutex<Backend>>,archive:String,li
 }
 
 #[tauri::command]
-async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>)->Result<minecraft::LaunchResult,String>{
+async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<microsoft::MicrosoftState>>,project_id:String,name:String,source_owner:Option<String>)->Result<minecraft::LaunchResult,String>{
     // Release the global account/project mutex BEFORE Java discovery, file I/O
     // and process spawning. A slow disk cannot freeze other launcher commands.
     let (owner,ins,data_root,guest_name,project_mod_list)={
@@ -1035,16 +1035,33 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
     if ins.engine=="horizon" {return Err("Las instancias Horizon requieren cuenta Microsoft; usá el motor Horizon en VIS Worlds".into())}
     let launch_app=app.clone();
     let active={let s=locked(&state)?;s.active_user.clone()};
+    // A Microsoft profile must never silently launch in offline mode.
+    let credential=if let Some(ref user)=active {
+        let is_premium={let b=locked(&state)?;
+            b.storage.get(user).is_some_and(|account|account.microsoft_linked)};
+        let session=ms.lock().map_err(|_|"Sesión Microsoft bloqueada")?;
+        let found=session.game_identity(user)?;
+        if is_premium && found.is_none(){
+            return Err("Iniciá sesión nuevamente con Microsoft para jugar en modo premium".into());
+        }
+        found
+    }else{None};
     let shared=ins.source_owner.len()>0;
     let result=tauri::async_runtime::spawn_blocking(move||{
         if shared || guest_name.is_some() {
             let player=guest_name.or(active).ok_or("Falta el perfil que ejecuta la instancia")?;
-            minecraft::launch_shared(&launch_app,&data_root,&owner,&ins,&player)
+            if let Some(ref premium)=credential{
+                minecraft::launch_shared_premium(&launch_app,&data_root,&owner,&ins,&player,premium)
+            }else{
+                minecraft::launch_shared(&launch_app,&data_root,&owner,&ins,&player)
+            }
         } else {
             if let Some(mods)=project_mod_list.as_ref() {
                 project_mods::sync(&data_root,&owner,&ins,mods)?;
             }
-            minecraft::launch(&launch_app,&data_root,&owner,&ins)
+            if let Some(ref premium)=credential{
+                minecraft::launch_premium(&launch_app,&data_root,&owner,&ins,premium)
+            }else{minecraft::launch(&launch_app,&data_root,&owner,&ins)}
         }
     })
         .await.map_err(|e|e.to_string())??;
