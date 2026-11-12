@@ -945,9 +945,18 @@ async fn import_worlds_instance(state:State<'_,Mutex<Backend>>,archive:String,li
 async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>)->Result<minecraft::LaunchResult,String>{
     // Release the global account/project mutex BEFORE Java discovery, file I/O
     // and process spawning. A slow disk cannot freeze other launcher commands.
-    let (owner,ins,data_root,guest_name)={
+    let (owner,ins,data_root,guest_name,project_mod_list)={
         let s=locked(&state)?;
         let guest_name=s.guest_name.clone();
+        let project_mod_list=if s.guest_name.is_none() &&
+            source_owner.as_deref().is_none_or(|owner|owner==s.username().unwrap_or("")) {
+            s.project(&project_id).filter(|p|p.engine=="java" &&
+                p.mc_version==s.storage.prefs(s.username().unwrap_or(""))
+                .instances.iter().find(|i|i.project_id==project_id&&i.name==name)
+                .map(|i|i.version.as_str()).unwrap_or("") &&
+                p.loader==p.loader)
+                .map(|p|p.modrinth_mods.clone())
+        } else {None};
         let (owner,ins)=if let Some(guest)=s.guest_name.as_deref() {
             let source=source_owner.ok_or("Elegí una instancia instalada")?;
             let mut ins=s.guest_instances().into_iter()
@@ -970,7 +979,7 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
         }else{
             checked_instance(&s,&project_id,&name,true)?
         };
-        (owner,ins,s.data_root.clone(),guest_name)
+        (owner,ins,s.data_root.clone(),guest_name,project_mod_list)
     };
     if ins.engine=="horizon" {return Err("Las instancias Horizon requieren cuenta Microsoft; usá el motor Horizon en VIS Worlds".into())}
     let launch_app=app.clone();
@@ -980,7 +989,12 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,pr
         if shared || guest_name.is_some() {
             let player=guest_name.or(active).ok_or("Falta el perfil que ejecuta la instancia")?;
             minecraft::launch_shared(&launch_app,&data_root,&owner,&ins,&player)
-        } else {minecraft::launch(&launch_app,&data_root,&owner,&ins)}
+        } else {
+            if let Some(mods)=project_mod_list.as_ref() {
+                project_mods::sync(&data_root,&owner,&ins,mods)?;
+            }
+            minecraft::launch(&launch_app,&data_root,&owner,&ins)
+        }
     })
         .await.map_err(|e|e.to_string())??;
     if let Some(window)=app.get_webview_window("main"){let _=window.minimize();}
