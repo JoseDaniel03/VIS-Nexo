@@ -428,6 +428,7 @@ fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
     let data:serde_json::Value=serde_json::from_slice(&raw)
         .map_err(|_|"Manifiesto VIS Horizon ilegible")?;
     if data["source_repo"].as_str()!=Some("https://github.com/JoseDaniel03/horizon-VISNEXO.git") ||
+       data["game_binary"].as_str()!=Some("horizon-official") ||
        data["minecraft_assets_included"]!=false {
         return Err("Build Horizon no pertenece al fork VIS o incluye activos prohibidos".into());
     }
@@ -575,7 +576,7 @@ mod tests{
         let data=serde_json::json!({
             "source_repo":"https://github.com/JoseDaniel03/horizon-VISNEXO.git",
             "source_commit":"123456789abc0000000000000000000000000000",
-            "minecraft_assets_included":false,"sha256":hashes
+            "minecraft_assets_included":false,"game_binary":"horizon-official","sha256":hashes
         });
         fs::write(dir.join("vis-horizon-source.json"),serde_json::to_vec(&data).unwrap()).unwrap();
         assert!(fork_metadata(&dir,tag).is_ok());
