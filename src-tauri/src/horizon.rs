@@ -326,6 +326,65 @@ pub fn install_instance_engine(dir:&Path,ins:&Instance)->Result<String,String>{
     Ok(target.to_string_lossy().into_owned())
 }
 
+fn find_local_jdk(dir:&Path,depth:usize)->Option<PathBuf>{
+    if dir.join("bin").join(if cfg!(target_os="windows"){"java.exe"}else{"java"}).is_file() &&
+       dir.join("bin").join(if cfg!(target_os="windows"){"javac.exe"}else{"javac"}).is_file() {
+        return Some(dir.to_owned());
+    }
+    if depth==0{return None;}
+    for entry in fs::read_dir(dir).ok()?.take(20).flatten(){
+        if entry.file_type().ok().is_some_and(|t|t.is_dir()&&!t.is_symlink()){
+            if let Some(home)=find_local_jdk(&entry.path(),depth-1){return Some(home);}
+        }
+    }
+    None
+}
+/// A portable VIS Worlds ZIP contains every Horizon binary, JDK and Mojang
+/// asset but its old absolute paths cannot be reused on a different computer.
+/// Relocate only to verified resources under the *imported instance*.
+pub fn relocate_imported(dir:&Path,ins:&mut Instance)->Result<(),String>{
+    if ins.engine!="horizon"{return Ok(());}
+    let root=dir.join(".vis/horizon-engine");
+    let old:Installed=serde_json::from_slice(
+        &fs::read(marker(dir)).map_err(|_|"Falta el manifiesto Horizon de la instancia")?
+    ).map_err(|_|"Manifiesto Horizon inválido")?;
+    if old.minecraft!=ins.version || old.lock_sha256.len()!=64 {
+        return Err("No coincide el manifiesto Horizon de la instancia".into());
+    }
+    let mut matches=Vec::new();
+    for entry in fs::read_dir(root).map_err(|e|e.to_string())?.take(16).flatten(){
+        if !entry.file_type().ok().is_some_and(|t|t.is_dir()&&!t.is_symlink()){continue;}
+        let candidate=entry.path();
+        if verify_source_build(&candidate).is_ok() &&
+           lock_hash(&candidate).ok().as_deref()==Some(old.lock_sha256.as_str()){
+            matches.push(candidate);
+        }
+    }
+    if matches.len()!=1{return Err("No se encontró un motor Horizon único y verificado dentro de la instancia".into());}
+    let base=dir.join(".vis/minecraft-base");
+    let client=base.join(".vis/runtime/versions").join(&ins.version)
+        .join(format!("{}.jar",ins.version));
+    let assets=base.join(".vis/runtime/assets/indexes");
+    let version=base.join(".vslauncher/version.json");
+    let jar=base.join(".vis/minecraft-server.jar");
+    let jdk=find_local_jdk(&base.join(".vis/java-runtimes/temurin-25"),4)
+        .ok_or("Falta JDK 25 dentro de la instancia portable; ejecutá Reparar")?;
+    if !client.is_file() || !assets.is_dir() || !version.is_file() || !jar.is_file(){
+        return Err("Falta la base Mojang dentro de esta instancia portable; ejecutá Reparar".into());
+    }
+    let engine=matches.remove(0);
+    let mut updated=old;
+    updated.build_dir=engine.to_string_lossy().into_owned();
+    // Update only VIS metadata. No world, config, log or player file is touched.
+    crate::accounts::atomic_json(&marker(dir),&updated)?;
+    ins.horizon_build_dir=updated.build_dir;
+    ins.horizon_minecraft_dir=base.to_string_lossy().into_owned();
+    ins.horizon_server_jar=jar.to_string_lossy().into_owned();
+    ins.java_path=jdk.to_string_lossy().into_owned();
+    ins.installed=valid_marker(dir,ins);
+    Ok(())
+}
+
 pub fn prepare(app:&AppHandle,dir:&Path,ins:&Instance)->Result<Probe,String>{
     let folder=build_folder(ins)?;
     // Verify both executables agree before running the expensive preparer.
