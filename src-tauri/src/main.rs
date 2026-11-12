@@ -1000,7 +1000,7 @@ fn delete_instance(
 /// Physical removal is separately opted-in and allowed only for safely
 /// recognized VIS-managed Instancias/<name> directories after full preflight.
 #[derive(Deserialize)]
-struct InstanceDeleteKey { project_id:String, name:String }
+struct InstanceDeleteKey { project_id:String, name:String, #[serde(default)] source_owner:String }
 #[tauri::command]
 fn delete_instances_batch(
     state: State<'_,Mutex<Backend>>, instances:Vec<InstanceDeleteKey>,
@@ -1015,14 +1015,27 @@ fn delete_instances_batch(
     let s=locked(&state)?;
     let owner=s.username()?.to_owned();
     let mut prefs=s.storage.prefs(&owner);
-    let mut seen=std::collections::BTreeSet::<(String,String)>::new();
+    let mut seen=std::collections::BTreeSet::<(String,String,String)>::new();
     let mut chosen=Vec::new();
     for key in &instances {
         if key.name.is_empty() || key.name.len()>80 || key.project_id.len()>130 {
             return Err("Identificador de instancia inválido".into());
         }
-        if !seen.insert((key.project_id.clone(),key.name.clone())) {
+        if !seen.insert((key.source_owner.clone(),key.project_id.clone(),key.name.clone())) {
             return Err("Hay instancias seleccionadas repetidas".into());
+        }
+        if !key.source_owner.is_empty() {
+            if erase_files {
+                return Err("Las instancias de otros perfiles solo pueden ocultarse; desactivá borrar archivos".into());
+            }
+            let exists=s.machine_instances(Some(&owner)).iter().any(|p|
+                p.source_owner==key.source_owner&&p.project_id==key.project_id&&p.name==key.name);
+            if !exists {
+                return Err("La instancia compartida ya no existe o está oculta".into());
+            }
+            prefs.hidden_shared.insert(Backend::shared_key(
+                &key.source_owner,&key.project_id,&key.name));
+            continue;
         }
         let item=prefs.instances.iter()
             .find(|p|p.project_id==key.project_id&&p.name==key.name)
@@ -1076,7 +1089,7 @@ fn delete_instances_batch(
                 .map_err(|e|format!("No se pudo eliminar {}: {e}. Revisá el estado antes de reintentar.",folder.display()))?;
         }
     }
-    prefs.instances.retain(|item|!seen.contains(&(item.project_id.clone(),item.name.clone())));
+    prefs.instances.retain(|item|!seen.contains(&(String::new(),item.project_id.clone(),item.name.clone())));
     s.storage.save_prefs(&owner,&prefs)?;
     Ok(s.snapshot())
 }
