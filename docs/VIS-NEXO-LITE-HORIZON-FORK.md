@@ -47,8 +47,22 @@ https://github.com/JoseDaniel03/VIS-Nexo/actions/workflows/vis-nexo-build.yml
 - Windows: instalador NSIS y ZIP de VIS-Nexo.exe portable, sin necesitar ejecutar un instalador (requiere WebView2 Runtime).
 - Linux: AppImage solamente, sin incluir Horizon.
 - Java/Fabric: archivos y Java dentro de la carpeta elegida para la instancia.
+- CI adjunta **sólo los archivos finales** (no AppDir/archivos intermedios); genera un SHA-256 para cada distribución.
+- El ZIP portable de Windows se inspecciona antes de subirlo: únicamente VIS-Nexo.exe y LEEME.txt.
+- Los artifacts de Actions tienen una retención de 30 días. No son una Release pública firmada del launcher.
 
-Objetivo de peso del AppImage: aproximadamente 50 MB, pero su cumplimiento debe medirse tras compilar; las bibliotecas AppImage/WebKitGTK podrían impedir llegar a ese tamaño.
+### Resultado de la primera compilación real (2026-11-12)
+
+- Horizon: [release visgame-9aa089251f86](https://github.com/JoseDaniel03/horizon-VISNEXO/releases/tag/visgame-9aa089251f86). Linux `vis-horizon-linux-x86_64.tar.gz` (40.767.445 bytes), Windows `vis-horizon-windows-x64.zip` (51.010.791 bytes) y `SHA256SUMS`.
+- VIS Nexo 2.19.0: [Actions run 43147590456](https://github.com/JoseDaniel03/VIS-Nexo/actions/runs/43147590456); instalador Windows 2,47 MiB, ZIP portable generado y AppImage Linux **78,79 MiB**. La ejecución original subió además contenido intermedio de AppDir (~182,8 MB de artifact); el workflow posterior restringe el upload al AppImage terminado.
+- El objetivo aspiracional de 50 MB para el AppImage **no se alcanzó**; antes de optimizar WebKitGTK o quitar bibliotecas hay que medir la compatibilidad en Linux.
+- Estos resultados acreditan compilación y publicación, **no** una instalación limpia con sesión Microsoft ni la ejecución de Minecraft 26.3.
+
+### Control de calidad de nuevas compilaciones
+
+- Horizon se recompila si cambian `crates/`, `game/`, `third_party/`, el lockfile, los exportadores, el empaquetador o los workflows; se aceptan disparos manuales.
+- Antes de publicar un build de Horizon, CI inspecciona su archive sin extraer, exige `game_binary: horizon-official`, revisa el commit, sistema operativo, archivos requeridos y hashes SHA-256 de **todos** los componentes, y rechaza JAR/class, entradas duplicadas, enlaces simbólicos y rutas maliciosas.
+- El digest de GitHub más `SHA256SUMS` demuestra integridad según esa publicación. **No sustituye la firma independiente del editor**.
 
 ## Seguridad
 
@@ -58,7 +72,7 @@ El fork y las Actions de construcción no reciben tokens de Cloudflare ni creden
 
 ## Pendientes de validación
 
-- Compilación y publicación real de los dos paquetes en el fork.
+- Revalidar la publicación del fork con las nuevas comprobaciones de archivo completo.
 - Prueba de instalación y arranque en Windows y Linux con una carpeta totalmente vacía.
 - Pruebas con red interrumpida, disco lleno, reparación y archivos modificados.
 - Medición del tamaño, consumo RAM y CPU reales del nuevo launcher.
