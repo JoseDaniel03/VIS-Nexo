@@ -599,12 +599,53 @@ fn configure_shared_ram(state:State<'_,Mutex<Backend>>,source_owner:String,proje
     Ok(s.snapshot())
 }
 #[tauri::command]
-fn delete_instance(state: State<'_, Mutex<Backend>>, project_id: String, name: String) -> Result<Snapshot, String> {
-    let s = locked(&state)?;
-    let username = s.username()?.to_string();
-    let mut prefs = s.storage.prefs(&username);
-    prefs.instances.retain(|p| p.project_id != project_id || p.name != name);
-    s.storage.save_prefs(&username, &prefs)?;
+fn delete_instance(
+    state: State<'_, Mutex<Backend>>, project_id: String, name: String,
+    erase_files: Option<bool>
+) -> Result<Snapshot, String> {
+    let s=locked(&state)?;
+    let username=s.username()?.to_string();
+    let mut prefs=s.storage.prefs(&username);
+    let current=prefs.instances.iter()
+        .find(|p|p.project_id==project_id&&p.name==name)
+        .ok_or("No se encontró la instancia en tu biblioteca")?.clone();
+    if erase_files.unwrap_or(false){
+        // Destructive deletion is only possible for directories created by
+        // VIS's new Instancias/<name> layout. Legacy arbitrary paths are
+        // deliberately restricted to unlinking the library entry.
+        let dir=minecraft::instance_dir(&s.data_root,&username,&current)?;
+        let parent=dir.parent().ok_or("La instancia no tiene carpeta padre")?;
+        if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
+            return Err("Por seguridad, los archivos de las instalaciones antiguas solo pueden eliminarse manualmente. Podés quitar la instancia de VIS conservando los mundos.".into());
+        }
+        let library=parent.parent().ok_or("Biblioteca de instancia inválida")?;
+        if instance_guard::managed_child(library,&name)?!=dir{
+            return Err("La carpeta no coincide con la instancia administrada por VIS".into());
+        }
+        for account in &s.storage.data.accounts{
+            for other in s.storage.prefs(&account.username).instances{
+                if account.username==username && other.project_id==project_id && other.name==name {continue;}
+                if let Ok(folder)=minecraft::instance_dir(&s.data_root,&account.username,&other){
+                    instance_guard::independent(&dir,&folder)?;
+                }
+            }
+        }
+        if dir.exists(){
+            let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
+            if meta.file_type().is_symlink()||!meta.is_dir(){
+                return Err("La carpeta de la instancia no es un directorio seguro".into());
+            }
+            let has_marker=dir.join(".vis/instance.json").is_file()
+                ||dir.join(".vslauncher/install.json").is_file()
+                ||dir.join(".vis/horizon.json").is_file();
+            if !has_marker && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
+                return Err("La carpeta contiene datos sin marca de instalación VIS. Solo puede quitarse de la biblioteca; no se borrarán archivos desconocidos.".into());
+            }
+            fs::remove_dir_all(&dir).map_err(|e|format!("No se pudieron borrar los archivos: {e}"))?;
+        }
+    }
+    prefs.instances.retain(|p|p.project_id!=project_id||p.name!=name);
+    s.storage.save_prefs(&username,&prefs)?;
     Ok(s.snapshot())
 }
 #[tauri::command]
