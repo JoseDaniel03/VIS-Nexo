@@ -112,6 +112,9 @@ pub struct MergeReport{
  pub duplicates:usize,pub backup:String,pub updated:bool
 }
 pub fn merge_from_old(game:&Path,legacy:&[PathBuf],apply:bool)->Result<MergeReport,String>{
+    // Serialize parsing and replacement with Java/Horizon launches, not
+    // only the final write, so the source cannot change between the two.
+    let _guard=if apply{Some(crate::minecraft::acquire_game_run(game)?)}else{None};
     let target=game.join("servers.dat");
     let existing=if target.is_file(){
         let meta=fs::symlink_metadata(&target).map_err(|e|e.to_string())?;
@@ -145,7 +148,6 @@ pub fn merge_from_old(game:&Path,legacy:&[PathBuf],apply:bool)->Result<MergeRepo
         }
     }
     if !apply||report.additions==0{return Ok(report);}
-    let _guard=crate::minecraft::acquire_game_run(game)?;
     let output=encode(parsed)?;
     crate::instance_guard::private_paths(game,&[".vis/server-list-backups","servers.dat"])?;
     let backups=game.join(".vis/server-list-backups");
@@ -159,7 +161,8 @@ pub fn merge_from_old(game:&Path,legacy:&[PathBuf],apply:bool)->Result<MergeRepo
             .map_err(|e|e.to_string())?;
         out.write_all(&output).map_err(|e|e.to_string())?;
         out.sync_all().map_err(|e|e.to_string())?;
-        if target.exists(){fs::remove_file(&target).map_err(|e|e.to_string())?;}
+        // fs::rename replaces the existing regular file without the unsafe
+        // remove-then-rename window (Windows and Unix).
         if let Err(err)=fs::rename(&stage,&target){
             if backup.exists(){let _=fs::copy(&backup,&target);}
             return Err(err.to_string());
