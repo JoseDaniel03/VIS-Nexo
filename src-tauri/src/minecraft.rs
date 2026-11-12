@@ -910,7 +910,7 @@ fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&
     if let Some(window)=emitter.get_webview_window("main") {let _=window.unminimize();}
     let _=emitter.emit("minecraft-process-exited",event);
  });
- Ok(LaunchResult{pid,log_file,offline:true})
+ Ok(LaunchResult{pid,log_file,offline:premium.is_none()})
 }
 
 pub fn search_modrinth(query:&str,version:&str,kind:&str)->Result<Vec<ModHit>,String>{
