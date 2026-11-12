@@ -718,8 +718,12 @@ async function changePremiumCosmetic(action,params={}){
  if(!native||!microsoftGamertag||premiumCosmeticsBusy)return;
  premiumCosmeticsBusy=true;render();
  try{
-   premiumCosmetics=await command(action,params);
+   const next=await command(action,params);
+   premiumCosmetics={...next,history:next.history||premiumCosmetics?.history||[]};
    message('Cosmético oficial actualizado en Minecraft.');
+   // The refreshed official inventory also records the new texture in the
+   // private, token-free history for this same Minecraft UUID.
+   void Promise.resolve().then(()=>loadPremiumCosmetics());
  }catch(error){message('Minecraft Premium: '+String(error),true);}
  finally{premiumCosmeticsBusy=false;render();}
 }
@@ -731,6 +735,11 @@ function premiumCosmeticsPanel(){
    '<span>'+esc(skin.variant==='SLIM'?'Modelo delgado':'Modelo clásico')+
    '<small>'+(skin.state==='ACTIVE'?' · Equipada':' · Anterior')+'</small></span>'+
    (skin.state==='ACTIVE'?'':'<button class="outline-btn" data-action="premium-use-skin" data-id="'+attr(skin.id)+'">Usar</button>')+'</div>').join('');
+ const history=premiumCosmetics?.history||[];
+ const savedRows=history.map((item,index)=>'<div class="premium-cosmetic-entry">'+
+   '<img src="'+attr(item.url)+'" alt="Textura oficial guardada" loading="lazy"/>'+
+   '<span>Skin guardada '+(index+1)+'<small> · '+esc(item.variant==='SLIM'?'Delgado':'Clásico')+'</small></span>'+
+   '<button class="outline-btn" data-action="premium-use-saved-skin" data-id="'+attr(item.url)+'" '+(premiumCosmeticsBusy?'disabled':'')+'>Equipar</button></div>').join('');
  const capeRows=capes.map(cape=>'<div class="premium-cosmetic-entry">'+
    (cape.url?'<img src="'+attr(cape.url)+'" alt="Textura de capa" loading="lazy"/>':'')+
    '<span>'+esc(cape.alias||'Capa oficial')+
@@ -742,8 +751,11 @@ function premiumCosmeticsPanel(){
    '<p class="muted"><b>'+esc(microsoftGamertag)+'</b> · Skins y capas oficiales de tu cuenta Microsoft. No son el avatar de VIS Social.</p>'+
    (premiumCosmeticsBusy?'<p class="muted">Consultando Minecraft Services…</p>':'')+
    (premiumCosmetics?'<div class="premium-cosmetics-grid">'+
-     '<div class="premium-cosmetics-group"><h3>Skins anteriores y equipadas ('+skins.length+')</h3>'+
+     '<div class="premium-cosmetics-group"><h3>Skins oficiales actuales ('+skins.length+')</h3>'+
        (skinRows||'<p class="muted">No hay skins para mostrar.</p>')+
+       '<details class="profile-advanced"><summary>Historial guardado por VIS Nexo ('+history.length+')</summary>'+
+       '<small class="muted">VIS recuerda las texturas que consultás o equipás desde ahora. No puede recuperar automáticamente todas las skins usadas antes de VIS.</small>'+
+       (savedRows||'<p class="muted">El historial se completará cuando consultes o uses nuevas skins.</p>')+'</details>'+
        '<div class="profile-actions"><label>Modelo <select id="premium-skin-model"><option value="classic">Clásico</option><option value="slim">Delgado</option></select></label>'+
          '<button class="primary-btn" data-action="premium-upload-skin">'+I('upload',16)+' Subir PNG 64×64</button></div></div>'+
      '<div class="premium-cosmetics-group"><h3>Capas oficiales ('+capes.length+')</h3>'+
@@ -1617,6 +1629,10 @@ root.addEventListener('click',async event=>{
  }
  else if(act==='social-edit-status'){stateEditorOpen=!stateEditorOpen;render();}
  else if(act==='premium-refresh'){await loadPremiumCosmetics();}
+ else if(act==='premium-use-saved-skin'){
+   if(!premiumCosmetics?.history?.some(item=>item.url===id))return;
+   await changePremiumCosmetic('microsoft_use_saved_skin',{url:id});
+ }
  else if(act==='premium-use-skin'){
    if(!premiumCosmetics?.skins?.some(item=>item.id===id))return;
    await changePremiumCosmetic('microsoft_use_skin',{skinId:id});
