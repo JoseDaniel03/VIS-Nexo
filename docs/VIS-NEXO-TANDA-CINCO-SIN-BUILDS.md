@@ -8,7 +8,7 @@ Rama: `feature/five-systems-no-builds`. Mantener separada de `main`; **no abrir 
 
 ## 2. Copias de seguridad y restauración
 
-`src-tauri/src/instance_backup.rs`: acciones explícitas en **Instancias → Datos**. Copia solo `saves/`, `servers.dat`, `options.txt`, `optionsof.txt`, `resourcepacks/`, `shaderpacks/`, `config/` y `mods/`. No incluye Microsoft, VIS Social, JDK, binarios, logs, temporales ni motor. Los ZIP se escriben primero a un archivo parcial y solo se publican al finalizar. Máximo 16 GiB descomprimidos, 40.000 archivos, 26 niveles. Rechaza rutas extrañas, symlinks, entradas repetidas y ZIP excesivos.
+`src-tauri/src/instance_backup.rs`: acciones explícitas en **Instancias → Datos**. Copia solo `saves/`, `servers.dat`, `options.txt`, `optionsof.txt`, `resourcepacks/`, `shaderpacks/`, `config/` y `mods/`. No incluye las credenciales administradas por Microsoft/VIS Social, JDK, binarios, logs, temporales ni motor. **Aviso:** archivos de configuración de mods pueden contener tokens de servicios externos; no compartas estos ZIP públicamente. Los ZIP se escriben primero a un archivo parcial y solo se publican al finalizar. Máximo 16 GiB descomprimidos, 40.000 archivos, 26 niveles. Rechaza rutas extrañas, symlinks, entradas repetidas y ZIP excesivos.
 
 La restauración requiere escribir **RESTAURAR**. Por defecto solo incorpora archivos ausentes; al activar reemplazo, mueve versiones anteriores a `.vis/backups/.rollback-...` para recuperarlas. Los respaldos **no se producen automáticamente** ni ahora ni al abrir el launcher. La restauración parcial interrumpida puede requerir intervención; conserva originales reemplazados en rollback.
 
