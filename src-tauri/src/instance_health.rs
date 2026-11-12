@@ -48,7 +48,7 @@ pub fn inspect(game:&Path)->Result<HealthReport,String>{
     }
  }
  let worlds=game.join("saves");
- if worlds.is_dir(){
+ if fs::symlink_metadata(&worlds).is_ok_and(|m|m.is_dir()&&!m.file_type().is_symlink()){
    for item in fs::read_dir(&worlds).map_err(|e|e.to_string())?.take(2000){
      let item=item.map_err(|e|e.to_string())?;
      let meta=fs::symlink_metadata(item.path()).map_err(|e|e.to_string())?;
@@ -68,7 +68,7 @@ pub fn inspect(game:&Path)->Result<HealthReport,String>{
     else {issue(&mut result,"unsafe-servers","servers.dat no es un archivo normal","danger",false);}
  }
  let packs=game.join("resourcepacks");
- if packs.is_dir(){
+ if fs::symlink_metadata(&packs).is_ok_and(|m|m.is_dir()&&!m.file_type().is_symlink()){
     for item in fs::read_dir(packs).map_err(|e|e.to_string())?.take(2000){
        let item=item.map_err(|e|e.to_string())?;
        let ty=item.file_type().map_err(|e|e.to_string())?;
