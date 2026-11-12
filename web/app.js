@@ -731,12 +731,149 @@ function premiumCosmeticsPanel(){
      '<button class="outline-btn" data-action="premium-refresh">Consultar mis skins y capas</button>')+
    '</section>';
 }
-function profilePage(){if(isGuest())return `<div class="content-inner"><div class="page-heading"><h1>Modo offline</h1></div><section class="surface-card"><p>Sesión temporal: ${esc(displayAccount(db.user?.username))}. No se creó una cuenta. Solo podés iniciar instancias existentes.</p><button class="primary-btn" data-action="go-instances">Ver instancias instaladas</button><button class="outline-btn" data-action="logout">Salir</button></section></div>`;return `<div class="content-inner profile-page"><div class="page-heading"><div><span class="page-eyebrow">IDENTIDAD / CUENTA</span><h1>Mi perfil</h1><p>Tu presencia e identidad en el ecosistema VIS Nexo.</p></div><button class="outline-btn" data-action="edit-avatar">${I('edit',17)} Personalizar avatar</button></div>
- <div class="profile-banner portal-profile-banner" ${db.user?.profile_banner&&preview(db.user.profile_banner)?`style="background-image:linear-gradient(90deg,rgba(18,12,35,.9),rgba(20,12,38,.33)),url('${preview(db.user.profile_banner)}');background-position:center;background-size:cover"`:''}><div class="profile-orb"></div><div class="profile-portrait">${userAvatar(116)}<button type="button" class="avatar-overlay-edit" data-action="edit-avatar" aria-label="Cambiar avatar">${I('edit',18)}</button></div><div class="profile-titles"><span class="page-eyebrow">MI CUENTA</span><h2>${esc(displayAccount(db.user?.username))}</h2><div><span class="role-chip">${humanRole(db.user?.role)}</span><span class="role-chip ghost">${esc(names[db.user?.presence]||'Conectado')}</span></div></div></div>
- <div class="profile-stat-row"><div>${I('grid',20)} <strong>${db.projects.length}</strong><span>Proyectos</span></div><div>${I('layers',20)} <strong>${db.instances.length}</strong><span>Instancias</span></div><div>${I('users',20)} <strong>${db.friends.length}</strong><span>Amigos globales</span></div></div>
- ${premiumCosmeticsPanel()}<div class="settings-grid"><section class="surface-card"><div class="card-heading">${I('user',21)} Avatar y apariencia</div><p class="muted">Importá una imagen o elegí un emblema abstracto. Los ajustes se guardan en tu cuenta local.</p><div class="profile-actions"><button class="outline-btn" data-action="edit-avatar">${I('image',18)} Abrir editor de avatar</button><button class="subtle-btn" data-action="import-avatar">${I('upload',17)} Importar foto</button><button class="subtle-btn" data-action="import-avatar-layer">${I('layers',17)} Capa superpuesta PNG</button><button class="outline-btn" data-action="import-profile-banner">${I('image',17)} Banner de perfil</button>${db.user?.profile_banner?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="profile_banner">${I('trash',15)} Quitar banner</button><button class="subtle-btn" data-action="crop-profile-existing" data-kind="profile_banner">${I('crop',15)} Ajustar banner</button>`:''}</div></section><section class="surface-card"><div class="card-heading">${I('game',21)} Skin de Minecraft</div><p class="muted">Importá una skin Minecraft PNG 64×64 o 64×32 para tu biblioteca local. Para aplicarla a tu personaje oficial necesitás Microsoft.</p>${db.user?.skin&&preview(db.user.skin)?`<img class="mc-skin-preview" src="${preview(db.user.skin)}" alt="Skin local importada"/>`:''}<div class="profile-actions"><button class="outline-btn" data-action="import-skin">${I('upload',18)} Importar skin PNG</button><button class="outline-btn" data-action="import-cape">${I('upload',18)} Importar capa local</button>${db.user?.skin?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="skin">${I('trash',16)} Quitar skin</button>`:''}${db.user?.cape?`<button class="subtle-btn" data-action="clear-profile-asset" data-kind="cape">${I('trash',16)} Quitar capa</button>`:''}</div><small class="muted">Las capas locales NO se muestran automáticamente en servidores oficiales.</small></section><section class="surface-card"><div class="card-heading">${I('layers',21)} Instancias</div><p class="muted">Administrá la memoria y las versiones de las instancias de tu equipo.</p><button class="outline-btn" data-action="go-instances">Ver mis instancias ${I('arrow',17)}</button>
- ${db.hidden_shared_instances?.length?`<div class="hidden-instance-list"><strong>Instancias compartidas ocultas</strong>
- ${db.hidden_shared_instances.map(i=>`<div class="request-row"><span>${esc(i.name)} · ${esc(i.source_owner)}</span><button type="button" class="outline-btn" data-action="show-shared-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}">Mostrar</button></div>`).join('')}</div>`:''}</section><section class="surface-card"><div class="card-heading">${I('shield',21)} Acceso y privacidad</div><p class="muted">Cuenta local protegida con Argon2id. Las sesiones Microsoft se mantienen en memoria; VIS Social utiliza una identidad independiente.</p><button class="outline-btn" data-action="logout">${I('logout',17)} Cerrar sesión</button></section></div></div>`;}
+
+function profilePage(){
+ if(isGuest())return '<div class="content-inner"><div class="page-heading"><h1>Modo offline</h1></div>'+
+   '<section class="surface-card"><p>Las cuentas offline pueden usar juegos instalados, sin identidad social.</p>'+
+   '<button class="primary-btn" data-action="go-instances">Ver juegos instalados</button></section></div>';
+ const username=db.user?.username||'',skinPath=db.user?.skin||'',localSkin=skinPath?preview(skinPath):'';
+ const publicSkin=socialSkins.get(username),skins=(db.instances||[]).filter(i=>!i.source_owner);
+ const hidden=db.hidden_shared_instances||[],connected=social.connected();
+ const socialId=social.state()?.public_id||'';
+ const socialLabel=connected?'VIS Social conectado':socialMode==='connecting'?'Conectando VIS Social':'VIS Social desconectado';
+ const premium=microsoftGamertag?'Minecraft Java · '+microsoftGamertag:'Minecraft Java · Cuenta no vinculada en esta sesión';
+ const banner=db.user?.profile_banner&&preview(db.user.profile_banner);
+ const bannerStyle=banner?' style="background-image:linear-gradient(90deg,rgba(18,12,35,.89),rgba(20,12,38,.35)),url(\''+attr(banner)+'\');background-size:cover;background-position:center"':'';
+ const hiddenRows=hidden.map(i=>'<div class="request-row"><span>'+esc(i.name)+' · '+esc(i.source_owner)+'</span>'+
+   '<button type="button" class="outline-btn" data-action="show-shared-instance" data-id="'+attr(i.name)+
+   '" data-project="'+attr(i.project_id)+'" data-source="'+attr(i.source_owner)+'">Restaurar</button></div>').join('');
+ const gameRows=skins.slice(0,3).map(i=>'<div class="vis-profile-game"><span>'+I('game',17)+
+   ' '+esc(i.name)+'</span><small>'+esc(i.engine==='horizon'?'Horizon Rust':'Java / '+(i.loader||'Vanilla'))+
+   ' · '+esc(i.version)+'</small></div>').join('');
+ return '<div class="content-inner profile-page profile-v21">'+
+  '<header class="profile-page-head"><div><span class="page-eyebrow">CUENTA Y APARIENCIA</span>'+
+  '<h1>Mi perfil</h1><p>Todo lo importante de tu identidad y tus juegos, en un solo lugar.</p></div>'+
+  '<button class="primary-btn" data-action="edit-profile">'+I('edit',17)+' Editar perfil</button></header>'+
+  '<section class="profile-banner portal-profile-banner"'+bannerStyle+'>'+
+    '<div class="profile-orb" aria-hidden="true"></div>'+
+    '<div class="profile-portrait">'+userAvatar(104)+
+       '<button type="button" class="avatar-overlay-edit" data-action="edit-avatar" aria-label="Cambiar avatar">'+I('edit',18)+'</button></div>'+
+    '<div class="profile-titles"><span class="page-eyebrow">IDENTIDAD VIS</span>'+
+      '<h2>'+esc(displayAccount(username))+'</h2>'+
+      '<div class="vis-handle">@'+esc(username)+'</div>'+
+      '<div class="vis-profile-chips"><span class="role-chip">'+humanRole(db.user?.role)+'</span>'+
+        '<span class="role-chip ghost">'+esc(socialLabel)+'</span>'+
+        (socialId?'<span class="role-chip ghost">VIS ID '+esc(socialId)+'</span>':'')+'</div>'+
+    '</div><button class="outline-btn profile-share" data-action="social-copy-handle">'+I('copy',15)+' Copiar usuario VIS</button>'+
+  '</section>'+
+  '<div class="profile-overview"><div><strong>'+skins.length+'</strong><span>Instancias propias</span></div>'+
+   '<div><strong>'+db.friends.length+'</strong><span>Amigos VIS</span></div>'+
+   '<div><strong>'+(publicSkin?.skin?'Publicada':localSkin?'Local':'Sin skin')+'</strong><span>Skin VIS</span></div></div>'+
+  '<div class="profile-v21-grid">'+
+   '<section class="surface-card profile-identity-card">'+
+    '<div class="card-heading">'+I('users',20)+' Comunidad e identidad</div>'+
+    '<p class="muted">Tu usuario VIS es el que tus amigos utilizan para encontrarte. El gamertag Microsoft no reemplaza esta identidad.</p>'+
+    '<div class="profile-status-rows">'+
+      '<div><span>VIS Social</span><strong>'+esc(socialLabel)+'</strong></div>'+
+      '<div><span>Minecraft Premium</span><strong>'+esc(premium)+'</strong></div>'+
+      '<div><span>Foto pública</span><strong>'+esc(socialAvatars.get(username)?.url?'Sincronizada':'Sin foto sincronizada')+'</strong></div>'+
+    '</div>'+
+    '<div class="profile-quick-actions">'+
+      '<button class="outline-btn" data-action="social-copy-handle">'+I('copy',15)+' Copiar usuario</button>'+
+      (connected?'<button class="outline-btn" data-action="social-upload-avatar">'+I('image',15)+' Publicar foto</button>':
+      '<button class="outline-btn" data-action="social-retry">'+I('cloud',15)+' Conectar VIS Social</button>')+
+    '</div>'+
+   '</section>'+
+   '<section class="surface-card profile-skin-card">'+
+    '<div class="card-heading">'+I('game',20)+' Mi skin en VIS</div>'+
+    '<p class="muted">La skin que subís a VIS Nexo puede mostrarse a cualquier usuario conectado del launcher, aunque no sea tu amigo. Es independiente de las skins oficiales de Mojang.</p>'+
+    '<div class="profile-skin-visual">'+
+      (localSkin?'<img class="profile-skin-sheet" src="'+attr(localSkin)+'" alt="Textura PNG local de Minecraft"/>':
+       '<div class="profile-skin-placeholder">'+I('game',32)+'<span>Sin skin local</span></div>')+
+      '<div class="profile-skin-public">'+
+       (publicSkin?.head?'<img class="profile-skin-head" src="'+attr(publicSkin.head)+'" alt="Cabeza de la skin publicada"/>':
+        '<span class="profile-skin-nohead">'+I('user',29)+'</span>')+
+       '<strong>'+(publicSkin?.skin?'Visible en VIS Social':'No publicada')+'</strong>'+
+       '<small>'+(publicSkin?.skin?'Otros usuarios pueden verla buscando @'+esc(username):
+         'Importá una skin o publicá la que ya tenés.')+'</small>'+
+      '</div></div>'+
+    '<div class="profile-quick-actions">'+
+      '<button class="outline-btn" data-action="import-skin">'+I('upload',15)+' Importar PNG</button>'+
+      '<button class="primary-btn" data-action="publish-vis-skin" '+(!skinPath||!connected||skinSharingBusy?'disabled':'')+'>'+
+        I('cloud',15)+' '+(skinSharingBusy?'Publicando…':'Compartir skin VIS')+'</button>'+
+      (publicSkin?.skin?'<button class="subtle-btn" data-action="remove-vis-skin">'+I('trash',15)+' Dejar de compartir</button>':'')+
+    '</div>'+
+   '</section>'+
+   '<section class="surface-card profile-library-card">'+
+    '<div class="card-heading">'+I('layers',20)+' Mis juegos</div>'+
+    '<p class="muted">Tus instalaciones están separadas por perfil y los mundos se conservan al ocultar una instancia compartida.</p>'+
+    (gameRows||'<p class="muted">Todavía no creaste instancias propias.</p>')+
+    '<button class="outline-btn" data-action="go-instances">'+I('layers',16)+' Abrir biblioteca</button>'+
+    (hidden.length?'<details class="profile-advanced"><summary>Compartidas ocultas ('+hidden.length+')</summary>'+
+      '<div class="hidden-instance-list">'+hiddenRows+'</div></details>':'')+
+   '</section>'+
+   '<section class="surface-card profile-security-card">'+
+    '<div class="card-heading">'+I('shield',20)+' Cuenta y privacidad</div>'+
+    '<p class="muted">La cuenta VIS controla amigos, mensajes y apariencia del launcher. Microsoft se utiliza exclusivamente para autenticar Minecraft Java y Horizon.</p>'+
+    '<div class="profile-status-rows"><div><span>Acceso</span><strong>'+
+       esc(microsoftGamertag?'Microsoft Premium':db.mode==='offline'?'Offline':'VIS')+'</strong></div>'+
+       '<div><span>Skin pública</span><strong>'+esc(publicSkin?.skin?'Visible para usuarios VIS':'No publicada')+'</strong></div></div>'+
+    '<div class="profile-quick-actions"><button class="outline-btn" data-action="edit-profile">'+I('edit',15)+' Personalizar</button>'+
+       '<button class="subtle-btn" data-action="logout">'+I('logout',15)+' Cerrar sesión</button></div>'+
+   '</section>'+
+  '</div>'+
+  premiumCosmeticsPanel()+
+ '</div>';
+}
+function editProfileDialog(){
+ const user=db.user||{},connected=social.connected(),skin=socialSkins.get(user.username)?.skin;
+ return '<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-medium profile-edit-modal" role="dialog" aria-modal="true" aria-label="Editar perfil">'+
+ '<header class="modal-head"><div><span class="page-eyebrow">CUENTA VIS</span><h2>Editar perfil</h2>'+
+ '<p class="muted">Personalizá lo que ven los demás sin mezclar tu cuenta Microsoft.</p></div>'+
+ '<button class="icon-btn" data-action="close-modal" aria-label="Cerrar">'+I('x',19)+'</button></header>'+
+ '<div class="modal-body profile-edit-body">'+
+ '<section><h3>'+I('user',18)+' Identidad visual</h3>'+
+  '<div class="profile-edit-preview">'+userAvatar(64)+'<span><strong>'+esc(displayAccount(user.username))+
+   '</strong><small>@'+esc(user.username)+'</small></span></div>'+
+  '<div class="profile-quick-actions"><button class="outline-btn" data-action="edit-avatar">'+I('edit',15)+' Avatar y emblemas</button>'+
+  '<button class="outline-btn" data-action="import-profile-banner">'+I('image',15)+' Cambiar portada</button></div>'+
+  '<div class="profile-quick-actions">'+(connected?'<button class="primary-btn" data-action="social-upload-avatar">'+I('upload',15)+' Publicar foto en VIS Social</button>':
+    '<span class="muted">Conectá VIS Social para publicar tu foto.</span>')+'</div>'+
+  '<details class="profile-advanced"><summary>Más opciones visuales</summary><div class="profile-quick-actions">'+
+  '<button class="subtle-btn" data-action="import-avatar-layer">Capa PNG del avatar</button>'+
+  (user.profile_banner?'<button class="subtle-btn" data-action="clear-profile-asset" data-kind="profile_banner">Quitar portada</button>':'')+
+  (user.avatar_layer?'<button class="subtle-btn" data-action="clear-profile-asset" data-kind="avatar_layer">Quitar capa del avatar</button>':'')+'</div></details>'+
+ '</section>'+
+ '<section><h3>'+I('game',18)+' Minecraft en VIS</h3>'+
+  '<p class="muted">Importá PNG 64×64 o 64×32. Publicarla permite que todas las cuentas VIS conectadas vean tu skin. No modifica las skins de Minecraft oficial.</p>'+
+  '<div class="profile-quick-actions"><button class="outline-btn" data-action="import-skin">Importar skin local</button>'+
+   '<button class="primary-btn" data-action="publish-vis-skin" '+(!user.skin||!connected||skinSharingBusy?'disabled':'')+'>Publicar en VIS</button>'+
+   (skin?'<button class="subtle-btn" data-action="remove-vis-skin">Quitar pública</button>':'')+'</div>'+
+  '<details class="profile-advanced"><summary>Recursos locales y avanzados</summary><div class="profile-quick-actions">'+
+    '<button class="outline-btn" data-action="import-cape">Importar capa local</button>'+
+    (user.cape?'<button class="subtle-btn" data-action="clear-profile-asset" data-kind="cape">Quitar capa local</button>':'')+
+    (user.skin?'<button class="subtle-btn" data-action="clear-profile-asset" data-kind="skin">Quitar skin local</button>':'')+
+    '</div><small class="muted">Las capas importadas localmente no se agregan a tu cuenta oficial Mojang.</small></details>'+
+ '</section>'+
+ '<section><h3>'+I('users',18)+' Compartir identidad</h3>'+
+  '<p class="muted">Compartí tu usuario VIS para recibir solicitudes de amistad.</p>'+
+  '<button class="outline-btn" data-action="social-copy-handle">'+I('copy',15)+' Copiar @'+esc(user.username)+'</button>'+
+ '</section>'+
+ '</div><footer class="modal-footer"><button class="primary-btn" data-action="close-modal">Listo</button></footer></div></div>';
+}
+function visSkinDialog(){
+ const entry=publicSkinLookup||{};
+ return '<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small vis-skin-dialog" role="dialog" aria-modal="true" aria-label="Skin pública VIS">'+
+  '<header class="modal-head"><div><span class="page-eyebrow">SKINS DE VIS SOCIAL</span><h2>@'+esc(entry.username||'Usuario VIS')+'</h2></div>'+
+  '<button class="icon-btn" data-action="close-modal" aria-label="Cerrar">'+I('x',18)+'</button></header>'+
+  '<div class="modal-body"><p class="muted">Apariencia pública de VIS Nexo, no es una verificación de cuenta Microsoft.</p>'+
+  (entry.loading?'<p class="muted">Consultando la skin pública…</p>':
+   entry.error?'<p class="muted">'+esc(entry.error)+'</p>':
+   entry.skin?'<div class="vis-skin-view">'+(entry.head?'<img class="profile-skin-head" src="'+attr(entry.head)+'" alt="Cabeza de Minecraft"/>':'')+
+    '<img class="profile-skin-sheet" src="'+attr(entry.skin)+'" alt="Textura completa PNG de Minecraft"/></div>':
+   '<p class="muted">Este usuario todavía no publicó una skin VIS.</p>')+
+  '</div><footer class="modal-footer"><button class="primary-btn" data-action="close-modal">Cerrar</button></footer></div></div>';
+}
 function isExecutionEnabled(p){return p?.installable&&db.project_execution?.[p.id]!==false;}
 function selectedMcInstance(){return db.instances.find(i=>i.project_id===mcSelected?.projectId&&i.name===mcSelected?.name)||(libraryMode==='user'?personalInstances()[0]:officialInstances()[0])||null;}
 function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const allow=i.project_id===PERSONAL_PROJECT_ID || isExecutionEnabled(p);
@@ -1020,7 +1157,7 @@ async function projectInstallAndPlay(){
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste es exclusivo de tu perfil VIS. No modifica la instalación ni los mundos del propietario.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
 function confirmDialog(){return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="alertdialog" aria-modal="true"><header class="modal-head"><h2>Confirmar eliminación</h2><button class="icon-btn" data-action="close-modal">${I('x',18)}</button></header><div class="modal-body"><p>¿Querés quitar <strong>${esc(dialog.label)}</strong> de VIS Nexo? Por defecto <b>se conservan todos los mundos y archivos del disco</b>.</p>
  ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los archivos del disco</b><small>Irreversible. Disponible solo para instalaciones administradas por VIS en Instancias/&lt;nombre&gt;. Cerrá el juego antes.</small></span><input type="checkbox" id="delete-instance-files"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
-function dialogView(){return dialog?.type==='project'?projectWizard():dialog?.type==='quick-post'?quickPublishDialog():dialog?.type==='crop'?cropDialog():dialog?.type==='avatar'?avatarDialog():dialog?.type==='instance'?instanceDialog():dialog?.type==='project-install'?projectInstallDialog():dialog?.type==='shared-ram'?sharedRamDialog():confirmDialog();}
+function dialogView(){return dialog?.type==='edit-profile'?editProfileDialog():dialog?.type==='vis-skin'?visSkinDialog():dialog?.type==='project'?projectWizard():dialog?.type==='quick-post'?quickPublishDialog():dialog?.type==='crop'?cropDialog():dialog?.type==='avatar'?avatarDialog():dialog?.type==='instance'?instanceDialog():dialog?.type==='project-install'?projectInstallDialog():dialog?.type==='shared-ram'?sharedRamDialog():confirmDialog();}
 function viewSnapshot(){
  return {
    screen:db.user?`${libraryMode}:${page}:${page==='project'?selectedId:''}`:'auth',authMode,
