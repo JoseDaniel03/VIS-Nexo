@@ -51,6 +51,7 @@ async function copyMicrosoftText(value,label){
  }
 }
 async function beginMicrosoftLogin(){
+ if(authBusy)return;
  if(!native){message('Microsoft requiere la aplicación de escritorio.',true);return;}
  microsoftPollGeneration++;
  const generation=microsoftPollGeneration;
@@ -67,6 +68,7 @@ async function beginMicrosoftLogin(){
      if(result.status==='pending'){interval=Number(result.interval||5);continue;}
      if(result.status==='connected'){
        microsoftTicket=null;
+       resetAccountView();
        db=result.snapshot;
        microsoftGamertag=result.minecraft_name;
        premiumCosmetics=null;
