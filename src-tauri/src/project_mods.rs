@@ -9,6 +9,7 @@ use std::{
     fs::{self,File},
     io::Read,
     path::{Path,PathBuf},
+    sync::Mutex,
     time::{SystemTime,UNIX_EPOCH},
 };
 
@@ -30,6 +31,9 @@ pub struct SyncReport {
     pub protected:usize,
     pub unchanged:bool,
 }
+
+// Parallel launch/install/update calls must not modify the same mod set concurrently.
+static MOD_UPDATE_GUARD: Mutex<()> = Mutex::new(());
 
 fn manifest(dir:&Path)->PathBuf {dir.join(".vslauncher/project-mods.json")}
 fn clean_name(s:&str)->bool {
@@ -101,6 +105,7 @@ fn timestamp()->u128 {
 pub fn sync(root:&Path,username:&str,ins:&Instance,ids:&[String])
     -> Result<SyncReport,String>
 {
+    let _lock=MOD_UPDATE_GUARD.lock().map_err(|_|"Gestor de mods bloqueado")?;
     validate_ids(ids)?;
     if ins.engine!="java" || (ins.loader!="fabric" && !ids.is_empty()) {
         return if ids.is_empty() {Ok(SyncReport{added:0,retired:0,protected:0,unchanged:true})}
@@ -232,6 +237,53 @@ mod tests {
         assert!(!clean_name("evil.jar.disabled"));
         assert!(clean_name("fabric-api-1.0.jar"));
     }
+    #[test]fn project_removal_archives_only_managed_mods(){
+        let root=std::env::temp_dir().join(format!("vis-project-retire-{}-{}",std::process::id(),timestamp()));
+        let dir=root.join("game");
+        let metadata=dir.join(".vslauncher");
+        fs::create_dir_all(dir.join(".vis/runtime/versions/1.20.1")).unwrap();
+        fs::create_dir_all(dir.join(".vis/runtime/libraries")).unwrap();
+        fs::create_dir_all(dir.join(".vis/runtime/assets/indexes")).unwrap();
+        fs::create_dir_all(dir.join(".vis/java-runtimes/temurin-25/bin")).unwrap();
+        fs::create_dir_all(dir.join("mods")).unwrap();
+        fs::create_dir_all(&metadata).unwrap();
+        fs::write(dir.join(".vis/runtime/versions/1.20.1/1.20.1.jar"),b"game").unwrap();
+        fs::write(dir.join(".vis/runtime/assets/indexes/test.json"),b"{}").unwrap();
+        fs::write(dir.join(".vis/java-runtimes/temurin-25/bin").join(
+            if cfg!(target_os="windows"){"java.exe"}else{"java"}),b"jdk").unwrap();
+        fs::write(metadata.join("version.json"),br#"{"assetIndex":{"id":"test"},"javaVersion":{"majorVersion":25}}"#).unwrap();
+        let ins=Instance{
+            project_id:"test-project".into(),name:"Test".into(),
+            version:"1.20.1".into(),loader:"fabric".into(),
+            loader_version:"0.18.4".into(),game_dir:dir.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let install=minecraft::LocalInstallation{
+            version:ins.version.clone(),loader:ins.loader.clone(),
+            loader_version:ins.loader_version.clone(),installed_at:0,
+            runtime_storage:"instance-v1".into()
+        };
+        atomic_json(&metadata.join("install.json"),&install).unwrap();
+        fs::write(dir.join("mods/managed.jar"),b"project bytes").unwrap();
+        fs::write(dir.join("mods/personal.jar"),b"personal bytes").unwrap();
+        let (sha1,size)=fingerprint(&dir.join("mods/managed.jar")).unwrap();
+        let prev=ManagedState{
+            project_id:ins.project_id.clone(),mc_version:ins.version.clone(),
+            loader:ins.loader.clone(),selected_ids:vec!["oldmod".into()],
+            files:vec![ManagedFile{name:"managed.jar".into(),sha1,size}]
+        };
+        atomic_json(&manifest(&dir),&prev).unwrap();
+        let report=sync(&root,"player",&ins,&[]).unwrap();
+        assert_eq!(report.retired,1);
+        assert!(!dir.join("mods/managed.jar").exists());
+        assert_eq!(fs::read(dir.join("mods/personal.jar")).unwrap(),b"personal bytes");
+        assert!(current(&dir,&ins,&[],&load(&dir,&ins.project_id).unwrap()));
+        let archive=metadata.join("retired-mods");
+        assert!(fs::read_dir(archive).unwrap().any(|child|
+            child.unwrap().path().join("managed.jar").exists()));
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]fn refuses_to_lose_ownership_metadata(){
         let root=std::env::temp_dir().join(format!("vis-project-metadata-{}-{}",std::process::id(),timestamp()));
         fs::create_dir_all(root.join(".vslauncher")).unwrap();
