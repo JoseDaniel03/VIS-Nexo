@@ -71,6 +71,10 @@ pub struct Instance {
     #[serde(default)] pub source_owner: String,
     #[serde(default)] pub reuse_source: String,
     #[serde(default)] pub share_offline: bool,
+    /// One installed instance should show the same worlds, server list,
+    /// resource packs and first-run settings when switching VIS accounts.
+    /// Historical profiles without this field default to shared data.
+    #[serde(default="default_shared_game_data")] pub share_game_data: bool,
     #[serde(default="default_engine")] pub engine: String,
     #[serde(default)] pub horizon_build_dir: String,
     #[serde(default)] pub horizon_minecraft_dir: String,
@@ -78,10 +82,11 @@ pub struct Instance {
 }
 fn default_loader()->String{"vanilla".into()}
 fn default_engine()->String{"java".into()}
+fn default_shared_game_data()->bool{true}
 impl Default for Instance {
     fn default() -> Self {
         Self { name: String::new(), project_id: String::new(), version: String::new(),
-            game_dir: String::new(), ram_mb: 4096, fullscreen: false, installed: false, loader: default_loader(), loader_version: String::new(), java_path: String::new(), player_name: String::new(), source_owner: String::new(), reuse_source: String::new(), share_offline: false, engine: default_engine(), horizon_build_dir: String::new(), horizon_minecraft_dir: String::new(), horizon_server_jar: String::new() }
+            game_dir: String::new(), ram_mb: 4096, fullscreen: false, installed: false, loader: default_loader(), loader_version: String::new(), java_path: String::new(), player_name: String::new(), source_owner: String::new(), reuse_source: String::new(), share_offline: false, share_game_data: true, engine: default_engine(), horizon_build_dir: String::new(), horizon_minecraft_dir: String::new(), horizon_server_jar: String::new() }
     }
 }
 
