@@ -17,7 +17,7 @@ static SHARED_PLAYER_LAYOUT_GUARD: Mutex<()> = Mutex::new(());
 /// One running game per writable game directory inside this launcher process.
 /// Sharing the same saves with two live processes could corrupt a world.
 static ACTIVE_GAME_DIRS:OnceLock<Mutex<BTreeSet<PathBuf>>>=OnceLock::new();
-pub(crate) struct GameRunGuard{path:PathBuf}
+pub(crate) struct GameRunGuard{path:PathBuf,_os_lock:crate::instance_lock::InstanceLock}
 impl Drop for GameRunGuard {
  fn drop(&mut self){
     if let Some(registry)=ACTIVE_GAME_DIRS.get(){
@@ -32,7 +32,11 @@ pub(crate) fn acquire_game_run(dir:&Path)->Result<GameRunGuard,String>{
     if !active.insert(path.clone()){
         return Err("Esta instancia ya está abierta. Cerrá Minecraft antes de iniciar la misma partida con otra cuenta.".into());
     }
-    Ok(GameRunGuard{path})
+    let os_lock=match crate::instance_lock::try_lock(&path){
+        Ok(lock)=>lock,
+        Err(error)=>{active.remove(&path);return Err(error);}
+    };
+    Ok(GameRunGuard{path,_os_lock:os_lock})
 }
 
 const MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
