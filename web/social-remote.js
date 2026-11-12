@@ -298,6 +298,28 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     await sync();
     return result;
   }
+  async function getSkin(username){
+    if(!connected())throw Error('VIS Social no está conectado');
+    if(typeof username!=='string'||!/^[a-z0-9_]{3,24}$/.test(username))
+      throw Error('Nombre de usuario VIS inválido');
+    return rpc('/v1/skins/get','POST',{username});
+  }
+  async function uploadSkin(dataUrl){
+    if(!connected())throw Error('VIS Social no está conectado');
+    if(typeof dataUrl!=='string'||!/^data:image\/png;base64,[A-Za-z0-9+/]*={0,2}$/.test(dataUrl))
+      throw Error('La skin VIS debe ser PNG');
+    const data=dataUrl.slice('data:image/png;base64,'.length);
+    if(data.length>87384||data.length<32)throw Error('La skin supera 64 KiB, optimizá el PNG');
+    const reply=await rpc('/v1/skins/upload','POST',{mime:'image/png',data});
+    await sync();
+    return reply;
+  }
+  async function deleteSkin(){
+    if(!connected())throw Error('Conectá VIS Social para quitar tu skin pública');
+    const reply=await rpc('/v1/skins/delete','POST',{});
+    await sync();
+    return reply;
+  }
   async function accountInfo() {
     if (!connected()) throw Error('Primero iniciá sesión en VIS Social');
     return rpc('/v1/account');
@@ -330,5 +352,5 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
-    setAccountRole, setAccountDisabled, accountInfo, getAvatar, uploadAvatar, state: () => state };
+    setAccountRole, setAccountDisabled, accountInfo, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
 }
