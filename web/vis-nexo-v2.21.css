@@ -212,3 +212,28 @@ html,body,#app{min-width:0;max-width:100%;min-height:0}
 .vis-display-name-label input:disabled{opacity:.55}
 .profile-edit-modal .profile-advanced{max-width:100%;overflow-wrap:anywhere}
 .profile-v21 .profile-identity-card .profile-advanced p{overflow-wrap:anywhere}
+
+/* VIS data center — compact, accessible and usable in short CachyOS windows. */
+.vis-data-dialog{width:min(740px,calc(100vw - 28px));max-height:min(92dvh,860px);overflow:hidden}
+.vis-data-dialog .modal-body{overflow-y:auto;min-height:0}
+.vis-data-grid{display:grid;gap:14px;padding:16px}
+.vis-data-grid>section{padding:14px;border:1px solid rgba(180,149,211,.22);
+    border-radius:10px;background:rgba(14,9,27,.22);min-width:0}
+.vis-data-grid h3{display:flex;align-items:center;gap:8px;font-size:14px;margin:0 0 9px}
+.vis-data-grid label{display:flex;flex-direction:column;gap:8px;font-size:12px;margin-top:12px}
+.vis-data-grid select,.vis-data-grid input[type=text]{background:#1c1827;color:#f8f0ff;
+    border:1px solid #69577a;min-height:39px;border-radius:7px;padding:8px;max-width:100%;width:100%}
+.vis-data-grid select{overflow:hidden;text-overflow:ellipsis}
+.vis-data-grid .toggle-line{flex-direction:row;align-items:center;justify-content:space-between}
+.vis-data-grid .toggle-line small{display:block;line-height:1.45;font-weight:400}
+.vis-data-grid button{margin-top:8px;min-width:0;max-width:100%}
+.vis-data-actions{display:flex;gap:8px;flex-wrap:wrap}
+.vis-data-issues{max-height:170px;overflow-y:auto;list-style:none;margin:10px 0;padding:0}
+.vis-data-issue{font-size:11px;line-height:1.5;padding:7px 0;border-bottom:1px solid rgba(210,180,233,.15);overflow-wrap:anywhere}
+.vis-data-issue strong{display:inline-block;margin-right:4px;color:#f4d7ec}
+@media (max-width:570px),(max-height:580px){
+ .vis-data-dialog{width:calc(100vw - 12px);max-height:96dvh}
+ .vis-data-grid{padding:10px;gap:10px}
+ .vis-data-grid>section{padding:10px}
+ .vis-data-actions button{flex:1 1 145px}
+}
