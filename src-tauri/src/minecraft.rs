@@ -243,6 +243,15 @@ fn java_home_instance(data_root:&Path,username:&str,ins:&Instance)->Result<PathB
  crate::instance_guard::destination(&data_root.join("minecraft-instances")
    .join(username).join(&ins.project_id).join(ins.name.replace(' ',"-")))
 }
+/// Resolve a stable offline nickname. Premium identity is handled separately.
+pub fn offline_player_name(account:&str,configured:&str)->Result<String,String>{
+ let name=if configured.trim().is_empty(){account.trim()}else{configured.trim()};
+ if !(3..=16).contains(&name.len()) ||
+    !name.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'){
+   return Err("El nombre offline debe tener 3 a 16 caracteres (A-Z, 0-9 o _)".into());
+ }
+ Ok(name.to_owned())
+}
 pub fn instance_dir(data_root:&Path,username:&str,ins:&Instance)->Result<PathBuf,String>{java_home_instance(data_root,username,ins)}
 fn installation_path(dir:&Path)->PathBuf{dir.join(".vslauncher").join("install.json")}
 // All new and repaired instances resolve binaries inside the game folder.
