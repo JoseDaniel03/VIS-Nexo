@@ -261,7 +261,11 @@ pub(crate) fn temporary_horizon_session(
     crate::instance_guard::private_paths(dir,&[".vis/tmp"])?;
     let tmp=dir.join(".vis/tmp");
     fs::create_dir_all(&tmp).map_err(|e|e.to_string())?;
-    let path=tmp.join(format!("msa-{}.json",uuid::Uuid::new_v4()));
+    use rand_core::{OsRng,RngCore};
+    let mut nonce=[0u8;16];
+    OsRng.fill_bytes(&mut nonce);
+    let path=tmp.join(format!("msa-{}.json",uuid::Uuid::from_bytes(nonce).simple()));
+    nonce.fill(0);
     let mut opts=OpenOptions::new();
     opts.create_new(true).write(true);
     #[cfg(unix)]{
