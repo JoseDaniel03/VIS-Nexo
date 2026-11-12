@@ -13,6 +13,7 @@ use tauri::{AppHandle,Emitter,Manager};
 use crate::accounts::Instance;
 
 static INSTALL_GUARD: Mutex<()> = Mutex::new(());
+static SHARED_PLAYER_LAYOUT_GUARD: Mutex<()> = Mutex::new(());
 const MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const FABRIC: &str = "https://meta.fabricmc.net/v2";
 const MODRINTH: &str = "https://api.modrinth.com/v2";
@@ -862,6 +863,10 @@ pub fn launch_shared_premium(app:&AppHandle,data_root:&Path,owner:&str,
     launch_with_game_directory(app,data_root,owner,ins,Some(&folder),Some(auth))
 }
 pub fn shared_game_directory(data_root:&Path,owner:&str,ins:&Instance,visitor:&str)->Result<PathBuf,String>{
+    // Two UI operations (e.g. Abrir carpeta + Jugar) must never race to
+    // migrate the same old world. Serializing also prevents overwrites.
+    let _layout_guard=SHARED_PLAYER_LAYOUT_GUARD.lock()
+        .map_err(|_|"No se pudo proteger la carpeta compartida".to_string())?;
     if !clean_segment(visitor)||!clean_segment(owner)||!clean_segment(&ins.project_id){
         return Err("La identidad o proyecto de la instancia compartida es inválida".into());
     }
