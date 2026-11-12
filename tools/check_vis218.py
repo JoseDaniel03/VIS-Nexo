@@ -1,30 +1,71 @@
 #!/usr/bin/env python3
-"""Static acceptance of source-built Horizon integration (NOT Cargo compilation)."""
+"""Static acceptance: portable Horizon GAME from user's fork, not Horizon Launcher.
+
+These are source invariants; Rust build and real install are separately tested
+in GitHub Actions / two-computer smoke testing.
+"""
 from pathlib import Path
 import json
-p=Path(__file__).resolve().parent.parent
-main=(p/'src-tauri/src/main.rs').read_text()
-horizon=(p/'src-tauri/src/horizon.rs').read_text()
-ui=(p/'web/app.js').read_text()
-package=json.loads((p/'package.json').read_text())
-config=json.loads((p/'src-tauri/tauri.conf.json').read_text())
-builder=(p/'tools/horizon_from_source.py').read_text()
-checks={
-  'Source build is automatic before Tauri app build': 'prepare_horizon.mjs build' in config['build']['beforeBuildCommand'],
-  'Source build is automatic during developer launch': 'prepare_horizon.mjs build' in config['build']['beforeDevCommand'],
-  'Compiles the client and preparer, never Horizon Launcher': all(s in builder for s in ["'horizon-client'", "'horizon-prepare'", "'cargo', 'build'", 'git', 'rev-parse']),
-  'Includes source binaries and research lock as Tauri resources': 'resources/horizon/' in config['bundle']['resources'],
-  'Does not bundle copyrighted Minecraft assets': 'minecraft_assets_included' in builder and 'False' in builder,
-  'Source commit and SHA256 binaries recorded': all(s in builder for s in ['source_commit','sha256','digest(', 'research-lock.json']),
-  'Legacy binary directories preserved': 'if ins.horizon_build_dir.is_empty() || ins.horizon_build_dir==SOURCE_BUILD_ID' in horizon and 'verify_managed_build(&folder)?;' in horizon,
-  'Bundled binaries verified before invocation': 'verify_source_build(path)?;' in horizon and 'hash_file_sha256' in horizon,
-  'No release download in automatic project installation': 'horizon::bundled_source_path()?;' in main and 'horizon_download::install(&cloned_app' not in main,
-  'Horizon source ID allowed by backend validation': 'instance.horizon_build_dir!=horizon::SOURCE_BUILD_ID' in main,
-  'VIS Studios game version validation preserved': 'ins.engine=project.engine.clone()' in main,
-  'Fixes E0382 moved project id': 'ins.name=name;ins.project_id=project_id.clone();' in main,
-  'Horizon source button wired in UI': "act==='use-horizon-source'" in ui and 'horizon_source_build' in main,
-  'Versions synchronized': len(set([package['version'],config['version'],__import__('re').search(r'version = "([^"]+)"',(p/'src-tauri/Cargo.toml').read_text()).group(1)]))==1,
+import re
+
+p = Path(__file__).resolve().parent.parent
+main = (p / "src-tauri/src/main.rs").read_text()
+horizon = (p / "src-tauri/src/horizon.rs").read_text()
+download = (p / "src-tauri/src/horizon_download.rs").read_text()
+ui = (p / "web/app.js").read_text()
+checks_script = (p / "tools/horizon_from_source.py").read_text()
+workflow = (p / ".github/workflows/vis-nexo-build.yml").read_text()
+package = json.loads((p / "package.json").read_text())
+config = json.loads((p / "src-tauri/tauri.conf.json").read_text())
+build = config["build"]
+
+checks = {
+    "Tauri never compiles Horizon on launcher build":
+        "prepare_horizon.mjs" not in str(build)
+        and "horizon:source" not in workflow,
+    "Game executable is NOT bundled into the AppImage or NSIS":
+        "resources/horizon/" not in json.dumps(config.get("bundle", {})),
+    "Launcher builds without Java25 or upstream Horizon compilation":
+        "Build Minecraft Horizon GAME" not in workflow
+        and "setup-java" not in workflow,
+    "On-demand game download is part of instance installation":
+        "horizon_download::install_fork(&cloned_app,&dir,&chosen.version)" in main,
+    "Only the user's fork supplies the game":
+        'https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/releases' in download,
+    "No arbitrary game-binary download URLs":
+        'https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}' in download,
+    "GitHub SHA-256 digest is mandatory":
+        'strip_prefix("sha256:")' in download
+        and 'download_stream(app,response,&archive_path,&sha,asset.size)' in download,
+    "No duplicate game engine inside instance":
+        "if source.starts_with(&local_root)" in horizon,
+    "Source manifest bound to the fork and exact release tag":
+        '"source_repo"' in download and 'source_commit' in download
+        and "commit.starts_with(tag.strip_prefix" in download,
+    "Extracted file hashes rechecked before execution":
+        "fork_metadata(&built,&tag)?" in download
+        and "save_game_stamp(&built,&tag)?" in download,
+    "Minecraft assets and Java25 remain instance-owned":
+        "minecraft::horizon_prerequisites" in main
+        and "horizon::prepare" in main,
+    "Preserve legacy imported instance binaries":
+        "crate::horizon_download::verify_managed_build(&folder)?;" in horizon,
+    "User interface offers automatic fork downloads":
+        "Descargar Horizon al instalar" in ui
+        and "use-horizon-source" in ui,
+    "Optional source compilers remain separate from normal installer":
+        all(term in checks_script for term in
+            ["'horizon-client'", "'horizon-prepare'", "'cargo', 'build'", "git", "rev-parse"]),
+    "Minecraft project version validation preserved":
+        "ins.engine=project.engine.clone()" in main,
+    "Tauri, Cargo and npm versions synchronized":
+        len({
+            package["version"], config["version"],
+            re.search(r'version = "([^"]+)"', (p / "src-tauri/Cargo.toml").read_text()).group(1)
+        }) == 1,
 }
-for name,ok in checks.items():print(('OK' if ok else 'FAIL'),name)
-if not all(checks.values()):raise SystemExit('Source contracts 2.18 have failures')
-print(f'VIS Horizon v2.18 static checks: {sum(checks.values())}/{len(checks)}')
+for name, passed in checks.items():
+    print(("OK" if passed else "FAIL"), name)
+if not all(checks.values()):
+    raise SystemExit("VIS Horizon portable static contracts are incomplete")
+print(f"VIS Horizon portable checks: {sum(checks.values())}/{len(checks)}")
