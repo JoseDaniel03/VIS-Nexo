@@ -46,7 +46,8 @@ checks = {
         and "T.event.listen('vis-download-state'" in ui
         and "command('cancel_download',{id:job.id})" in ui,
     "History and current user filtering": "downloadsHistorySection()" in ui
-        and "job.owner===db.user.username" in ui
+        and "job.owner!==db.user.username" in ui
+        and "j.owner===db.user?.username" in ui
         and "command('download_jobs')" in ui,
     "Portable responsive download dock": ".vis-download-dock [data-action=" in css,
     "Both standalone examples use the new module":
