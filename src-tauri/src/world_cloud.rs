@@ -6,7 +6,7 @@ use rand_core::{OsRng,RngCore};
 use sha2::{Digest,Sha256};
 use std::{collections::BTreeMap,fs::{self,File,OpenOptions},io::{self,Read,Write},
     path::{Component,Path,PathBuf},time::{SystemTime,UNIX_EPOCH}};
-use zip::{ZipArchive,ZipWriter,write::FileOptions,CompressionMethod};
+use zip::{ZipArchive,ZipWriter,write::SimpleFileOptions,CompressionMethod};
 
 const MAX_FILES:usize=40_000;
 const MAX_TOTAL:u64=16*1024*1024*1024;
@@ -230,7 +230,7 @@ pub fn backup(game:&Path,world:&str)->Result<CloudBackup,String>{
         let output=OpenOptions::new().write(true).create_new(true).open(&stage).map_err(|e|e.to_string())?;
         let mut zip=ZipWriter::new(output);
         for (path,rel,size,_) in &files{
-            zip.start_file(rel,FileOptions::default().compression_method(CompressionMethod::Deflated)
+            zip.start_file(rel,SimpleFileOptions::default().compression_method(CompressionMethod::Deflated)
                 .unix_permissions(0o600)).map_err(|e|e.to_string())?;
             let mut input=File::open(path).map_err(|e|e.to_string())?;
             let copied=io::copy(&mut input,&mut zip).map_err(|e|e.to_string())?;
