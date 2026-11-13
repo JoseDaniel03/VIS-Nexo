@@ -63,7 +63,9 @@ checks={
         and 'hash!==packageMatch[2]' in worker,
     "R2 catalogs include immutable bundle metadata":
         '"team-packages/"+project.id+".json"' in worker
-        and 'bundle_url:packageInfo.url' in worker,
+        and 'bundle_url:packageInfo.url' in worker
+        and "candidate.minecraft_version===project.mc_version" in worker
+        and '"X-VIS-Minecraft-Version",project.mc_version.as_str()' in cloud,
     "Native publication rechecks file and catalog digest":
         "pub fn upload_team_pack(" in cloud
         and 'format!("{:x}",digest.finalize())!=pack.sha256' in cloud
