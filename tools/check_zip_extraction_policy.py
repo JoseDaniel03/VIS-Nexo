@@ -2,8 +2,8 @@
 """Fail CI if old zip crate's vulnerable extraction helpers are introduced.
 
 RUSTSEC-2026-0367, -0368, -0369 and -0429 involve ZipArchive::extract
-or ZipStreamReader::extract. This is a defensive guard, not a substitute
-for upgrading the zip crate; cargo audit must continue reporting exposure.
+or ZipStreamReader::extract. This is a defense-in-depth guard; the crate was
+migrated to zip 9.4.2 and cargo audit independently checks its locked version.
 """
 from pathlib import Path
 import re
@@ -25,4 +25,4 @@ for path in root.rglob("*.rs"):
 if offenders:
     print("Unsafe zip extraction API found:\n" + "\n".join(offenders), file=sys.stderr)
     raise SystemExit(1)
-print("ZIP extraction policy: manual validated members only. Dependency upgrade still required.")
+print("ZIP extraction policy: manual validated members only; audit validates the dependency.")
