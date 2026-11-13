@@ -381,7 +381,7 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
         let mut preserved=0usize;
         for index in 0..zip.len(){
             let mut file=zip.by_index(index).map_err(|e|e.to_string())?;
-            let name=file.name().to_owned();
+            let name=file.name().map_err(|e|e.to_string())?.into_owned();
             if name==".bsconfig"{continue;}
             let expected=by_name.get(&name).ok_or("Entrada ZIP no declarada")?;
             if !archive_paths.insert(name.clone())||file.is_dir()
