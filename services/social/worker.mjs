@@ -411,7 +411,7 @@ async function lookupUser(db, username) {
   if (!user) bad(404, "Account not found");
   return user;
 }
-async function friendRequest(request, db, user) {
+async function friendRequest(request, db, user, env, ctx) {
   await rateLimit(db, request, "friend-request:" + user.id, 30);
   const { username } = await parseBody(request);
   const peer = await lookupUser(db, username);
@@ -428,9 +428,10 @@ async function friendRequest(request, db, user) {
   await db.prepare(
     "INSERT INTO friend_requests (id,sender_id,recipient_id,status) VALUES (?,?,?,'pending')"
   ).bind(crypto.randomUUID(), user.id, peer.id).run();
+  await notifyUser(env,ctx,peer.id);
   return reply({ ok: true, to: peer.username }, 201);
 }
-async function friendAccept(request, db, user) {
+async function friendAccept(request, db, user, env, ctx) {
   const { username } = await parseBody(request);
   const peer = await lookupUser(db, username);
   const pair = [user.id, peer.id].sort();
@@ -445,6 +446,7 @@ async function friendAccept(request, db, user) {
     db.prepare("UPDATE friend_requests SET status='accepted',updated_at=? WHERE id=? AND status='pending'")
       .bind(now(), exists.id)
   ]);
+  await notifyUser(env,ctx,peer.id);
   return reply({ ok: true, friend: peer.username });
 }
 async function friendAlias(request, db, user) {
@@ -866,8 +868,8 @@ export default {
       if (method === "POST" && path === "/v1/skins/get") return await getSkin(request,db,user);
       if (method === "POST" && path === "/v1/skins/delete") return await deleteSkin(request,db,user);
       if (method === "POST" && path === "/v1/keys") return await setKey(request, db, user);
-      if (method === "POST" && path === "/v1/friends/request") return await friendRequest(request, db, user);
-      if (method === "POST" && path === "/v1/friends/accept") return await friendAccept(request, db, user);
+      if (method === "POST" && path === "/v1/friends/request") return await friendRequest(request, db, user,env,ctx);
+      if (method === "POST" && path === "/v1/friends/accept") return await friendAccept(request, db, user,env,ctx);
       if (method === "POST" && path === "/v1/friends/alias") return await friendAlias(request, db, user);
       if (method === "POST" && path === "/v1/presence") return await presence(request, db, user);
       if (method === "POST" && path === "/v1/messages/send") return await sendMessage(request, db, user,env,ctx);
