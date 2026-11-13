@@ -679,6 +679,9 @@ function socialDisplayName(username){
  const configured=social.state()?.display_name?.trim();
  return configured&&configured!==username?configured:displayAccount(username);
 }
+function publicVisHandle(){
+ return social.state()?.public_handle||db.user?.username||'';
+}
 function userAvatar(size=36){return socialAvatarHtml(db.user?.username,size,true)}
 function sidebar(){
  const personal = libraryMode==='user';
@@ -882,7 +885,7 @@ function profilePage(){
        '<button type="button" class="avatar-overlay-edit" data-action="edit-avatar" aria-label="Cambiar avatar">'+I('edit',18)+'</button></div>'+
     '<div class="profile-titles"><span class="page-eyebrow">IDENTIDAD VIS</span>'+
       '<h2>'+esc(socialDisplayName(username))+'</h2>'+
-      '<div class="vis-handle">Identidad pública de VIS Nexo</div>'+
+      '<div class="vis-handle">@'+esc(publicVisHandle())+' · VIS Ceibo</div>'+
       '<div class="vis-profile-chips"><span class="role-chip">'+humanRole(db.user?.role)+'</span>'+
         '<span class="role-chip ghost">'+esc(socialLabel)+'</span>'+
         '</div>'+
@@ -894,9 +897,11 @@ function profilePage(){
   '<div class="profile-v21-grid">'+
    '<section class="surface-card profile-identity-card">'+
     '<div class="card-heading">'+I('users',20)+' Comunidad e identidad</div>'+
-    '<p class="muted">Tu usuario VIS es el que tus amigos utilizan para encontrarte. El gamertag Microsoft no reemplaza esta identidad.</p>'+
+    '<p class="muted">Compartí tu @usuario VIS. Podés cambiarlo sin perder amigos ni chats. Tu ID permanente es distinta del nombre oficial de Minecraft.</p>'+
     '<div class="profile-status-rows">'+
       '<div><span>VIS Social</span><strong>'+esc(socialLabel)+'</strong></div>'+
+      '<div><span>@usuario VIS</span><strong>@'+esc(publicVisHandle())+'</strong></div>'+
+      '<div><span>ID permanente</span><strong>'+esc(socialId||'Disponible al conectar VIS Social')+'</strong></div>'+
       '<div><span>Minecraft Premium</span><strong>'+esc(premium)+'</strong></div>'+
       '<div><span>Foto pública</span><strong>'+esc(socialAvatars.get(username)?.url?'Sincronizada':'Sin foto sincronizada')+'</strong></div>'+
     '</div>'+
@@ -959,9 +964,12 @@ function editProfileDialog(){
  '<div class="modal-body profile-edit-body">'+
  '<section><h3>'+I('user',18)+' Identidad visual</h3>'+
   '<div class="profile-edit-preview">'+userAvatar(64)+'<span><strong>'+esc(socialDisplayName(user.username))+
-   '</strong><small>@'+esc(user.username)+'</small></span></div>'+
+   '</strong><small>@'+esc(publicVisHandle())+'</small></span></div>'+
   '<label class="vis-display-name-label">Nombre visible en VIS Portals <input id="social-display-name" type="text" minlength="2" maxlength="32" value="'+attr(social.state()?.display_name&&social.state()?.display_name!==user.username?social.state().display_name:socialDisplayName(user.username))+'" placeholder="Nombre visible" autocomplete="off" '+(connected?'':'disabled')+'/></label>'+
   '<div class="profile-quick-actions"><button class="primary-btn" data-action="social-save-display-name" '+(connected?'':'disabled')+'>Guardar nombre visible</button></div>'+
+  '<label class="vis-display-name-label">@usuario público (3-24 caracteres)<input id="social-public-handle" type="text" minlength="3" maxlength="24" pattern="[a-zA-Z0-9_]{3,24}" value="'+attr(publicVisHandle())+'" autocomplete="off" '+(connected?'':'disabled')+'/></label>'+
+  '<p class="muted">Podés cambiarlo cada 7 días. La identidad permanente, tus amigos y mensajes cifrados no cambian.</p>'+
+  '<div class="profile-quick-actions"><button class="outline-btn" data-action="social-save-public-handle" '+(connected?'':'disabled')+'>Actualizar @usuario VIS</button></div>'+
   '<div class="profile-quick-actions"><button class="outline-btn" data-action="edit-avatar">'+I('edit',15)+' Avatar y emblemas</button>'+
   '<button class="outline-btn" data-action="import-profile-banner">'+I('image',15)+' Cambiar portada</button></div>'+
   '<div class="profile-quick-actions">'+(connected?'<button class="primary-btn" data-action="social-upload-avatar">'+I('upload',15)+' Publicar foto en VIS Social</button>':
@@ -985,8 +993,8 @@ function editProfileDialog(){
     '</div><small class="muted">Las capas importadas localmente no se agregan a tu cuenta oficial Mojang.</small></details>'+
  '</section>'+
  '<section><h3>'+I('users',18)+' Compartir identidad</h3>'+
-  '<p class="muted">Compartí tu usuario VIS para recibir solicitudes de amistad.</p>'+
-  '<button class="outline-btn" data-action="social-copy-handle">'+I('copy',15)+' Copiar @'+esc(user.username)+'</button>'+
+  '<p class="muted">Compartí tu @usuario. El nombre Premium de Minecraft es independiente.</p>'+
+  '<button class="outline-btn" data-action="social-copy-handle">'+I('copy',15)+' Copiar @'+esc(publicVisHandle())+'</button>'+
  '</section>'+
  '</div><footer class="modal-footer"><button class="primary-btn" data-action="close-modal">Listo</button></footer></div></div>';
 }
