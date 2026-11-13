@@ -56,12 +56,15 @@ pub fn begin(app:&AppHandle,owner:&str,label:&str)->Result<DownloadGuard,String>
     let _=app.emit("vis-download-state",job);
     Ok(DownloadGuard{app:app.clone(),id,finished:false})
 }
+fn final_status(failed:bool,cancelled:bool)->&'static str{
+    if failed&&cancelled{"cancelled"}else if failed{"failed"}else{"completed"}
+}
 fn end(app:&AppHandle,id:u64,failed:bool){
     let Ok(mut state)=registry().lock() else{return};
     let Some(mut job)=state.active.take() else{return};
     if job.id!=id {state.active=Some(job);return;}
     let cancelled=job.cancel_requested;
-    job.status=(if failed&&cancelled{"cancelled"}else if failed{"failed"}else{"completed"}).to_owned();
+    job.status=final_status(failed,cancelled).to_owned();
     job.finished_at=Some(now());
     job.detail=(if failed&&cancelled{"Cancelada. Podés reintentar: los archivos verificados existentes se conservan."}
                else if failed{"La instalación terminó con un error. Revisá el aviso del launcher."}
@@ -83,14 +86,17 @@ impl Drop for DownloadGuard {
         if !self.finished{end(&self.app,self.id,true);}
     }
 }
-pub fn list(owner:&str)->Result<Vec<DownloadJob>,String>{
-    let state=registry().lock().map_err(|_|"Gestor de descargas bloqueado".to_string())?;
+fn visible_jobs(state:&Registry,owner:&str)->Vec<DownloadJob>{
     let mut results=Vec::new();
     if let Some(active)=state.active.as_ref().filter(|job|job.owner==owner){
         results.push(active.clone());
     }
     results.extend(state.history.iter().filter(|job|job.owner==owner).cloned());
-    Ok(results)
+    results
+}
+pub fn list(owner:&str)->Result<Vec<DownloadJob>,String>{
+    let state=registry().lock().map_err(|_|"Gestor de descargas bloqueado".to_string())?;
+    Ok(visible_jobs(&state,owner))
 }
 pub fn cancel(app:&AppHandle,owner:&str,id:u64)->Result<DownloadJob,String>{
     let mut state=registry().lock().map_err(|_|"Gestor de descargas bloqueado".to_string())?;
@@ -130,6 +136,26 @@ mod tests {
         let store=Registry::default();
         assert!(store.active.is_none());
         assert!(store.history.is_empty());
+    }
+    #[test]
+    fn cancellation_has_distinct_terminal_status(){
+        assert_eq!(final_status(false,false),"completed");
+        assert_eq!(final_status(true,false),"failed");
+        assert_eq!(final_status(true,true),"cancelled");
+        assert_eq!(final_status(false,true),"completed");
+    }
+    #[test]
+    fn recent_downloads_are_never_shared_across_profiles(){
+        let mk=|owner:&str,id:u64|DownloadJob{
+            id,owner:owner.into(),label:"Minecraft".into(),stage:"init".into(),
+            detail:String::new(),completed:0,total:0,status:"completed".into(),
+            cancel_requested:false,started_at:0,finished_at:None,
+        };
+        let registry=Registry{next_id:2,active:Some(mk("alice",1)),history:vec![mk("bob",2)]};
+        assert_eq!(visible_jobs(&registry,"alice").len(),1);
+        assert_eq!(visible_jobs(&registry,"alice")[0].owner,"alice");
+        assert_eq!(visible_jobs(&registry,"bob")[0].owner,"bob");
+        assert!(visible_jobs(&registry,"unknown").is_empty());
     }
     #[test]
     fn history_limit_does_not_capture_external_credentials(){
