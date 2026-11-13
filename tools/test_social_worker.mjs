@@ -132,9 +132,26 @@ assert.equal((await call('/v1/realtime/connect?ticket='+wsTicket)).status,400,
   'no websocket protocol downgrade');
 assert.equal((await call('/v1/account/display',{display_name:'Mi Cuenta Premium'},alice.token)).status,200);
 assert.equal((await call('/v1/account/display',{display_name:'  '},alice.token)).status,400);
+// A mutable @handle never changes the account's internal identity or E2EE.
+assert.equal((await call('/v1/account/handle',{handle:'alice_new'})).status,401);
+assert.equal((await call('/v1/account/handle',{handle:'admin'},alice.token)).status,409);
+assert.equal((await call('/v1/account/handle',{handle:'bob'},alice.token)).status,409);
+assert.equal((await call('/v1/account/handle',{handle:'bad handle'},alice.token)).status,400);
+const aliceBefore=await call('/v1/account',undefined,alice.token);
+assert.equal((await call('/v1/account/handle',{handle:'alice_new'},alice.token)).status,200);
+const aliceAfter=await call('/v1/account',undefined,alice.token);
+assert.equal(aliceAfter.data.account.username,'alice');
+assert.equal(aliceAfter.data.account.public_handle,'alice_new');
+assert.equal(aliceAfter.data.account.public_id,aliceBefore.data.account.public_id);
+assert.equal((await call('/v1/account/handle',{handle:'alice_second'},alice.token)).status,429);
+assert.equal((await call('/v1/account/handle',{handle:'alice_new'},bob.token)).status,409);
+assert.equal((await call('/v1/account/handle',{handle:'bob_public'},bob.token)).status,200);
+const bobId=(await call('/v1/account',undefined,bob.token)).data.account.public_id;
+assert.equal((await call('/v1/account/handle',{handle:bobId},alice.token)).status,409);
+assert.equal((await call('/v1/state',undefined,alice.token)).data.public_handle,'alice_new');
 assert.equal((await call('/v1/state',undefined,alice.token)).data.display_name,'Mi Cuenta Premium');
 assert.equal((await call('/v1/keys', {public_key: 'not_a_key'}, alice.token)).status, 400);
-assert.equal((await call('/v1/friends/request', {username: 'bob'}, alice.token)).status, 201);
+assert.equal((await call('/v1/friends/request', {username: 'bob_public'}, alice.token)).status, 201);
 response = await call('/v1/state', undefined, bob.token);
 assert.deepEqual(response.data.incoming_requests, ['alice']);
 assert.equal((await call('/v1/friends/accept', {username: 'alice'}, alice.token)).status, 404);
