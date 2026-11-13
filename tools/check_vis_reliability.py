@@ -23,7 +23,7 @@ checks = {
         and "#[serde(default)] pub auto_backup: bool" in accounts,
     "Owner-only VIS command registered and typed":
         "fn set_instance_auto_backup(" in main
-        and "instance.source_owner.is_empty()" in main
+        and "i.source_owner.is_empty()" in main
         and "set_instance_auto_backup, backup_instance_data" in main
         and "set_instance_auto_backup:" in types,
     "UI exposes opt-in for personal and published projects":
