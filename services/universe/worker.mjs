@@ -5,6 +5,8 @@ export default { fetch: async function universeServe(request, env) {
   const url=new URL(request.url);
   const extTypes={png:"image/png",jpg:"image/jpeg",webp:"image/webp"};
   const assetPattern=/^\/assets\/([a-f0-9]{64})\.(png|jpg|webp)$/;
+  const packagePattern=/^\/packs\/([a-z0-9][a-z0-9_-]{0,99})\/([a-f0-9]{64})\.zip$/;
+  const packageMatch=packagePattern.exec(url.pathname);
   if(request.method==="GET" && url.pathname==="/catalog.json"){
     const object=await env.UNIVERSE.get("catalog.json");
     return object?new Response(object.body,{headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-cache, max-age=0"}}):reply({format_version:1,projects:[]});
@@ -14,7 +16,18 @@ export default { fetch: async function universeServe(request, env) {
     const ext=assetPattern.exec(url.pathname)[2];
     return object?new Response(object.body,{headers:{"Content-Type":extTypes[ext],"Cache-Control":"public, max-age=31536000, immutable","X-Content-Type-Options":"nosniff"}}):reply({error:"Not found"},404);
   }
-  if(request.method!=="POST"||url.pathname!=="/publish")return reply({error:"Not found"},404);
+  if(request.method==="GET"&&packageMatch){
+    const object=await env.UNIVERSE.get(url.pathname.slice(1));
+    return object?new Response(object.body,{headers:{
+      "Content-Type":"application/zip",
+      "Content-Disposition":"attachment",
+      "Cache-Control":"public, max-age=31536000, immutable",
+      "X-Content-Type-Options":"nosniff"
+    }}):reply({error:"Not found"},404);
+  }
+  if(!(request.method==="POST"&&url.pathname==="/publish")
+      &&!(request.method==="PUT"&&packageMatch))
+    return reply({error:"Not found"},404);
   const secret=env.VIS_PUBLISH_TOKEN;
   const supplied=request.headers.get("Authorization")||"";
   const expected=typeof secret==="string"&&secret.length>=32?`Bearer ${secret}`:"";
@@ -23,6 +36,37 @@ export default { fetch: async function universeServe(request, env) {
   const b=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(expected)));
   let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
   if(diff!==0)return reply({error:"Unauthorized"},401);
+  if(request.method==="PUT"){
+    const limit=32*1024*1024,header=Number(request.headers.get("Content-Length")||0);
+    if(header>limit)return reply({error:"Pack exceeds 32 MiB"},413);
+    let bytes;
+    try{
+      const reader=request.body?.getReader();
+      if(!reader)return reply({error:"Archive required"},400);
+      let total=0;const parts=[];
+      while(true){
+        const {done,value}=await reader.read();if(done)break;
+        total+=value.byteLength;
+        if(total>limit){await reader.cancel();return reply({error:"Pack exceeds 32 MiB"},413);}
+        parts.push(value);
+      }
+      bytes=new Uint8Array(total);let offset=0;
+      for(const part of parts){bytes.set(part,offset);offset+=part.byteLength;}
+    }catch{return reply({error:"Invalid upload stream"},400);}
+    // Deep ZIP/path validation happens during construction in VIS Nexo and at
+    // import, before any file can be installed. R2 remains a byte store.
+    if(bytes.length<22||bytes[0]!==80||bytes[1]!==75||bytes[2]!==3||bytes[3]!==4)
+      return reply({error:"Expected VIS ZIP project package"},400);
+    const hash=[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))]
+      .map(x=>x.toString(16).padStart(2,"0")).join("");
+    if(hash!==packageMatch[2])return reply({error:"Package digest mismatch"},422);
+    const key=url.pathname.slice(1);
+    await env.UNIVERSE.put(key,bytes,{httpMetadata:{contentType:"application/zip"}});
+    const pointer={url:url.origin+url.pathname,sha256:hash,size_bytes:bytes.length};
+    await env.UNIVERSE.put("team-packages/"+packageMatch[1]+".json",JSON.stringify(pointer),{
+      httpMetadata:{contentType:"application/json; charset=utf-8"}});
+    return reply({ok:true,project_id:packageMatch[1],...pointer});
+  }
   const MAX_SIZE=18*1024*1024;
   let value;
   try{
@@ -65,7 +109,23 @@ export default { fetch: async function universeServe(request, env) {
     try{for(const field of ["banner_path","logo_path","icon_path"])project[field]=await publishImage(project[field]);}
     catch{return reply({error:"Invalid project image"},400);}
     const version=new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14);
-    out.push({id:project.id,name:project.title,description:project.description,version,minecraft_version:project.mc_version,loader:project.loader,bundle_url:"",sha256:"",size_bytes:0,project});
+    let packageInfo={url:"",sha256:"",size_bytes:0};
+    const pointer=await env.UNIVERSE.get("team-packages/"+project.id+".json");
+    if(pointer){
+      try{
+        const candidate=JSON.parse(await pointer.text());
+        if(candidate&&typeof candidate.url==="string"
+            &&candidate.url.startsWith(url.origin+"/packs/"+project.id+"/")
+            &&/^[a-f0-9]{64}$/.test(candidate.sha256)
+            &&Number.isSafeInteger(candidate.size_bytes)&&candidate.size_bytes>0
+            &&candidate.size_bytes<=32*1024*1024){
+          packageInfo=candidate;
+        }
+      }catch{return reply({error:"Invalid team package metadata"},500);}
+    }
+    out.push({id:project.id,name:project.title,description:project.description,version,
+      minecraft_version:project.mc_version,loader:project.loader,
+      bundle_url:packageInfo.url,sha256:packageInfo.sha256,size_bytes:packageInfo.size_bytes,project});
   }
   const doc=JSON.stringify({format_version:1,projects:out});
   if(new TextEncoder().encode(doc).length>2*1024*1024)return reply({error:"Catalog too large"},413);
