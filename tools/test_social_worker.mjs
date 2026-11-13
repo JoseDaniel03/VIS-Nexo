@@ -448,6 +448,12 @@ assert.equal((await call('/v1/admin/accounts/disable',{
 assert.equal((await call('/v1/state',undefined,bob.token)).status,401,
  'revoked sessions should not survive disable');
 assert.equal(DB.sqlite.prepare("SELECT count(*) AS n FROM admin_audit").get().n>=4,true);
+assert.equal((await call('/v1/account/mfa/verify',{
+  recovery_code:aliceRecoveryCodes[0]
+},alice.token)).status,200,'a backup code can provide step-up authorization');
+assert.equal((await call('/v1/account/mfa/verify',{
+  recovery_code:aliceRecoveryCodes[0]
+},alice.token)).status,401,'a backup code cannot be replayed');
 assert.equal((await call('/v1/auth/logout',{},alice.token)).status,200);
 assert.equal((await call('/v1/state',undefined,alice.token)).status,401);
 
@@ -726,6 +732,21 @@ const emailReminder=await call('/v1/recovery/start',{
 });
 assert.equal(emailReminder.status,200);
 assert(recoveryDeliveries.at(-1).text.includes('recover_me'));
+const oldCount=recoveryDeliveries.length;
+assert.equal((await call('/v1/account/email/request',{
+  email:'new-recovery@example.org'
+},newLogin.data.token)).status,200);
+assert.equal(recoveryDeliveries.length,oldCount+2,'email change requires approval from both mailboxes');
+const newApproval=recoveryDeliveries.at(-1).text.match(/[A-Za-z0-9_-]{43}/)[0];
+const oldApproval=recoveryDeliveries.at(-2).text.match(/[A-Za-z0-9_-]{43}/)[0];
+assert.equal((await call('/v1/recovery/email/verify',{code:newApproval})).data.verified,false,
+ 'new mailbox alone must not take over the account');
+assert.equal((await call('/v1/account',undefined,newLogin.data.token)).data.account.verified_email,
+ 'recover.me@example.org','verified email should not change without old approval');
+assert.equal((await call('/v1/recovery/email/verify',{code:oldApproval})).data.verified,true);
+assert.equal((await call('/v1/account',undefined,newLogin.data.token)).data.account.verified_email,
+ 'new-recovery@example.org');
+
 assert(!recoveryDeliveries.some(d=>JSON.stringify(d).includes(oldSalt)),
  'email must never contain password verifier salts');
 assert.equal((await call('/v1/account/mfa/verify',{code:'000000'},newLogin.data.token)).status,409,
