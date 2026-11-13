@@ -146,7 +146,7 @@ fn create_internal(game:&Path,automatic:bool)->Result<Option<BackupInfo>,String>
     let target=backups.join(&id);
     if target.exists(){return Err("Ya existe una copia con este identificador".into());}
     let partial=backups.join(format!("{id}.partial"));
-    let result=(||{
+    let result:Result<BackupInfo,String>=(||{
         let file=OpenOptions::new().write(true).create_new(true).open(&partial)
             .map_err(|e|e.to_string())?;
         let mut zip=ZipWriter::new(file);
