@@ -624,11 +624,14 @@ async function changePublicHandle(request,db,user){
   const payload=await parseBody(request,512);
   const handle=typeof payload.handle==="string"?payload.handle.trim().toLowerCase():"";
   if(!/^[a-z0-9_]{3,24}$/.test(handle))bad(400,"Usá entre 3 y 24 letras, números o _");
-  if(RESERVED_HANDLES.has(handle))bad(409,"Este identificador está reservado");
   const current=await db.prepare(
     "SELECT username,public_handle,public_handle_updated_at FROM social_users WHERE id=? AND disabled_at IS NULL"
   ).bind(user.id).first();
   if(!current)bad(403,"Cuenta inhabilitada");
+  // Reserved official handles can be retained only by the same account that
+  // already owns that exact immutable username (e.g. VIS STUDIOS).
+  if(RESERVED_HANDLES.has(handle)&&handle!==current.username)
+    bad(409,"Este identificador está reservado");
   if(current.public_handle===handle)
     return reply({ok:true,public_handle:handle,next_change_at:Math.max(0,current.public_handle_updated_at+HANDLE_COOLDOWN)});
   if(current.public_handle_updated_at&&now()-current.public_handle_updated_at<HANDLE_COOLDOWN)
