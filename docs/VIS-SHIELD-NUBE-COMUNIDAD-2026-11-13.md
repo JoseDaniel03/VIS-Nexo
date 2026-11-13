@@ -74,3 +74,24 @@ esta comprobación antes de considerar restringidos los servidores.
 6. Revisión de conflictos con cambios concurrentes sobre main antes de fusionar.
 7. Decidir licencia OSS e iniciar solicitud de SignPath Foundation, sin publicar
    ni copiar claves privadas al repositorio.
+
+## Avance de seguridad y compatibilidad ZIP (continuación 13/11/2026)
+- RustSec detectó las vulnerabilidades RUSTSEC-2026-0367, 0368, 0369 y 0429
+  en zip 0.6.6 (en particular, extracción automática y enlaces simbólicos).
+- Se migró la dependencia directa y el lockfile a **zip 9.4.2**. La API nueva
+  devuelve errores en `ZipFile::name()`, que ya se manejan de manera explícita.
+- Se mantuvo la extracción manual, control de rutas, tamaño y tipo de archivo.
+  `tools/check_zip_extraction_policy.py` impide volver a usar extracción automática.
+- El bloqueo GitHub Actions RustSec **no debe desactivarse ni ignorarse**; debe
+  pasar con el lockfile nuevo antes de fusionar.
+- Nube ahora usa un identificador aleatorio estable por mundo, conservado dentro
+  de la instancia portable. Rechaza symlinks y junctions hacia rutas ajenas.
+- El panel muestra mundos vinculados incluso cuando desapareció su carpeta
+  `saves`, permitiendo restaurar desde una copia si se conservó la configuración.
+- Un jugador sin la metadata `.vis/world-cloud.json` todavía necesita
+  importación manual de un respaldo externo; no está implementada la
+  recuperación automática de cuenta/proveedor entre PC distintas.
+- Sigue pendiente autenticar al proveedor desde Nexo mediante OAuth PKCE,
+  confirmar la subida remota, cifrar las copias antes de enviarlas y hacer
+  pruebas de recuperación ante un apagón o corte de sincronización.
+- No se modificó el fork Horizon ni se fusionó este PR a main.
