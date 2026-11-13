@@ -37,6 +37,19 @@ export default { fetch: async function universeServe(request, env) {
   let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
   if(diff!==0)return reply({error:"Unauthorized"},401);
   if(request.method==="PUT"){
+    const release={
+      engine:request.headers.get("x-vis-engine"),
+      minecraft_version:request.headers.get("x-vis-minecraft-version"),
+      loader:request.headers.get("x-vis-loader"),
+      loader_version:request.headers.get("x-vis-loader-version")||""
+    };
+    if(!["java","horizon"].includes(release.engine)
+      ||!["vanilla","fabric","horizon"].includes(release.loader)
+      ||!(/^[a-zA-Z0-9._+-]{1,40}$/.test(release.minecraft_version||""))
+      ||!(/^[a-zA-Z0-9._+-]{0,50}$/.test(release.loader_version))
+      ||(release.engine==="horizon"&&(release.loader!=="horizon"||release.minecraft_version!=="26.3"))
+      ||(release.engine==="java"&&release.loader==="horizon"))
+      return reply({error:"Invalid project version or loader"},400);
     const limit=32*1024*1024,header=Number(request.headers.get("Content-Length")||0);
     if(header>limit)return reply({error:"Pack exceeds 32 MiB"},413);
     let bytes;
@@ -62,7 +75,7 @@ export default { fetch: async function universeServe(request, env) {
     if(hash!==packageMatch[2])return reply({error:"Package digest mismatch"},422);
     const key=url.pathname.slice(1);
     await env.UNIVERSE.put(key,bytes,{httpMetadata:{contentType:"application/zip"}});
-    const pointer={url:url.origin+url.pathname,sha256:hash,size_bytes:bytes.length};
+    const pointer={url:url.origin+url.pathname,sha256:hash,size_bytes:bytes.length,...release};
     await env.UNIVERSE.put("team-packages/"+packageMatch[1]+".json",JSON.stringify(pointer),{
       httpMetadata:{contentType:"application/json; charset=utf-8"}});
     return reply({ok:true,project_id:packageMatch[1],...pointer});
@@ -118,7 +131,11 @@ export default { fetch: async function universeServe(request, env) {
             &&candidate.url.startsWith(url.origin+"/packs/"+project.id+"/")
             &&/^[a-f0-9]{64}$/.test(candidate.sha256)
             &&Number.isSafeInteger(candidate.size_bytes)&&candidate.size_bytes>0
-            &&candidate.size_bytes<=32*1024*1024){
+            &&candidate.size_bytes<=32*1024*1024
+            &&candidate.engine===project.engine
+            &&candidate.minecraft_version===project.mc_version
+            &&candidate.loader===project.loader
+            &&candidate.loader_version===(project.loader_version||"")){
           packageInfo=candidate;
         }
       }catch{return reply({error:"Invalid team package metadata"},500);}
