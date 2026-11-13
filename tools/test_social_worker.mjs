@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import {deflateSync} from 'node:zlib';
-import worker from '../services/social/worker.mjs';
+import worker, { VisRealtimeRoom } from '../services/social/worker.mjs';
 
 class D1Database {
   constructor() {
@@ -398,4 +398,56 @@ assert(notifications.length>=1,'Encrypted message delivery should signal recipie
 DB.sqlite.exec("UPDATE realtime_tickets SET expires_at=1");
 await worker.scheduled({},env);
 assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get().n,0);
+// Simulated Cloudflare WebSocket Hibernation runtime: Node's standard Response
+// forbids HTTP 101, so only this isolated section substitutes the DO primitives.
+// The actual edge upgrade/hibernation still requires Wrangler/Cloudflare tests.
+{
+  const originalPair=globalThis.WebSocketPair, originalResponse=globalThis.Response;
+  const accepted=[];
+  const state={
+    getWebSockets:()=>accepted,
+    acceptWebSocket:socket=>accepted.push(socket)
+  };
+  const room=new VisRealtimeRoom(state);
+  try{
+    globalThis.WebSocketPair=class {
+      constructor(){
+        this[0]={sent:[],closed:[],send(value){this.sent.push(value);},
+          close(code,reason){this.closed.push({code,reason});}};
+        this[1]={sent:[],closed:[],send(value){this.sent.push(value);},
+          close(code,reason){this.closed.push({code,reason});}};
+      }
+    };
+    globalThis.Response=class {
+      constructor(body,options={}) {
+        this.status=options.status??200;
+        this.body=body;
+        this.webSocket=options.webSocket;
+      }
+    };
+    const upgrade=()=>new Request(origin+'/_vis/subscribe',{
+      headers:{Upgrade:'websocket'}
+    });
+    assert.equal((await room.fetch(new Request(origin+'/_vis/subscribe'))).status,404,
+      'Durable Object rejects non-WebSocket requests');
+    const first=await room.fetch(upgrade());
+    assert.equal(first.status,101,'DO must return a WebSocket upgrade');
+    assert(first.webSocket,'WebSocket client endpoint returned by DO');
+    assert.equal(accepted.length,1);
+    assert.deepEqual(accepted[0].sent,['{"type":"ready"}']);
+    room.webSocketMessage(accepted[0],'ping');
+    assert(accepted[0].sent.includes('pong'),'heartbeat acknowledged');
+    assert.equal((await room.fetch(new Request(origin+'/_vis/notify',{method:'POST'}))).status,204);
+    assert(accepted[0].sent.includes('{"type":"wakeup"}'),
+      'DO sends notification only, no sender identity or ciphertext');
+    for(let i=1;i<6;i++)assert.equal((await room.fetch(upgrade())).status,101);
+    assert.equal((await room.fetch(upgrade())).status,429,'per-user socket cap');
+    room.webSocketMessage(accepted[0],JSON.stringify({type:'message',body:'plaintext'}));
+    assert(accepted[0].closed.some(entry=>entry.code===1008),
+      'DO must never accept chat text or application commands');
+  }finally{
+    globalThis.WebSocketPair=originalPair;
+    globalThis.Response=originalResponse;
+  }
+}
 console.log('VIS Social authentication, encrypted delivery and D1 migrations passed');
