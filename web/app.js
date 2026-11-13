@@ -1804,6 +1804,51 @@ root.addEventListener('submit',async event=>{
   return;
  }
  if(form.id==='cloud-catalog-form'){try{await command('configure_cloud_catalog',{url:String(formData.get('url')||'').trim()});message('Catálogo configurado');await refreshCloudCatalog();}catch(e){message(String(e),true);}return;}
+ if(form.id==='team-publish-form'){
+   if(!native||!isAdmin())return;
+   const value=String(formData.get('instance')||'');
+   let ids;try{ids=JSON.parse(value);}catch{ids=null;}
+   if(!Array.isArray(ids)||ids.length!==2||ids.some(x=>typeof x!=='string'||!x))
+     return message('Seleccioná una instancia del proyecto.',true);
+   const [projectId,name]=ids;
+   const options={include_packs:formData.has('include_packs'),
+     include_servers:formData.has('include_servers'),include_waypoints:formData.has('include_waypoints')};
+   const signature=JSON.stringify([projectId,name,options]);
+   const action=event.submitter?.dataset.teamAction||'preview';
+   await onceOperation('team:'+action+':'+signature,async()=>{
+     try{
+       if(action==='preview'){
+         const report=await command('preview_team_project',{projectId,name,options});
+         teamReview={signature,report};
+         const panel=document.getElementById('vis-team-review');
+         if(panel)panel.innerHTML='<p><b>'+report.files.length+' archivo(s), '+
+           fmtBytes(report.total_bytes)+'</b></p>'+
+           '<p>'+report.warnings.map(esc).join(' ')+'</p>'+
+           (report.excluded?.length?'<p>Excluidos: '+report.excluded.slice(0,12).map(esc).join(', ')+'</p>':'')+
+           '<details><summary>Revisar rutas del ZIP</summary>'+
+           report.files.slice(0,100).map(f=>'<div>'+esc(f)+'</div>').join('')+
+           (report.files.length>100?'<div>… y más archivos</div>':'')+'</details>';
+         message('Vista previa disponible. Revisá la lista antes de publicar.');
+         return;
+       }
+       if(action!=='publish')return;
+       if(!teamReview||teamReview.signature!==signature)
+         return message('Cambió la selección; primero revisá los archivos.',true);
+       const token=String(formData.get('token')||'');
+       if(token.length<32)return message('Ingresá la credencial de publicación VIS Universe.',true);
+       if(!window.confirm('¿Publicar '+teamReview.report.files.length+
+         ' archivos de '+projectId+' en R2? Quedarán disponibles para los usuarios del catálogo.'))return;
+       const pack=await command('publish_team_project',{projectId,name,options,token});
+       teamReview=null;form.reset();
+       const panel=document.getElementById('vis-team-review');
+       if(panel)panel.textContent='Publicado · '+pack.files+' archivos · '+
+         fmtBytes(pack.size_bytes)+' · SHA-256 '+pack.sha256.slice(0,16)+'…';
+       message('Paquete de equipo y catálogo publicados.');
+       void refreshCloudCatalog(true);
+     }catch(error){message('VIS Team: '+String(error),true);}
+   });
+   return;
+ }
  if(form.id==='universe-publish-form'){
   if(!isAdmin()||!native)return;
   const token=String(formData.get('token')||'');
