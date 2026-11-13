@@ -1817,6 +1817,31 @@ async fn publish_team_project(
     }).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
+async fn apply_team_project(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    allow_servers:bool,allow_waypoints:bool
+)->Result<team_pack::TeamApplyReport,String>{
+    let (root,game,project)={
+        let s=locked(&state)?;
+        let (owner,instance)=checked_instance(&s,&project_id,&name,false)?;
+        if !instance.source_owner.is_empty(){return Err("Solo podés modificar tus propias instancias".into());}
+        let project=s.project(&project_id).ok_or("Proyecto no encontrado")?.clone();
+        let dir=minecraft::instance_dir(&s.data_root,&owner,&instance)?;
+        if instance.version!=project.mc_version||instance.loader!=project.loader
+           ||instance.engine!=project.engine {
+            return Err("Instalá primero la versión correcta del proyecto".into());
+        }
+        (s.data_root.clone(),dir,project)
+    };
+    tauri::async_runtime::spawn_blocking(move||{
+        let _game_lock=crate::instance_lock::try_lock(&game)?;
+        // Cloud downloads always verify the SHA-256 and expected byte count
+        // from the trusted public manifest; unknown ZIP paths are not applied.
+        let zip=cloud::download(&root,&project_id)?;
+        team_pack::apply(&game,Path::new(&zip),&project,allow_servers,allow_waypoints)
+    }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
 async fn fetch_cloud_catalog(state:State<'_,Mutex<Backend>>)->Result<cloud::CloudCatalog,String>{
     let root={locked(&state)?.data_root.clone()};
     tauri::async_runtime::spawn_blocking(move||cloud::fetch(&root)).await.map_err(|e|e.to_string())?
@@ -1867,7 +1892,7 @@ fn main() {
             set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
-            fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project
+            fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
