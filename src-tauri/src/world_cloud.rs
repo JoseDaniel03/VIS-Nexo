@@ -2,6 +2,7 @@
 //! No OAuth credentials are stored by VIS; a "saved" status means the ZIP exists
 //! in the selected local sync folder, not that a provider has confirmed upload.
 use serde::{Deserialize,Serialize};
+use rand_core::{OsRng,RngCore};
 use sha2::{Digest,Sha256};
 use std::{collections::BTreeMap,fs::{self,File,OpenOptions},io::{self,Read,Write},
     path::{Component,Path,PathBuf},time::{SystemTime,UNIX_EPOCH}};
@@ -14,7 +15,7 @@ const PROVIDERS:&[&str]=&["onedrive","google_drive","dropbox","nextcloud","other
 
 #[derive(Debug,Default,Clone,Serialize,Deserialize)]
 #[serde(default)]
-struct Link { provider:String,folder:String,archive:String,sha256:String,
+struct Link { provider:String,folder:String,namespace:String,archive:String,sha256:String,
     fingerprint:String,bytes:u64,saved_at:u64 }
 #[derive(Default,Serialize,Deserialize)]
 #[serde(default)]
@@ -113,7 +114,10 @@ fn digest_file(path:&Path)->Result<String,String>{
     loop {let n=input.read(&mut buf).map_err(|e|e.to_string())?;if n==0{break;}hasher.update(&buf[..n]);}
     Ok(format!("{:x}",hasher.finalize()))
 }
-fn location(game:&Path,world:&str,folder:&Path)->Result<PathBuf,String>{
+fn location(game:&Path,world:&str,folder:&Path,namespace:&str)->Result<PathBuf,String>{
+    if namespace.len()!=32||!namespace.bytes().all(|c|c.is_ascii_hexdigit()){
+        return Err("Identificador del respaldo inválido".into());
+    }
     let chosen=fs::canonicalize(folder).map_err(|_|"La carpeta de sincronización no está disponible".to_string())?;
     let kind=fs::symlink_metadata(&chosen).map_err(|e|e.to_string())?;
     if !kind.is_dir(){return Err("Elegí una carpeta de sincronización".into());}
@@ -121,9 +125,24 @@ fn location(game:&Path,world:&str,folder:&Path)->Result<PathBuf,String>{
     if chosen.starts_with(&game_root)||game_root.starts_with(&chosen){
         return Err("No vincules una carpeta que contenga la instancia o esté dentro de ella".into());
     }
-    let instance_id=format!("{:x}",Sha256::digest(game_root.to_string_lossy().as_bytes()));
+    // A stable random namespace travels with the portable instance. Moving the
+    // instance no longer changes its destination within the provider folder.
     let world_id=format!("{:x}",Sha256::digest(world.as_bytes()));
-    Ok(chosen.join("VIS-Nexo-Worlds").join(&instance_id[..24]).join(&world_id[..24]))
+    let target=chosen.join("VIS-Nexo-Worlds").join(namespace).join(&world_id[..24]);
+    // Reject pre-existing links and non-directory entries at EVERY generated
+    // level; a synced folder may contain data we did not create ourselves.
+    let mut cursor=chosen.clone();
+    for segment in target.strip_prefix(&chosen).map_err(|_|"Ruta Nube insegura")?.components(){
+        cursor.push(segment.as_os_str());
+        match fs::symlink_metadata(&cursor) {
+            Ok(meta) if meta.file_type().is_symlink()||!meta.is_dir()=>
+                return Err("La carpeta sincronizada contiene enlaces o archivos inesperados".into()),
+            Ok(_)=>(),
+            Err(err) if err.kind()==io::ErrorKind::NotFound=>(),
+            Err(err)=>return Err(err.to_string()),
+        }
+    }
+    Ok(target)
 }
 pub fn link(game:&Path,world:&str,folder:&str,provider:&str)->Result<(),String>{
     world_dir(game,world)?;
@@ -131,11 +150,22 @@ pub fn link(game:&Path,world:&str,folder:&str,provider:&str)->Result<(),String>{
     let root=Path::new(folder);
     if !root.is_absolute(){return Err("Elegí una carpeta absoluta desde el selector".into());}
     let canonical=fs::canonicalize(root).map_err(|_|"Carpeta de nube no disponible".to_string())?;
-    let target=location(game,world,&canonical)?;
-    if !target.starts_with(&canonical){return Err("Carpeta de copia insegura".into());}
     let mut settings=load(game)?;
+    let namespace=if let Some(old)=settings.worlds.get(world){
+        if old.namespace.len()==32&&old.namespace.bytes().all(|c|c.is_ascii_hexdigit()){
+            old.namespace.clone()
+        }else{
+            let mut bytes=[0u8;16];OsRng.fill_bytes(&mut bytes);
+            bytes.iter().map(|b|format!("{b:02x}")).collect()
+        }
+    }else{
+        let mut bytes=[0u8;16];OsRng.fill_bytes(&mut bytes);
+        bytes.iter().map(|b|format!("{b:02x}")).collect()
+    };
+    let target=location(game,world,&canonical,&namespace)?;
+    if !target.starts_with(&canonical){return Err("Carpeta de copia insegura".into());}
     settings.worlds.insert(world.to_owned(),Link{provider:provider.to_owned(),
-        folder:canonical.to_string_lossy().into_owned(),..Link::default()});
+        folder:canonical.to_string_lossy().into_owned(),namespace,..Link::default()});
     save(game,&settings)
 }
 pub fn unlink(game:&Path,world:&str)->Result<(),String>{
@@ -156,7 +186,7 @@ pub fn status(game:&Path)->Result<Vec<WorldCloudStatus>,String>{
         let state=(||->Result<(&str,String),String>{
             let dir=world_dir(game,&world)?;
             let (_,fingerprint)=files_and_stamp(&dir)?;
-            let base=location(game,&world,Path::new(&link.folder))?;
+            let base=location(game,&world,Path::new(&link.folder),&link.namespace)?;
             if link.archive.is_empty() {return Ok(("orange","Todavía no guardaste una copia".into()));}
             let archive=Path::new(&link.archive);
             if archive.parent()!=Some(base.as_path()){return Err("La ruta de la copia no es válida".into());}
@@ -178,10 +208,11 @@ pub fn backup(game:&Path,world:&str)->Result<CloudBackup,String>{
     let world_path=world_dir(game,world)?;
     let mut settings=load(game)?;
     let link=settings.worlds.get_mut(world).ok_or("Primero vinculá una carpeta de nube")?;
-    let base=location(game,world,Path::new(&link.folder))?;
+    let base=location(game,world,Path::new(&link.folder),&link.namespace)?;
     crate::instance_guard::private_paths(game,&["saves"])?;
     let (files,before)=files_and_stamp(&world_path)?;
     fs::create_dir_all(&base).map_err(|e|e.to_string())?;
+    location(game,world,Path::new(&link.folder),&link.namespace)?; // reject symlink swap before writes
     let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let name=format!("world-{stamp}-{}.zip",std::process::id());
     let destination=base.join(&name);
@@ -216,7 +247,7 @@ pub fn restore_as_copy(game:&Path,world:&str)->Result<String,String>{
     let _game_lock=crate::minecraft::acquire_game_run(game)?;
     let settings=load(game)?;
     let link=settings.worlds.get(world).ok_or("Este mundo no tiene nube vinculada")?;
-    let base=location(game,world,Path::new(&link.folder))?;
+    let base=location(game,world,Path::new(&link.folder),&link.namespace)?;
     let archive=Path::new(&link.archive);
     if archive.parent()!=Some(base.as_path())||link.sha256.len()!=64{
         return Err("Referencia de respaldo inválida".into());
