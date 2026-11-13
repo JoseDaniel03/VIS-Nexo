@@ -131,7 +131,7 @@ async function register(request, db) {
   try {
     await db.prepare(
       "INSERT INTO social_users (id,username,public_id,display_name,signing_public_key) VALUES (?,?,?,?,?)"
-    ).bind(id, username, randomToken().slice(0,24), username, body.public_key).run();
+    ).bind(id, username, crypto.randomUUID().replaceAll("-","").slice(0,24), username, body.public_key).run();
   } catch {
     bad(409, "Username already registered");
   }
