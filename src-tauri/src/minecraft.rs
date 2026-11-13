@@ -229,7 +229,7 @@ fn official_url(url:&str)->bool{
  const HOSTS:&[&str]=&["piston-meta.mojang.com","piston-data.mojang.com","launcher.mojang.com","libraries.minecraft.net","resources.download.minecraft.net","maven.fabricmc.net","meta.fabricmc.net","repo.maven.apache.org","repo1.maven.org","api.modrinth.com","cdn.modrinth.com"];
  if let Ok(parsed)=reqwest::Url::parse(url){parsed.scheme()=="https"&&parsed.host_str().is_some_and(|host|HOSTS.contains(&host))}else{false}
 }
-fn obtain_file(c:&Client,url:&str,target:&Path,expected_sha1:Option<&str>,max_bytes:u64)->Result<(),String>{
+fn obtain_file(c:&Client,url:&str,target:&Path,expected_sha1:Option<&str>,max_bytes:u64,cancel_install:bool)->Result<(),String>{
  if !official_url(url){return Err(format!("Descarga bloqueada: origen no autorizado ({url})"));}
  ensure_regular_or_absent(target)?;
  if cached_file_valid(target,expected_sha1,max_bytes){return Ok(())}
@@ -246,7 +246,8 @@ fn obtain_file(c:&Client,url:&str,target:&Path,expected_sha1:Option<&str>,max_by
   if response.content_length().is_some_and(|n|n>max_bytes){return Err("Archivo supera el límite permitido".into())}
   let mut file=File::create(&temp).map_err(|e|e.to_string())?;
   let mut size=0u64;let mut buf=[0u8;65536];let mut hasher=Sha1::new();
-  loop {let n=response.read(&mut buf).map_err(|e|e.to_string())?;if n==0{break}size+=n as u64;
+  loop {if cancel_install{crate::download_manager::checkpoint()?;}
+   let n=response.read(&mut buf).map_err(|e|e.to_string())?;if n==0{break}size+=n as u64;
    if size>max_bytes{return Err("Archivo supera el límite permitido".into())}hasher.update(&buf[..n]);file.write_all(&buf[..n]).map_err(|e|e.to_string())?;}
   file.flush().map_err(|e|e.to_string())?;drop(file);
   if let Some(expected)=expected_sha1{let actual=format!("{:x}",hasher.finalize());if !actual.eq_ignore_ascii_case(expected){return Err(format!("Checksum SHA1 inválido para {}",target.display()))}}
@@ -313,7 +314,7 @@ fn obtain_or_reuse(c:&Client,task:&Task,destination_root:&Path,sources:&[PathBuf
    }
   }
  }
- obtain_file(c,&task.url,&task.path,task.sha1.as_deref(),task.max)?;
+ obtain_file(c,&task.url,&task.path,task.sha1.as_deref(),task.max,true)?;
  Ok(false)
 }
 fn java_home_instance(data_root:&Path,username:&str,ins:&Instance)->Result<PathBuf,String>{
@@ -753,7 +754,7 @@ pub fn horizon_prerequisites(app:&AppHandle,data_root:&Path,username:&str,ins:&I
     }
     let manifest_url=format!("https://piston-meta.mojang.com/v1/packages/{manifest_sha}/{}.json",ins.version);
     let manifest_path=base.join(".vslauncher/version.json");
-    obtain_file(&http,&manifest_url,&manifest_path,Some(manifest_sha),20*1024*1024)?;
+    obtain_file(&http,&manifest_url,&manifest_path,Some(manifest_sha),20*1024*1024,true)?;
     let profile:Value=serde_json::from_slice(&fs::read(manifest_path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     // The pinned release can use an older asset index than Mojang's current one.
     let runtime=base.join(".vis/runtime");
@@ -761,7 +762,7 @@ pub fn horizon_prerequisites(app:&AppHandle,data_root:&Path,username:&str,ins:&I
     let index_id=index["id"].as_str().ok_or("Índice sin ID")?;
     if !clean_segment(index_id){return Err("Índice inválido".into())}
     let index_path=runtime.join("assets/indexes").join(format!("{index_id}.json"));
-    obtain_file(&http,index["url"].as_str().ok_or("Índice sin URL")?,&index_path,Some(index["sha1"].as_str().ok_or("Índice sin huella")?),20*1024*1024)?;
+    obtain_file(&http,index["url"].as_str().ok_or("Índice sin URL")?,&index_path,Some(index["sha1"].as_str().ok_or("Índice sin huella")?),20*1024*1024,true)?;
     let assets:Value=serde_json::from_slice(&fs::read(index_path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     let mut tasks=Vec::new();
     let objects=assets["objects"].as_object().ok_or("Índice sin objetos")?;
@@ -778,7 +779,7 @@ pub fn horizon_prerequisites(app:&AppHandle,data_root:&Path,username:&str,ins:&I
     let server_sha=server["sha1"].as_str().ok_or("Mojang no publicó SHA-1 del server.jar")?;
     let server_jar=base.join(".vis").join("minecraft-server.jar");
     if let Some(parent)=server_jar.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
-    obtain_file(&http,server_url,&server_jar,Some(server_sha),700*1024*1024)?;
+    obtain_file(&http,server_url,&server_jar,Some(server_sha),700*1024*1024,true)?;
     // A JDK, not merely a JRE: Horizon's one-time preparation invokes exporters.
     let jdk_root=base.join(".vis/java-runtimes/temurin-25");
     let installed=look_for_java(&jdk_root,4).and_then(|java|{
@@ -1343,7 +1344,7 @@ pub fn install_modrinth(data_root:&Path,username:&str,ins:&Instance,project_id:&
    let dest=directory.join(name);
    ensure_regular_or_absent(&dest)?;
    if cached_file_valid(&dest,Some(sha),150*1024*1024){continue}
-   obtain_file(&c,url,&stage.join(name),Some(sha),150*1024*1024)?;
+   obtain_file(&c,url,&stage.join(name),Some(sha),150*1024*1024,false)?;
    changed.push(name.clone());
   }
   promote_mod_batch(&directory,&stage,&changed)
