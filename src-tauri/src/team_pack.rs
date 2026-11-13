@@ -99,7 +99,7 @@ fn inspect_config_secrets(path:&Path,filename:&str)->Result<(),String>{
     for line in source.lines(){
         let trimmed=line.trim();
         if trimmed.starts_with('#')||trimmed.starts_with("//"){continue;}
-        let Some(index)=trimmed.find(['=',':']) else {continue};
+        let Some(index)=trimmed.find(|ch:char|ch=='='||ch==':') else {continue};
         let key=trimmed[..index].trim().trim_matches('"').to_ascii_lowercase();
         let value=trimmed[index+1..].trim().trim_end_matches(',').trim_matches('"').trim();
         if labels.iter().any(|word|key.contains(word))
@@ -436,6 +436,35 @@ mod tests{
         fs::write(&example,r#"{"renderDistance":12}"#).unwrap();
         assert!(inspect_config_secrets(&example,"test.json").is_ok());
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]fn round_trip_installs_only_missing_defaults(){
+        let root=std::env::temp_dir().join(format!("vis-team-pack-test-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        let game=root.join("Instancias").join("source");
+        let dest=root.join("Instancias").join("target");
+        fs::create_dir_all(game.join("config")).unwrap();
+        fs::create_dir_all(game.join("saves/Private World")).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(game.join("config/test.json"),br#"{"enabled":true}"#).unwrap();
+        fs::write(game.join("saves/Private World/level.dat"),b"never upload").unwrap();
+        fs::write(game.join("options.txt"),b"personal preference").unwrap();
+        let project=GameProject{id:"teamtest".into(),title:"Team Test".into(),
+            mc_version:"1.21.1".into(),engine:"java".into(),loader:"vanilla".into(),
+            ..Default::default()};
+        let list=preview(&game,&project,TeamOptions::default()).unwrap();
+        assert_eq!(list.files,vec!["config/test.json"]);
+        let package=build(&game,&root,&project,TeamOptions::default()).unwrap();
+        assert!(package.size_bytes>0);
+        let imported=apply(&dest,Path::new(&package.archive),&project,false,false).unwrap();
+        assert_eq!(imported.installed,1);
+        assert_eq!(fs::read(dest.join("config/test.json")).unwrap(),br#"{"enabled":true}"#);
+        assert!(!dest.join("saves").exists());
+        assert!(!dest.join("options.txt").exists());
+        fs::write(dest.join("config/test.json"),b"user settings").unwrap();
+        let again=apply(&dest,Path::new(&package.archive),&project,false,false).unwrap();
+        assert_eq!(again.installed,0);
+        assert_eq!(fs::read(dest.join("config/test.json")).unwrap(),b"user settings");
+        let _=fs::remove_dir_all(root);
     }
     #[test]fn project_ids_and_secret_paths(){
         assert!(safe_id("virgoland"));
