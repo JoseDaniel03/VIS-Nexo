@@ -99,10 +99,17 @@ export function validatePinnedPeerKey(pinned, incoming) {
     throw Error('ALERTA: cambió la clave de cifrado del contacto. No se enviarán ni recibirán mensajes hasta verificar la identidad por otro canal.');
   return incoming;
 }
+// Adaptive polling: fast while talking, gentle when idle and exponentially
+// backed off on network failures (never a tight retry loop).
+export function socialPollDelay(chatOpen,failures=0){
+  const base=chatOpen?2200:8500;
+  const attempts=Math.min(4,Math.max(0,Number(failures)||0));
+  return Math.min(45000,base*2**attempts);
+}
 export function createSocialRemote(command, onUpdate, onStatus) {
   let state = null, keys = null, privateDb = null, currentUser = '';
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
-  let lastFingerprint = '', chatActive=false;
+  let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
   const connected = () => !!(state && privateDb && keys);
   const status = (value, error = '') => onStatus?.(value, error);
   const rpc = (path, method = 'GET', body = null) => command('social_request',
@@ -166,87 +173,141 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       onUpdate?.(state, messages);
     }
   }
+  function scheduleNext(epoch) {
+    if(epoch!==sessionEpoch||!connected()||document.hidden)return;
+    if(interval)clearTimeout(interval);
+    interval=setTimeout(()=>{interval=null;void sync();},
+      socialPollDelay(chatActive,consecutiveErrors));
+  }
   async function sync() {
     if (!connected() || busy || document.hidden) return;
+    const epoch=sessionEpoch,username=currentUser;
+    if(interval){clearTimeout(interval);interval=null;}
     busy = true;
+    const valid=()=>epoch===sessionEpoch&&username===currentUser&&connected();
     try {
       if (Date.now() - lastHeartbeat > 45000) {
         await rpc('/v1/presence', 'POST',
           { presence: state.presence === 'offline' ? 'online' : state.presence,
             custom_status: state.custom_status || '', current_game: state.current_game || '' });
+        if(!valid())return;
         lastHeartbeat = Date.now();
       }
       const fresh = await rpc('/v1/state');
+      if(!valid())return;
+      const friendsByName=new Map((fresh.friends||[]).map(f=>[f.username,f]));
       const ack = [];
-      let securityError='';
+      let newMessages=false,securityError='';
       for (const incoming of fresh.pending_messages || []) {
-        const friend = (fresh.friends || []).find(f => f.username === incoming.from);
+        if(!valid())return;
+        const friend = friendsByName.get(incoming.from);
         if (!friend?.public_key) continue;
         try {
           const pub=await verifiedPeerKey(friend);
+          if(!valid())return;
           const text = await decrypt(incoming.payload, incoming.from,
-            currentUser, incoming.client_message_id, keys.pair.privateKey, pub);
+            username, incoming.client_message_id, keys.pair.privateKey, pub);
+          if(!valid())return;
           await saveMessage({
-            id: incoming.client_message_id, from: incoming.from, to: currentUser,
+            id: incoming.client_message_id, from: incoming.from, to: username,
             body: text, created: new Date(incoming.created_at * 1000).toISOString()
           });
-          ack.push(incoming.id);
+          if(!valid())return;
+          ack.push(incoming.id);newMessages=true;
         } catch(error) {
-          // No ACK for unverifiable messages. Never replace a pinned key.
-          if(String(error).includes('ALERTA:')) securityError=String(error);
+          // Never acknowledge undecryptable messages or silently replace
+          // pinned ECDH keys. The sender can retry after out-of-band recovery.
+          if(String(error).includes('ALERTA:'))securityError=String(error);
         }
       }
-      if (ack.length) await rpc('/v1/messages/ack', 'POST', { ids: ack });
+      if (ack.length) {
+        await rpc('/v1/messages/ack', 'POST', { ids: ack });
+        if(!valid())return;
+      }
       state = fresh;
-      messages = await localHistory();
+      // IndexedDB is read once at login and only after received/sent messages,
+      // not on every periodic online/presence poll.
+      if(newMessages)messages = await localHistory();
+      if(!valid())return;
+      consecutiveErrors=0;
       status(securityError?'security_warning':'connected',securityError);
       notify();
     } catch (error) {
-      status('degraded', String(error));
+      if(!valid())return;
+      consecutiveErrors=Math.min(4,consecutiveErrors+1);
+      const detail=String(error);
+      if(/HTTP 401\b/.test(detail)){
+        // Do not keep issuing unauthorized requests using an expired token.
+        // A fresh, explicit authenticated login/reconnect is required.
+        if(interval){clearTimeout(interval);interval=null;}
+        sessionEpoch++;
+        state=null;keys=null;messages=[];lastFingerprint='';currentUser='';
+        if(privateDb){privateDb.close();privateDb=null;}
+        status('disconnected','La sesión VIS Social expiró. Volvé a conectar la cuenta.');
+      }else status('degraded',detail);
     } finally {
-      busy = false;
+      if(epoch===sessionEpoch){
+        busy = false;
+        scheduleNext(epoch);
+      }
     }
   }
   async function start(username, reuseCloudSession=false) {
     await stop();
     if (!/^[a-z0-9_]{3,24}$/.test(username)) throw Error('Usuario VIS Social inválido');
+    const epoch=sessionEpoch;
     status('connecting');
     currentUser = username;
     try {
-      privateDb = await openPrivateDb();
+      const db=await openPrivateDb();
+      if(epoch!==sessionEpoch){db.close();return false;}
+      privateDb=db;
       keys = await ecdhKeys(privateDb, username);
+      if(epoch!==sessionEpoch)return false;
       const remote = reuseCloudSession ? await rpc('/v1/state') : await command('social_connect');
+      if(epoch!==sessionEpoch)return false;
       await rpc('/v1/keys', 'POST', { public_key: keys.publicKey });
+      if(epoch!==sessionEpoch)return false;
       state = remote;
       messages = await localHistory();
-      lastHeartbeat = 0;
+      if(epoch!==sessionEpoch)return false;
+      lastHeartbeat = 0; consecutiveErrors=0;
       notify(true);
-      await sync();
-      interval = setInterval(() => { void sync(); }, chatActive ? 2600 : 8500);
       document.addEventListener('visibilitychange', onVisibility);
-      return true;
+      window.addEventListener('online', onOnline);
+      await sync();
+      return epoch===sessionEpoch;
     } catch (error) {
-      await stop();
-      status('disconnected', String(error));
+      if(epoch===sessionEpoch){
+        await stop();
+        status('disconnected',String(error));
+      }
       throw error;
     }
   }
-  function onVisibility() { if (!document.hidden) void sync(); }
+  function onVisibility() {
+    if(document.hidden){if(interval){clearTimeout(interval);interval=null;}}
+    else if(connected())void sync();
+  }
+  function onOnline() {
+    if(connected()){consecutiveErrors=0;void sync();}
+  }
   function setChatActive(open) {
     chatActive=!!open;
-    if(interval){clearInterval(interval);interval=setInterval(()=>{
-      void sync();
-    },chatActive?2600:8500);}
-    if(chatActive)void sync();
+    if(interval){clearTimeout(interval);interval=null;}
+    if(chatActive){void sync();}
+    else if(!busy)scheduleNext(sessionEpoch);
   }
   async function stop() {
-    if (interval) { clearInterval(interval); interval = null; }
+    sessionEpoch++;
+    if (interval) { clearTimeout(interval); interval = null; }
     document.removeEventListener('visibilitychange', onVisibility);
-    const wasConnected = !!state;
-    state = null; keys = null; currentUser = ''; messages = []; lastFingerprint = '';
-    lastHeartbeat = 0;
-    if (privateDb) { privateDb.close(); privateDb = null; }
-    if (wasConnected) await command('social_disconnect').catch(() => {});
+    window.removeEventListener('online', onOnline);
+    const wasConnected=!!state;
+    state=null;keys=null;currentUser='';messages=[];lastFingerprint='';
+    lastHeartbeat=0;consecutiveErrors=0;busy=false;
+    if(privateDb){privateDb.close();privateDb=null;}
+    if(wasConnected)await command('social_disconnect').catch(()=>{});
     status('disconnected');
   }
   async function friendRequest(username) {
