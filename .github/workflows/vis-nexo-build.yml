@@ -2,24 +2,10 @@ name: VIS Nexo Portable Build (Linux + Windows)
 concurrency:
   group: vis-nexo-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+# This workflow creates distributable Linux/Windows binaries.
+# During VIS Nexo development it must run only when explicitly requested.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'src-tauri/**'
-      - 'web/**'
-      - 'legacy/crates/vsui-core/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'package-lock.json'
-      - 'package.json'
-      - 'tools/**'
-      - 'services/universe/**'
-      - 'src-tauri/resources/horizon/README.txt'
-      - '.github/workflows/vis-nexo-build.yml'
-  pull_request:
-    branches: [main]
 jobs:
   build:
     strategy:
