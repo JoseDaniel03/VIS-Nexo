@@ -1796,7 +1796,7 @@ async fn preview_team_project(
 #[tauri::command]
 async fn publish_team_project(
     state:State<'_,Mutex<Backend>>,project_id:String,name:String,
-    options:team_pack::TeamOptions,token:String
+    options:team_pack::TeamOptions,review_sha256:String,token:String
 )->Result<team_pack::TeamPack,String>{
     let (root,game,project,projects)={
         let s=locked(&state)?;
@@ -1808,7 +1808,7 @@ async fn publish_team_project(
             // Never copy configurations while Java/Horizon or another
             // VIS process may still be writing to this instance.
             let _lock=crate::instance_lock::try_lock(&game)?;
-            team_pack::build(&game,&root,&project,options)?
+            team_pack::build(&game,&root,&project,options,&review_sha256)?
         };
         cloud::upload_team_pack(&root,&pack,&token)?;
         // Publishing after upload exposes the hash-verified archive in catalog.
