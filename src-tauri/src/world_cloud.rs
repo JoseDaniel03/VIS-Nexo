@@ -197,8 +197,9 @@ pub fn backup(game:&Path,world:&str)->Result<CloudBackup,String>{
     let (sha256,bytes)=result?;
     link.archive=destination.to_string_lossy().into_owned();
     link.sha256=sha256.clone();link.bytes=bytes;link.fingerprint=before;link.saved_at=now();
+    let archive=link.archive.clone();
     save(game,&settings)?;
-    Ok(CloudBackup{world:world.to_owned(),archive:link.archive.clone(),sha256,bytes})
+    Ok(CloudBackup{world:world.to_owned(),archive,sha256,bytes})
 }
 pub fn restore_as_copy(game:&Path,world:&str)->Result<String,String>{
     let _game_lock=crate::minecraft::acquire_game_run(game)?;
