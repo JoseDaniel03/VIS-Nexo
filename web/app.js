@@ -1440,6 +1440,25 @@ async function projectInstallAndPlay(){
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste de RAM es exclusivo de tu perfil VIS. Los mundos y servidores siguen la política compartida de esta instancia.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
 function confirmDialog(){return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="alertdialog" aria-modal="true"><header class="modal-head"><h2>Confirmar eliminación</h2><button class="icon-btn" data-action="close-modal">${I('x',18)}</button></header><div class="modal-body"><p>¿Querés quitar <strong>${esc(dialog.label)}</strong> de VIS Nexo? Por defecto <b>se conservan todos los mundos y archivos del disco</b>.</p>
  ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los archivos del disco</b><small>Irreversible. Disponible solo para instalaciones administradas por VIS en Instancias/&lt;nombre&gt;. Cerrá el juego antes.</small></span><input type="checkbox" id="delete-instance-files"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
+
+function instanceWorldCloudSection(d){
+ if(d.sourceOwner)return '<section><h3>'+I('cloud',17)+' Nube</h3><p class="muted">Las copias de nube se vinculan desde la cuenta propietaria de la instancia.</p></section>';
+ const worlds=d.worldCloud||[];
+ const labels={grey:'Sin vincular',green:'Guardada en carpeta',orange:'Actualización pendiente',red:'Error'};
+ return '<section class="vis-cloud-worlds"><h3>'+I('cloud',17)+' Nube · mundos</h3>'+
+ '<p class="muted">Elegí una carpeta de OneDrive, Google Drive, Dropbox o Nextcloud que ya sincronices con su aplicación oficial. VIS guarda copias ZIP por mundo; el verde comprueba la copia LOCAL, no que la nube haya confirmado la subida. No se guardan contraseñas ni tokens.</p>'+
+ '<label>Carpeta gestionada por <select id="vis-world-provider"><option value="onedrive">OneDrive</option><option value="google_drive">Google Drive</option><option value="dropbox">Dropbox</option><option value="nextcloud">Nextcloud</option><option value="other">Otra carpeta sincronizada</option></select></label>'+
+ (worlds.length?worlds.map(w=>
+ '<div class="vis-cloud-world-row"><div class="vis-cloud-world-info"><b>'+esc(w.world)+'</b>'+
+ '<span class="vis-world-cloud-state is-'+attr(w.status)+'"><i aria-hidden="true"></i>'+esc(labels[w.status]||'Error')+'</span>'+
+ '<small>'+esc(w.detail||'')+'</small></div><div class="vis-data-actions">'+
+ '<button class="outline-btn" type="button" data-action="world-cloud-link" data-world="'+attr(w.world)+'">'+I('folder',14)+' Vincular</button>'+
+ (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-save" data-world="'+attr(w.world)+'">'+I('cloud',14)+' Nube</button>':'')+
+ (w.status==='green'||w.status==='orange'?'<button class="outline-btn" type="button" data-action="world-cloud-restore" data-world="'+attr(w.world)+'">Restaurar copia</button>':'')+
+ '</div></div>').join(''):'<p class="muted">Todavía no se detectaron mundos con level.dat en esta instancia.</p>')+
+ '</section>';
+}
+
 function instanceDataDialog(){
  const d=dialog||{},backups=d.backups||[],health=d.health;
  const foreign=!!d.sourceOwner;
@@ -1473,7 +1492,7 @@ function instanceDataDialog(){
    '<label>Escribí RESTAURAR<input id="instance-data-restore-word" type="text" autocomplete="off" placeholder="RESTAURAR"/></label>'+
    '<button class="outline-btn" data-action="instance-data-restore">'+I('refresh',15)+' Restaurar copia</button>':
    foreign?'<p class="muted">La restauración de esta instancia corresponde a su propietario.</p>':'')+
- '</section>'+
+ '</section>'+instanceWorldCloudSection(d)+
  '<section><h3>'+I('shield',17)+' Diagnóstico</h3>'+
  (health?'<p>Mundos detectados: <strong>'+Number(health.worlds||0)+'</strong> · Mundos válidos: <strong>'+Number(health.valid_worlds||0)+'</strong></p>'+
  '<p>Servidores guardados: '+(health.servers_file?'Sí':'Sin lista')+
@@ -1503,11 +1522,12 @@ async function openInstanceData(projectId,name,sourceOwner){
  await onceOperation('instance-data-open:'+JSON.stringify([projectId,name,sourceOwner]),async()=>{
   try{
     const params={projectId,name,sourceOwner:sourceOwner||null};
-    const [backups,health]=await Promise.all([
-       command('instance_backups',params),command('inspect_instance_data',params)
+    const [backups,health,worldCloud]=await Promise.all([
+       command('instance_backups',params),command('inspect_instance_data',params),
+       sourceOwner?Promise.resolve([]):command('world_cloud_status',{projectId,name})
     ]);
     if(generation!==accountGeneration)return;
-    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,merge:null,
+    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,worldCloud,merge:null,
       autoBackup:!sourceOwner&&!!db.instances.find(i=>!i.source_owner&&i.project_id===projectId&&i.name===name)?.auto_backup};
     render();
   }catch(error){if(generation===accountGeneration)message('No se pudieron consultar los datos: '+String(error),true);}
@@ -2317,6 +2337,33 @@ root.addEventListener('click',async event=>{
  }
  else if(act==='instance-data-tools'){
    await openInstanceData(projectId,id,button.dataset.source||'');
+ }
+ else if(['world-cloud-link','world-cloud-save','world-cloud-restore'].includes(act)){
+   const d=dialog,world=button.dataset.world||'',generation=accountGeneration;
+   if(!native||d?.type!=='instance-data'||d.sourceOwner||!world)return;
+   await onceOperation('cloud-world:'+JSON.stringify([d.projectId,d.name,world]),async()=>{
+     try{
+       const params={projectId:d.projectId,name:d.name,world};
+       if(act==='world-cloud-link'){
+         if(!T?.dialog?.open)throw Error('Selector de carpetas no disponible');
+         const provider=document.getElementById('vis-world-provider')?.value||'other';
+         const folder=await T.dialog.open({directory:true,multiple:false,title:'Elegí tu carpeta de nube ya sincronizada'});
+         if(typeof folder!=='string'||!folder)return;
+         await command('link_world_cloud',{...params,folder,provider});
+         message('Carpeta vinculada; guardá la primera copia del mundo con Nube.');
+       }else if(act==='world-cloud-save'){
+         const backup=await command('backup_world_cloud',params);
+         message('Mundo copiado a carpeta sincronizada: '+fmtBytes(backup.bytes));
+       }else{
+         if(!window.confirm('Se restaurará una COPIA con nombre nuevo; el mundo actual no se reemplazará. ¿Continuar?'))return;
+         const restored=await command('restore_world_cloud',{...params,confirmation:'RESTAURAR'});
+         message('Mundo restaurado como '+restored+'. Se conservó el original.');
+       }
+       if(generation!==accountGeneration||dialog!==d)return;
+       d.worldCloud=await command('world_cloud_status',{projectId:d.projectId,name:d.name});
+       if(generation===accountGeneration&&dialog===d)render();
+     }catch(error){if(generation===accountGeneration)message('Nube: '+String(error),true);}
+   });
  }
  else if(act==='instance-data-backup')await runInstanceDataAction('backup');
  else if(act==='instance-data-toggle-auto-backup'){
