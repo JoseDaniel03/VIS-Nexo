@@ -3,12 +3,6 @@
 // temporary bearer sessions and opaque ECDH/AES-GCM encrypted message envelopes.
 import {createCeiboRecovery} from "./ceibo_recovery.mjs";
 import {createCeiboMfa} from "./ceibo_mfa.mjs";
-const ceiboMfa=createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit});
-const ceibo=createCeiboRecovery({
-  reply,bad,now,hash,randomToken,parseBody,rateLimit,cloudVerifier,
-  verifySignature,revokeRealtime,requireStepup:ceiboMfa.requireStepup,
-  consumeRecoveryCode:ceiboMfa.consumeRecoveryCode
-});
 const te = new TextEncoder();
 const USERNAME = /^[a-z0-9_]{3,24}$/;
 const MAX_BODY = 8192;
@@ -1201,6 +1195,13 @@ async function manageCommunityMedia(request,db,user) {
   ).bind(mediaId,id,user.id,data.kind,parsed.provider,parsed.url,title).run();
   return reply({ok:true,id:mediaId});
 }
+
+const ceiboMfa=createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit});
+const ceibo=createCeiboRecovery({
+  reply,bad,now,hash,randomToken,parseBody,rateLimit,cloudVerifier,
+  verifySignature,revokeRealtime,requireStepup:ceiboMfa.requireStepup,
+  consumeRecoveryCode:ceiboMfa.consumeRecoveryCode
+});
 
 export default {
   async fetch(request, env, ctx) {
