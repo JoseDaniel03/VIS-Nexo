@@ -45,7 +45,8 @@ checks={
     "await removeMessages(privateDb, expired)" in social
     and "const tx = db.transaction('messages','readwrite')" in social,
   "No full local history scan during each empty poll":
-    "if(newMessages)messages = await localHistory()" in social,
+    "if(newMessages)await refreshLocalMessages()" in social
+    and "if(request===historyRequest)messages=fresh" in social,
   "Login paints first, then loads media":
     ui.count("page='home';render();void refreshAssets().catch(()=>{});")==2
     and "await refreshAssets();render();" not in ui,
