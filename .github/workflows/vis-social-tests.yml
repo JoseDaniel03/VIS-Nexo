@@ -11,6 +11,7 @@ on:
       - 'tools/test_social_peer_key.mjs'
       - 'tools/check_vis_realtime.py'
       - 'tools/check_vis_network_perf.py'
+      - 'tools/check_vis_identity.py'
       - '.github/workflows/vis-social-tests.yml'
 
 permissions:
@@ -43,3 +44,4 @@ jobs:
         run: |
           python3 tools/check_vis_realtime.py
           python3 tools/check_vis_network_perf.py
+          python3 tools/check_vis_identity.py
