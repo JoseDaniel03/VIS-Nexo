@@ -234,9 +234,11 @@ pub(crate) async fn social_cloud_login(
 ) -> Result<crate::Snapshot,String> {
     // @handle is a friendly login address. The server still authenticates
     // against the original immutable username bound to the Ed25519 proof.
-    let identifier=identifier.trim().trim_start_matches('@').to_ascii_lowercase();
+    let identifier=identifier.trim().trim_start_matches('@').to_owned();
+    // Legacy 24-char public IDs are case-sensitive base64url; do not fold
+    // them. The Worker separately normalizes @handles and old usernames.
     if !(3..=24).contains(&identifier.len()) ||
-        !identifier.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_') ||
+        !identifier.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-') ||
         password.is_empty() {
         return Err("Ingresá tu @usuario o ID pública y contraseña".into());
     }
