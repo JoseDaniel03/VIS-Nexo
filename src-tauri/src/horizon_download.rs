@@ -133,6 +133,7 @@ fn checksum_of(sums:&[u8],archive:&str)->Result<String,String>{
     Ok(first)
 }
 fn emit(app:&AppHandle,stage:&str,completed:usize,detail:&str){
+    crate::download_manager::progress(app,stage,completed,100,detail);
     let _=app.emit("minecraft-progress",Progress{stage:stage.into(),completed,total:100,detail:detail.chars().take(180).collect()});
 }
 fn stream_archive(app:&AppHandle,http:&Client,a:&Asset,release:&Release,dest:&Path,expected:&str)->Result<(),String>{
@@ -148,6 +149,7 @@ fn download_stream<R:Read>(app:&AppHandle,mut reader:R,dest:&Path,expected:&str,
     let mut hasher=Sha256::new();
     let mut buffer=[0u8;64*1024];let mut downloaded=0u64;let mut last_percent=usize::MAX;
     loop {
+        crate::download_manager::checkpoint()?;
         let n=reader.read(&mut buffer).map_err(|e|e.to_string())?;
         if n==0{break}
         downloaded+=n as u64;
@@ -158,6 +160,7 @@ fn download_stream<R:Read>(app:&AppHandle,mut reader:R,dest:&Path,expected:&str,
         if percent!=last_percent {emit(app,"Descargando Horizon",percent,&format!("{} MiB descargados",downloaded/1048576));last_percent=percent;}
     }
     file.sync_all().map_err(|e|e.to_string())?;
+    crate::download_manager::checkpoint()?;
     if format!("{:x}",hasher.finalize())!=expected{return Err("SHA-256 del juego no coincide con el manifiesto firmado".into())}
     Ok(())
 }
@@ -499,6 +502,7 @@ fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
 /// inside the instance, not inside the AppImage, AppData or ~/.minecraft.
 /// The new build is staged and verified before atomic publication.
 pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Installed,String>{
+    crate::download_manager::checkpoint()?;
     if minecraft_version!="26.3" {
         return Err("El fork Horizon disponible implementa exclusivamente Minecraft 26.3".into())
     }
@@ -547,6 +551,7 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     let response=http.get(&expected_url).send().and_then(|r|r.error_for_status())
         .map_err(|e|format!("No se pudo descargar Horizon portable: {e}"))?;
     download_stream(app,response,&archive_path,&sha,asset.size)?;
+    crate::download_manager::checkpoint()?;
     if fs::metadata(&archive_path).map_err(|e|e.to_string())?.len()!=asset.size {
         return Err("La descarga del motor Rust tiene tamaño incorrecto".into());
     }
@@ -555,11 +560,13 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     emit(app,"Motor Rust",85,"Comprobando archivos y desempaquetando");
     if archive.ends_with(".zip"){unpack_zip(&archive_path,&unpacked)?}
     else{unpack_tar(&archive_path,&unpacked)?}
+    crate::download_manager::checkpoint()?;
     let built=find_build(&unpacked)?;
     fork_metadata(&built,&tag)?;
     executable_permissions(&built)?;
     save_game_stamp(&built,&tag)?;
     fs::write(unpacked.join(".vis-release-sha256"),&sha).map_err(|e|e.to_string())?;
+    crate::download_manager::checkpoint()?;
     let nested=built.strip_prefix(&unpacked).map_err(|e|e.to_string())?.to_path_buf();
     fs::rename(&unpacked,&final_dir).map_err(|e|e.to_string())?;
     let installed=final_dir.join(nested);
