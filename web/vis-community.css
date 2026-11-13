@@ -1,0 +1,23 @@
+/* Small project membership and curated media panels; no untrusted HTML or iframe embeds. */
+.vis-project-community {padding:18px; margin-top:14px; border:1px solid rgba(255,255,255,.09); background:rgba(20,15,35,.45); border-radius:18px; display:grid; gap:14px; min-width:0;}
+.vis-community-heading {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;}
+.vis-community-heading h2 {font-size:1.12rem;margin:0;}
+.vis-community-roles {display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;}
+.vis-community-role {padding:11px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);min-width:0;}
+.vis-community-role h3 {font-size:.87rem;margin:0 0 8px;display:flex;justify-content:space-between;}
+.vis-community-role h3 small {color:#a4a0b9;}
+.vis-community-role p {font-size:.75rem;margin:0;}
+.vis-community-member {display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);font-size:.82rem;}
+.vis-community-member small {font-size:.73rem;color:#aaa4c3;}
+.vis-access-yes {color:#64daa6;font-size:.72rem;}
+.vis-community-permission {color:#efb25d;margin:0;font-size:.82rem;}
+.vis-community-manage,.vis-community-join,.vis-community-requests {display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.vis-community-join p {font-size:.84rem;margin:0;}
+.vis-community-media-grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+.vis-community-media-card {min-width:0;display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:12px;}
+.vis-community-media-card b {font-size:.81rem;overflow-wrap:anywhere;}
+.vis-community-media-card small {font-size:.72rem;color:#a7a2bf;}
+.vis-community-media-thumb {aspect-ratio:16/9;background:#1a1430;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.vis-community-media-thumb img {width:100%;height:100%;object-fit:cover;}
+.vis-community-media-card .vis-data-actions {display:flex;gap:4px;flex-wrap:wrap;}
+.vis-community-media-card .outline-btn {padding:4px 7px;font-size:.73rem;}
