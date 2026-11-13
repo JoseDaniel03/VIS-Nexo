@@ -35,6 +35,18 @@ export type DownloadJob = {
   status:'running'|'cancelling'|'completed'|'cancelled'|'failed';
   cancel_requested:boolean; started_at:number; finished_at:number|null;
 };
+export type TeamOptions = {
+  include_packs:boolean;include_servers:boolean;include_waypoints:boolean;
+};
+export type TeamPreview = {
+  project_id:string;files:string[];total_bytes:number;excluded:string[];warnings:string[];
+};
+export type TeamPack = {
+  project_id:string;archive:string;sha256:string;size_bytes:number;files:number;
+};
+export type TeamApplyReport = {
+  project_id:string;installed:number;preserved:number;modrinth_mods:number;
+};
 export type LaunchResult = {pid: number; log_file: string; offline: boolean};
 export type LaunchExit = {
   pid: number; success: boolean; exit_code: number | null;
@@ -79,6 +91,15 @@ export type NativeCommandMap = {
   install_app_update: {args: {confirmed: boolean}; result: void};
   fetch_cloud_catalog: {args: Record<string, never>; result: {source: string; projects: unknown[]}};
   download_cloud_bundle: {args: {projectId: string}; result: string};
+  preview_team_project: {
+    args:{projectId:string;name:string;options:TeamOptions};result:TeamPreview
+  };
+  publish_team_project: {
+    args:{projectId:string;name:string;options:TeamOptions;token:string};result:TeamPack
+  };
+  apply_team_project: {
+    args:{projectId:string;name:string;allowServers:boolean;allowWaypoints:boolean};result:TeamApplyReport
+  };
 };
 export type NativeCommandName = keyof NativeCommandMap;
 export type NativeCommandArgs<K extends NativeCommandName> = NativeCommandMap[K]['args'];
