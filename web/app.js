@@ -444,7 +444,7 @@ function refreshSocialSkins(snapshot){
  const generation=accountGeneration,owner=snapshot.username;
  const currentChat=(snapshot.friends||[]).find(p=>p.username===chatWith);
  const entries=[{username:owner,skin_version:snapshot.skin_version},
-   ...(snapshot.friends||[]).slice(0,30),...(currentChat?[currentChat]:[])];
+   ...(snapshot.friends||[]).slice(0,40),...(currentChat?[currentChat]:[])];
  for(const entry of entries){
    const username=entry.username,version=Number(entry.skin_version||0);
    if(!username||!Number.isFinite(version)||version<0)continue;
@@ -506,7 +506,7 @@ async function publishLocalSkin(dataUrl=null){
    socialSkins.delete(db.user.username);
    const result=await social.getSkin(db.user.username);
    const head=result.skin?await skinHeadPreview(result.skin):'';
-   socialSkins.set(db.user.username,{version:Number(result.skin_version||0),skin:result.skin||null,head});
+   rememberSocialMedia(socialSkins,db.user.username,{version:Number(result.skin_version||0),skin:result.skin||null,head},45);
    message('Skin VIS publicada. Otros jugadores conectados pueden verla por tu usuario VIS.');
  }catch(error){message('No se pudo publicar la skin: '+String(error),true);}
  finally{skinSharingBusy=false;render();}
@@ -530,7 +530,7 @@ async function lookupPublicSkin(username){
  try{
    const skin=await social.getSkin(handle);
    const head=skin.skin?await skinHeadPreview(skin.skin):'';
-   socialSkins.set(handle,{version:Number(skin.skin_version||0),skin:skin.skin||null,head});
+   rememberSocialMedia(socialSkins,handle,{version:Number(skin.skin_version||0),skin:skin.skin||null,head},45);
    if(publicSkinLookup?.username===handle){publicSkinLookup={username:handle,skin:skin.skin||null,head,loading:false,error:''};render();}
  }catch(error){
    if(publicSkinLookup?.username===handle){publicSkinLookup={username:handle,skin:null,head:'',loading:false,error:String(error)};render();}
