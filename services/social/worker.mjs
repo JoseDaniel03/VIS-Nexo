@@ -1253,7 +1253,8 @@ export default {
       if(mfaResult)return mfaResult;
       const ceiboResult=await ceibo.privateRoute(path,method,request,db,user,env);
       if(ceiboResult)return ceiboResult;
-      if(path.startsWith("/v1/admin/"))await ceiboMfa.requireStepup(db,user,true);
+      if(path.startsWith("/v1/admin/")&&(isSuper(user)||await isGlobalAdmin(db,user)))
+        await ceiboMfa.requireStepup(db,user,true);
       if (method === "POST" && path === "/v1/realtime/ticket")return await createRealtimeTicket(request,db,user,env);
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
