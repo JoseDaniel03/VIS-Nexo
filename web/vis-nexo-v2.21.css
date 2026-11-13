@@ -237,3 +237,22 @@ html,body,#app{min-width:0;max-width:100%;min-height:0}
  .vis-data-grid>section{padding:10px}
  .vis-data-actions button{flex:1 1 145px}
 }
+
+/* VIS Download Manager — compact cancel affordance, independent of window size. */
+.vis-download-dock [data-action="cancel-active-download"]{
+ display:inline-flex;align-items:center;gap:5px;margin-top:7px;
+ max-width:100%;min-height:28px;padding:5px 10px;font-size:11px;
+}
+.vis-download-dock [data-action="cancel-active-download"]:disabled{
+ opacity:.65;cursor:default;
+}
+.vis-download-history .detail-line{gap:12px;min-width:0}
+.vis-download-history .detail-line span{
+ min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.vis-download-history .detail-line strong{white-space:nowrap}
+@media(max-width:560px){
+ .vis-download-head{align-items:flex-start}
+ .vis-download-head b{display:block;max-width:55vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .vis-download-history .detail-line{flex-wrap:wrap}
+}
