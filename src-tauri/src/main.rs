@@ -770,6 +770,22 @@ async fn instance_backups(
  tauri::async_runtime::spawn_blocking(move||instance_backup::list(&dir))
     .await.map_err(|_|"No se pudieron consultar las copias".to_string())?
 }
+/// Owner-only VIS Worlds setting, available even to ordinary players whose
+/// installed project specification is otherwise managed by VIS STUDIOS.
+#[tauri::command]
+fn set_instance_auto_backup(
+ state:State<'_,Mutex<Backend>>,project_id:String,name:String,enabled:bool
+)->Result<Snapshot,String>{
+ let s=locked(&state)?;
+ let username=s.username()?.to_owned();
+ let mut prefs=s.storage.prefs(&username);
+ let instance=prefs.instances.iter_mut()
+     .find(|i|i.project_id==project_id&&i.name==name&&i.source_owner.is_empty())
+     .ok_or("Solo el propietario puede configurar las copias de esta instancia")?;
+ instance.auto_backup=enabled;
+ s.storage.save_prefs(&username,&prefs)?;
+ Ok(s.snapshot())
+}
 #[tauri::command]
 async fn backup_instance_data(
  state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
@@ -1759,7 +1775,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
