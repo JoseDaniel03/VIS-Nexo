@@ -138,6 +138,13 @@ pub fn link(game:&Path,world:&str,folder:&str,provider:&str)->Result<(),String>{
         folder:canonical.to_string_lossy().into_owned(),..Link::default()});
     save(game,&settings)
 }
+pub fn unlink(game:&Path,world:&str)->Result<(),String>{
+    if !valid_name(world){return Err("Mundo inválido".into());}
+    let mut settings=load(game)?;
+    settings.worlds.remove(world);
+    // Desvincular no borra los respaldos del proveedor.
+    save(game,&settings)
+}
 pub fn status(game:&Path)->Result<Vec<WorldCloudStatus>,String>{
     let settings=load(game)?;
     let mut out=Vec::new();
@@ -175,7 +182,8 @@ pub fn backup(game:&Path,world:&str)->Result<CloudBackup,String>{
     crate::instance_guard::private_paths(game,&["saves"])?;
     let (files,before)=files_and_stamp(&world_path)?;
     fs::create_dir_all(&base).map_err(|e|e.to_string())?;
-    let name=format!("world-{}-{}.zip",now(),std::process::id());
+    let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let name=format!("world-{stamp}-{}.zip",std::process::id());
     let destination=base.join(&name);
     let stage=base.join(format!(".{name}.partial"));
     let result=(||->Result<(String,u64),String>{
@@ -219,7 +227,8 @@ pub fn restore_as_copy(game:&Path,world:&str)->Result<String,String>{
     let saves=game.join("saves");
     crate::instance_guard::private_paths(game,&["saves"])?;
     fs::create_dir_all(&saves).map_err(|e|e.to_string())?;
-    let new_name=format!("{}-restaurado-{}",world,now());
+    let prefix=world.chars().take(58).collect::<String>();
+    let new_name=format!("{}-restaurado-{}",prefix,now());
     if !valid_name(&new_name){return Err("Nombre de restauración demasiado largo".into());}
     let target=saves.join(&new_name);
     if target.exists(){return Err("Ya existe una restauración con ese nombre".into());}
