@@ -828,15 +828,15 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
           "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 13 &&
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 14 &&
           new Set((columns.results || []).map(x=>x.name)).size === 6;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 8 : 0 },
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 9 : 0 },
           ready ? 200 : 503);
       }
       if (method === "GET" && path === "/v1/realtime/connect")return await consumeRealtimeTicket(request,db,env);
