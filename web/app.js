@@ -27,6 +27,7 @@ function resetAccountView(){
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();avatarLoads.clear();
  socialMediaQueue.length=0;publicSkinLookup=null;
  projectCommunity=null;projectCommunityId='';projectCommunityLoading=false;projectCommunityError='';
+ ceiboSecurity=null;ceiboSessions=null;ceiboRecoveryStep='request';
  for(const path of Object.keys(assetCache))delete assetCache[path];
  previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
  previewLoading.clear();
