@@ -39,7 +39,7 @@ export type TeamOptions = {
   include_packs:boolean;include_servers:boolean;include_waypoints:boolean;
 };
 export type TeamPreview = {
-  project_id:string;files:string[];total_bytes:number;excluded:string[];warnings:string[];
+  project_id:string;files:string[];total_bytes:number;review_sha256:string;excluded:string[];warnings:string[];
 };
 export type TeamPack = {
   project_id:string;archive:string;sha256:string;size_bytes:number;files:number;
@@ -95,7 +95,7 @@ export type NativeCommandMap = {
     args:{projectId:string;name:string;options:TeamOptions};result:TeamPreview
   };
   publish_team_project: {
-    args:{projectId:string;name:string;options:TeamOptions;token:string};result:TeamPack
+    args:{projectId:string;name:string;options:TeamOptions;reviewSha256:string;token:string};result:TeamPack
   };
   apply_team_project: {
     args:{projectId:string;name:string;allowServers:boolean;allowWaypoints:boolean};result:TeamApplyReport
