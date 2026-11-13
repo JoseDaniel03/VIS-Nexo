@@ -80,6 +80,35 @@ fn exclusions(filename:&str)->bool {
     || [".pem",".key",".p12",".pfx",".db",".sqlite",".log",".jar",".dll",".exe",".bat",".cmd",".sh"]
         .iter().any(|ending|lower.ends_with(ending))
 }
+// Best-effort reject common credentials accidentally kept inside config files.
+// Review by a human is still mandatory: arbitrary mods may store private fields.
+fn inspect_config_secrets(path:&Path,filename:&str)->Result<(),String>{
+    let ext=Path::new(filename).extension().and_then(|v|v.to_str())
+        .unwrap_or("").to_ascii_lowercase();
+    if !matches!(ext.as_str(),"json"|"json5"|"toml"|"yaml"|"yml"|"cfg"|"properties"|"ini"|"txt"|"js"){
+        return Ok(());
+    }
+    let len=fs::metadata(path).map_err(|e|e.to_string())?.len();
+    if len>2*1024*1024{
+        return Err(format!("Revisá y dividí el archivo de configuración grande antes de publicar: {filename}"));
+    }
+    let raw=fs::read(path).map_err(|e|e.to_string())?;
+    let source=String::from_utf8(raw).map_err(|_|format!("Configuración no textual: {filename}"))?;
+    let labels=["token","password","secret","api_key","apikey","private_key","access_key",
+        "sessionid","client_secret","authkey"];
+    for line in source.lines(){
+        let trimmed=line.trim();
+        if trimmed.starts_with('#')||trimmed.starts_with("//"){continue;}
+        let Some(index)=trimmed.find(['=',':']) else {continue};
+        let key=trimmed[..index].trim().trim_matches('"').to_ascii_lowercase();
+        let value=trimmed[index+1..].trim().trim_end_matches(',').trim_matches('"').trim();
+        if labels.iter().any(|word|key.contains(word))
+            && !value.is_empty()&&!matches!(value,"null"|"false"|"0"|"''"|"{}"){
+            return Err(format!("Configuración potencialmente privada ({filename}); quitá tokens o secretos antes de publicar"));
+        }
+    }
+    Ok(())
+}
 fn allow_root(name:&str,options:TeamOptions)->bool {
     matches!(name,"config"|"defaultconfigs"|"kubejs"|"scripts"|"patchouli_books")
     || options.include_packs&&matches!(name,"resourcepacks"|"shaderpacks"|"datapacks")
@@ -122,6 +151,7 @@ fn visit(game:&Path,root:&Path,options:TeamOptions,files:&mut Vec<PathBuf>,
             *bytes=bytes.checked_add(metadata.len()).ok_or("Paquete demasiado grande")?;
             if *bytes>MAX_UNCOMPRESSED {return Err("El paquete supera 96 MiB sin comprimir".into());}
             if files.len()>=MAX_FILES{return Err("El paquete supera 1500 archivos".into());}
+            inspect_config_secrets(&path,&name)?;
             if matches!(relative.components().next(),Some(std::path::Component::Normal(_))){
                 files.push(path);
             }else{return Err("Ruta interna insegura".into());}
@@ -397,6 +427,16 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn detects_common_secrets_in_configuration(){
+        let root=std::env::temp_dir().join(format!("team-secret-scan-{}",std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let example=root.join("test.json");
+        fs::write(&example,r#"{"password":"do-not-publish"}"#).unwrap();
+        assert!(inspect_config_secrets(&example,"test.json").is_err());
+        fs::write(&example,r#"{"renderDistance":12}"#).unwrap();
+        assert!(inspect_config_secrets(&example,"test.json").is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]fn project_ids_and_secret_paths(){
         assert!(safe_id("virgoland"));
         assert!(!safe_id("../../secret"));
