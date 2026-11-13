@@ -167,26 +167,26 @@ pub fn build(game:&Path,output_root:&Path,project:&GameProject,options:TeamOptio
     }).collect::<Result<Vec<_>,String>>()?;
     let manifest=serde_json::json!({
         "format_version":1,
-        "project_id":project.id,
-        "name":project.title,
-        "engine":project.engine,
-        "minecraft_version":project.mc_version,
-        "loader":project.loader,
-        "loader_version":project.loader_version,
-        "modrinth_project_ids":project.modrinth_mods,
+        "project_id":&project.id,
+        "name":&project.title,
+        "engine":&project.engine,
+        "minecraft_version":&project.mc_version,
+        "loader":&project.loader,
+        "loader_version":&project.loader_version,
+        "modrinth_project_ids":&project.modrinth_mods,
         "version_created_at":version_now(),
-        "files":entries,
+        "files":&entries,
         "contents":"team-defaults",
         "include_servers":options.include_servers,
         "include_waypoints":options.include_waypoints
     });
     let json=serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?;
     let base=output_root.join("project-packages").join("teams").join(&project.id);
-    fs::create_dir_all(&base).map_err(|e|e.to_string())?;
     crate::instance_guard::private_paths(output_root,&[
         "project-packages","project-packages/teams",
         &format!("project-packages/teams/{}",project.id)
     ])?;
+    fs::create_dir_all(&base).map_err(|e|e.to_string())?;
     let stage=base.join(format!("pack-{}-{}.tmp",std::process::id(),version_now()));
     let outcome=(||->Result<TeamPack,String>{
         let file=File::create(&stage).map_err(|e|e.to_string())?;
@@ -195,7 +195,7 @@ pub fn build(game:&Path,output_root:&Path,project:&GameProject,options:TeamOptio
         writer.start_file(".bsconfig",opts).map_err(|e|e.to_string())?;
         writer.write_all(&json).map_err(|e|e.to_string())?;
         for (file,entry) in files.iter().zip(entries.iter()){
-            writer.start_file(&entry.path,opts).map_err(|e|e.to_string())?;
+            writer.start_file(entry.path.as_str(),opts).map_err(|e|e.to_string())?;
             let mut input=File::open(file).map_err(|e|e.to_string())?;
             let mut buf=[0u8;65536];let mut digest=Sha256::new();let mut total=0u64;
             loop{
