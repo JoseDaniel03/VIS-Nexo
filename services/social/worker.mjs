@@ -279,6 +279,70 @@ async function setKey(request, db, user) {
     .bind(body.public_key, now(), user.id).run();
   return reply({ ok: true });
 }
+// A one-use WebSocket ticket (20s) only allows read-only wakeups; the actual
+// authenticated VIS Social bearer remains private in native Rust.
+const REALTIME_TICKET_SECONDS=20;
+const ALLOWED_WS_ORIGINS=new Set([
+  "tauri://localhost","http://tauri.localhost","https://tauri.localhost",
+  "http://127.0.0.1:1420","http://localhost:1420"
+]);
+async function createRealtimeTicket(request,db,user,env){
+  if(!env.REALTIME)bad(503,"Notificaciones en tiempo real no disponibles");
+  await rateLimit(db,request,"realtime-ticket:"+user.id,30);
+  const ticket=randomToken();
+  await db.prepare("INSERT INTO realtime_tickets(token_hash,user_id,expires_at) VALUES (?,?,?)")
+    .bind(await hash(ticket),user.id,now()+REALTIME_TICKET_SECONDS).run();
+  return reply({ticket,expires_in:REALTIME_TICKET_SECONDS});
+}
+async function consumeRealtimeTicket(request,db,env){
+  if(!env.REALTIME)bad(503,"Notificaciones en tiempo real no disponibles");
+  if(request.headers.get("Upgrade")?.toLowerCase()!=="websocket")
+    bad(400,"WebSocket upgrade required");
+  const origin=request.headers.get("Origin");
+  if(!origin||!ALLOWED_WS_ORIGINS.has(origin))
+    bad(403,"Only the VIS Nexo desktop client may open realtime notifications");
+  const url=new URL(request.url),ticket=url.searchParams.get("ticket");
+  if(!ticket||!(/^[A-Za-z0-9_-]{43}$/.test(ticket))||url.searchParams.size!==1)
+    bad(401,"Invalid or expired notification ticket");
+  const row=await db.prepare(
+    "DELETE FROM realtime_tickets WHERE token_hash=? AND expires_at>? RETURNING user_id"
+  ).bind(await hash(ticket),now()).first();
+  if(!row)bad(401,"Invalid or expired notification ticket");
+  return env.REALTIME.get(env.REALTIME.idFromName(row.user_id)).fetch(
+    "https://vis-realtime.internal/_vis/subscribe",{method:"GET",headers:{Upgrade:"websocket"}});
+}
+async function notifyUser(env,ctx,userId){
+  if(!env.REALTIME||!userId)return;
+  const stub=env.REALTIME.get(env.REALTIME.idFromName(userId));
+  const task=stub.fetch("https://vis-realtime.internal/_vis/notify",{method:"POST"}).catch(()=>{});
+  if(ctx?.waitUntil)ctx.waitUntil(task);
+  else await task;
+}
+export class VisRealtimeRoom {
+  constructor(ctx){this.ctx=ctx;}
+  async fetch(request){
+    const path=new URL(request.url).pathname;
+    if(path==="/_vis/notify"&&request.method==="POST"){
+      for(const ws of this.ctx.getWebSockets()){
+        try{ws.send('{"type":"wakeup"}');}
+        catch{try{ws.close(1011,"Delivery failed");}catch{}}
+      }
+      return new Response(null,{status:204});
+    }
+    if(path!=="/_vis/subscribe"||request.headers.get("Upgrade")?.toLowerCase()!=="websocket")
+      return reply({error:"Not found"},404);
+    if(this.ctx.getWebSockets().length>=6)return reply({error:"Too many active devices"},429);
+    const pair=new WebSocketPair(),client=pair[0],server=pair[1];
+    this.ctx.acceptWebSocket(server);
+    server.send('{"type":"ready"}');
+    return new Response(null,{status:101,webSocket:client});
+  }
+  webSocketMessage(ws,message){
+    if(message==="ping"){ws.send("pong");return;}
+    try{ws.close(1008,"Notifications only");}catch{}
+  }
+  webSocketClose(ws,code,reason){try{ws.close(code||1000,reason||"Closed");}catch{}}
+}
 async function currentState(db, user) {
   const friends = await db.prepare(
     "SELECT u.id,u.username,u.display_name,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.skin_version,u.last_seen_at," +
@@ -409,7 +473,7 @@ async function presence(request, db, user) {
   ).bind(status, custom, game, now(), now(), user.id).run();
   return reply({ ok: true });
 }
-async function sendMessage(request, db, user) {
+async function sendMessage(request, db, user, env, ctx) {
   await rateLimit(db, request, "send:" + user.id, 60);
   const body = await parseBody(request);
   const peer = await lookupUser(db, body.to);
@@ -432,6 +496,7 @@ async function sendMessage(request, db, user) {
     "INSERT OR IGNORE INTO pending_messages " +
     "(id,sender_id,recipient_id,client_message_id,payload,expires_at) VALUES (?,?,?,?,?,?)"
   ).bind(crypto.randomUUID(), user.id, peer.id, body.client_message_id, envelope, now() + 48 * HOUR).run();
+  await notifyUser(env,ctx,peer.id);
   return reply({ ok: true, client_message_id: body.client_message_id });
 }
 async function ackMessages(request, db, user) {
@@ -743,15 +808,17 @@ async function cleanup(db) {
     db.prepare("DELETE FROM auth_challenges WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM auth_sessions WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM auth_rate_limits WHERE expires_at<?").bind(t),
-    db.prepare("DELETE FROM pending_messages WHERE expires_at<? OR acknowledged_at IS NOT NULL").bind(t)
+    db.prepare("DELETE FROM pending_messages WHERE expires_at<? OR acknowledged_at IS NOT NULL").bind(t),
+    db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t)
   ]);
 }
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     // The Worker has no CORS grants: native Rust is the supported client.
     // Browser-origin requests are rejected to reduce CSRF/XSS exposure.
-    if (request.headers.has("origin")) return reply({error:"Browser origins are not authorized"},403);
+    if (request.headers.has("origin") && new URL(request.url).pathname!=="/v1/realtime/connect")
+      return reply({error:"Browser origins are not authorized"},403);
     const path = url.pathname;
     const method = request.method;
     if (!env?.DB) return reply({ service: "vis-social", status: "unavailable" }, 503);
@@ -772,6 +839,7 @@ export default {
         return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 8 : 0 },
           ready ? 200 : 503);
       }
+      if (method === "GET" && path === "/v1/realtime/connect")return await consumeRealtimeTicket(request,db,env);
       if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
       if (method === "POST" && path === "/v1/accounts/login/challenge") return await cloudChallenge(request, db);
       if (method === "POST" && path === "/v1/accounts/login/verify") return await cloudVerify(request, db);
@@ -780,6 +848,7 @@ export default {
       if (method === "POST" && path === "/v1/auth/session") return await session(request, db);
       if (!path.startsWith("/v1/")) return reply({ error: "Not found" }, 404);
       const user = await getSession(request, db);
+      if (method === "POST" && path === "/v1/realtime/ticket")return await createRealtimeTicket(request,db,user,env);
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
       if (method === "GET" && path === "/v1/account") return await accountInfo(db,user);
@@ -801,7 +870,7 @@ export default {
       if (method === "POST" && path === "/v1/friends/accept") return await friendAccept(request, db, user);
       if (method === "POST" && path === "/v1/friends/alias") return await friendAlias(request, db, user);
       if (method === "POST" && path === "/v1/presence") return await presence(request, db, user);
-      if (method === "POST" && path === "/v1/messages/send") return await sendMessage(request, db, user);
+      if (method === "POST" && path === "/v1/messages/send") return await sendMessage(request, db, user,env,ctx);
       if (method === "POST" && path === "/v1/messages/ack") return await ackMessages(request, db, user);
       if (method === "POST" && path === "/v1/auth/logout") {
         await db.prepare("DELETE FROM auth_sessions WHERE token_hash=?").bind(user.tokenHash).run();
