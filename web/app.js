@@ -722,7 +722,7 @@ function socialPanel(){
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
- ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}`:''}
+ ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button><button class="mini-add" type="button" data-action="social-global-admin">Administradores globales</button>`:''}`:''}
  ${social.connected()&&social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-developer-key" title="Consultar clave pública de la cuenta para una habilitación manual en GitHub">Identidad de desarrollador${socialOwner?' · habilitada':''}</button><button class="mini-add" type="button" data-action="social-superadmin-key" title="Preparar solicitud protegida de superadministrador, sin revelar contraseña">Identidad para superadmin${accountAdmin?' · habilitada':''}</button>`:''}
  <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>${social.connected()&&!social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-enable-cloud">Vincular contraseña online</button>`:''}
  `:''}
@@ -2160,6 +2160,18 @@ root.addEventListener('click',async event=>{
    else await social.setAccountRole(username,choice);
    message('Permiso actualizado en el servidor');
   }catch(e){message(String(e),true);}
+ }
+ else if(act==='social-global-admin'){
+   if(social.state()?.role!=='super_admin')return message('Se requiere la supercuenta.',true);
+   const username=window.prompt('Nombre técnico de la cuenta VIS Cloud (no el @alias):');
+   if(!username)return;
+   const operation=window.prompt('grant (autorizar administrador global) o revoke (revocar)','grant');
+   if(operation!=='grant'&&operation!=='revoke')return message('Operación inválida.',true);
+   if(!window.confirm((operation==='grant'?'Otorgar':'Revocar')+' administración global a '+username+'?'))return;
+   try{
+     await social.globalAdmin(username,operation==='grant');
+     message('Permiso global actualizado. No modifica el alias ni la identidad del usuario.');
+   }catch(error){message('Administradores: '+String(error),true);}
  }
  else if(act==='social-edit-status'){stateEditorOpen=!stateEditorOpen;render();}
  else if(act==='premium-refresh'){await loadPremiumCosmetics();}
