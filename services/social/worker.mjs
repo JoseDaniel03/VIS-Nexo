@@ -282,6 +282,7 @@ async function setKey(request, db, user) {
 // A one-use WebSocket ticket (20s) only allows read-only wakeups; the actual
 // authenticated VIS Social bearer remains private in native Rust.
 const REALTIME_TICKET_SECONDS=20;
+const REALTIME_SOCKET_LIFETIME_MS=15*60*1000;
 const ALLOWED_WS_ORIGINS=new Set([
   "tauri://localhost","http://tauri.localhost","https://tauri.localhost",
   "http://127.0.0.1:1420","http://localhost:1420"
@@ -311,6 +312,13 @@ async function consumeRealtimeTicket(request,db,env){
   return env.REALTIME.get(env.REALTIME.idFromName(row.user_id)).fetch(
     "https://vis-realtime.internal/_vis/subscribe",{method:"GET",headers:{Upgrade:"websocket"}});
 }
+async function revokeRealtime(env,ctx,userId){
+  if(!env.REALTIME||!userId)return;
+  const task=env.REALTIME.get(env.REALTIME.idFromName(userId))
+    .fetch("https://vis-realtime.internal/_vis/revoke",{method:"POST"}).catch(()=>{});
+  if(ctx?.waitUntil)ctx.waitUntil(task);
+  else await task;
+}
 async function notifyUser(env,ctx,userId){
   if(!env.REALTIME||!userId)return;
   const stub=env.REALTIME.get(env.REALTIME.idFromName(userId));
@@ -324,8 +332,20 @@ export class VisRealtimeRoom {
     const path=new URL(request.url).pathname;
     if(path==="/_vis/notify"&&request.method==="POST"){
       for(const ws of this.ctx.getWebSockets()){
-        try{ws.send('{"type":"wakeup"}');}
-        catch{try{ws.close(1011,"Delivery failed");}catch{}}
+        try{
+          const lease=ws.deserializeAttachment();
+          if(!lease||lease.expiresAt<=Date.now()){
+            ws.close(1008,"Connection authorization expired");
+            continue;
+          }
+          ws.send('{"type":"wakeup"}');
+        }catch{try{ws.close(1011,"Delivery failed");}catch{}}
+      }
+      return new Response(null,{status:204});
+    }
+    if(path==="/_vis/revoke"&&request.method==="POST"){
+      for(const ws of this.ctx.getWebSockets()){
+        try{ws.close(1008,"Account session revoked");}catch{}
       }
       return new Response(null,{status:204});
     }
@@ -334,6 +354,7 @@ export class VisRealtimeRoom {
     if(this.ctx.getWebSockets().length>=6)return reply({error:"Too many active devices"},429);
     const pair=new WebSocketPair(),client=pair[0],server=pair[1];
     this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({expiresAt:Date.now()+REALTIME_SOCKET_LIFETIME_MS});
     server.send('{"type":"ready"}');
     return new Response(null,{status:101,webSocket:client});
   }
@@ -683,7 +704,7 @@ async function adminAccountRole(request, db, user) {
   ]);
   return reply({ok:true,username,role});
 }
-async function adminAccountDisable(request, db, user) {
+async function adminAccountDisable(request, db, user, env, ctx) {
   requireSuper(user);
   await rateLimit(db, request, "admin-account:" + user.id, 15);
   const data=await parseBody(request);
@@ -698,6 +719,7 @@ async function adminAccountDisable(request, db, user) {
     db.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(target.id),
     auditStatement(db,user.id,"account.disabled",username+":"+(disabled?"yes":"no"))
   ]);
+  if(disabled)await revokeRealtime(env,ctx,target.id);
   return reply({ok:true,username,disabled});
 }
 
@@ -861,7 +883,7 @@ export default {
       if (method === "POST" && path === "/v1/admin/projects/upsert") return await adminProjectUpsert(request,db,user);
       if (method === "POST" && path === "/v1/admin/projects/staff") return await adminProjectStaff(request,db,user);
       if (method === "POST" && path === "/v1/admin/accounts/role") return await adminAccountRole(request,db,user);
-      if (method === "POST" && path === "/v1/admin/accounts/disable") return await adminAccountDisable(request,db,user);
+      if (method === "POST" && path === "/v1/admin/accounts/disable") return await adminAccountDisable(request,db,user,env,ctx);
       if (method === "POST" && path === "/v1/avatar/upload") return await uploadAvatar(request,db,user);
       if (method === "POST" && path === "/v1/avatar/get") return await getAvatar(request,db,user);
       if (method === "POST" && path === "/v1/skins/upload") return await uploadSkin(request,db,user);
@@ -876,6 +898,9 @@ export default {
       if (method === "POST" && path === "/v1/messages/ack") return await ackMessages(request, db, user);
       if (method === "POST" && path === "/v1/auth/logout") {
         await db.prepare("DELETE FROM auth_sessions WHERE token_hash=?").bind(user.tokenHash).run();
+        // A different signed-in device can transparently reconnect with a
+        // fresh ticket. Revoke all old socket leases immediately on logout.
+        await revokeRealtime(env,ctx,user.id);
         return reply({ ok: true });
       }
       return reply({ error: "Not found" }, 404);
