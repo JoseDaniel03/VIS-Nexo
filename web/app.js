@@ -24,7 +24,8 @@ function resetAccountView(){
  bulkInstanceMode=false;bulkInstanceSelection.clear();
  cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;downloadJobs=[];
   premiumSkinSync=true;premiumSkinModel='classic';
- socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;
+ socialAvatars.clear();socialSkins.clear();skinLoads.clear();avatarLoads.clear();
+ socialMediaQueue.length=0;publicSkinLookup=null;
  for(const path of Object.keys(assetCache))delete assetCache[path];
  previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
  previewLoading.clear();
@@ -352,6 +353,28 @@ async function refreshAssets(){
 let socialMode = 'disconnected', socialError = '', socialOverlay = null;
 const socialAvatars=new Map(), avatarLoads=new Set();
 const socialSkins=new Map(), skinLoads=new Set();
+// Limit simultaneous image requests after login: avoid bursts of dozens
+// of Cloudflare/IndexedDB operations on slow or metered connections.
+const socialMediaQueue=[];
+let socialMediaActive=0;
+function pumpSocialMedia(){
+ while(socialMediaActive<3&&socialMediaQueue.length){
+   const task=socialMediaQueue.shift();
+   socialMediaActive++;
+   Promise.resolve().then(task).catch(()=>{}).finally(()=>{
+     socialMediaActive--;pumpSocialMedia();
+   });
+ }
+}
+function queueSocialMedia(task){
+ if(socialMediaQueue.length>=80)return false;
+ socialMediaQueue.push(task);pumpSocialMedia();return true;
+}
+function rememberSocialMedia(cache,username,data,maxEntries){
+ if(cache.has(username))cache.delete(username);
+ cache.set(username,data);
+ while(cache.size>maxEntries)cache.delete(cache.keys().next().value);
+}
 let publicSkinLookup=null, skinSharingBusy=false;
 let socialRenderScheduled=false;
 function scheduleSocialRender(){
@@ -373,21 +396,29 @@ function socialAvatarHtml(username,size=34,owned=false) {
  return owned?avatarVisual(db.user?.avatar,username,size,true):avatarVisual('',username,size);
 }
 function refreshSocialAvatars(snapshot) {
- const entries=[{username:snapshot.username,avatar_version:snapshot.avatar_version},...(snapshot.friends||[])];
+ const generation=accountGeneration,owner=snapshot.username;
+ const currentChat=(snapshot.friends||[]).find(p=>p.username===chatWith);
+ const entries=[{username:owner,avatar_version:snapshot.avatar_version},
+   ...(snapshot.friends||[]).slice(0,50),...(currentChat?[currentChat]:[])];
  for(const person of entries){
-  const version=Number(person.avatar_version||0),username=person.username;
-  if(!username||!version||socialAvatars.get(username)?.version===version)continue;
-  const key=username+':'+version;
-  if(avatarLoads.has(key))continue;
-  avatarLoads.add(key);
-  void social.getAvatar(username).then(result=>{
-   if(result.avatar&&(!result.avatar.startsWith('data:image/webp;base64,')||result.avatar.length>40000))return;
-   socialAvatars.set(username,{version,url:result.avatar||''});
-   if(db.user?.username===snapshot.username)scheduleSocialRender();
-  }).catch(()=>{}).finally(()=>avatarLoads.delete(key));
+   const version=Number(person.avatar_version||0),username=person.username;
+   if(!username||!version||socialAvatars.get(username)?.version===version)continue;
+   const key=username+':'+version;
+   if(avatarLoads.has(key))continue;
+   avatarLoads.add(key);
+   if(!queueSocialMedia(async()=>{
+     try{
+       if(generation!==accountGeneration||db.user?.username!==owner||!social.connected())return;
+       const result=await social.getAvatar(username);
+       if(generation!==accountGeneration||db.user?.username!==owner)return;
+       if(result.avatar&&(!result.avatar.startsWith('data:image/webp;base64,')||result.avatar.length>40000))return;
+       rememberSocialMedia(socialAvatars,username,{version,url:result.avatar||''},80);
+       scheduleSocialRender();
+     }catch{/* Network/media failures must never stop the chat itself. */}
+     finally{avatarLoads.delete(key);}
+   }))avatarLoads.delete(key);
  }
 }
-
 function skinHeadPreview(dataUrl){
  return new Promise((resolve,reject)=>{
    if(!/^data:image\/png;base64,[A-Za-z0-9+/]*={0,2}$/.test(dataUrl)||dataUrl.length>87500){
@@ -410,21 +441,33 @@ function skinHeadPreview(dataUrl){
  });
 }
 function refreshSocialSkins(snapshot){
- const entries=[{username:snapshot.username,skin_version:snapshot.skin_version},...(snapshot.friends||[])].slice(0,41);
+ const generation=accountGeneration,owner=snapshot.username;
+ const currentChat=(snapshot.friends||[]).find(p=>p.username===chatWith);
+ const entries=[{username:owner,skin_version:snapshot.skin_version},
+   ...(snapshot.friends||[]).slice(0,30),...(currentChat?[currentChat]:[])];
  for(const entry of entries){
    const username=entry.username,version=Number(entry.skin_version||0);
    if(!username||!Number.isFinite(version)||version<0)continue;
    if(socialSkins.get(username)?.version===version)continue;
-   if(version===0){socialSkins.set(username,{version,skin:null,head:''});continue;}
+   if(version===0){
+     rememberSocialMedia(socialSkins,username,{version,skin:null,head:''},45);
+     continue;
+   }
    const key=username+':'+version;if(skinLoads.has(key))continue;
    skinLoads.add(key);
-   void social.getSkin(username).then(async result=>{
-     const png=result.skin||null;
-     if(png&&(!png.startsWith('data:image/png;base64,')||png.length>87500))return;
-     const head=png?await skinHeadPreview(png):'';
-     socialSkins.set(username,{version,skin:png,head});
-     scheduleSocialRender();
-   }).catch(()=>{}).finally(()=>skinLoads.delete(key));
+   if(!queueSocialMedia(async()=>{
+     try{
+       if(generation!==accountGeneration||db.user?.username!==owner||!social.connected())return;
+       const result=await social.getSkin(username),png=result.skin||null;
+       if(generation!==accountGeneration||db.user?.username!==owner)return;
+       if(png&&(!png.startsWith('data:image/png;base64,')||png.length>87500))return;
+       const head=png?await skinHeadPreview(png):'';
+       if(generation!==accountGeneration||db.user?.username!==owner)return;
+       rememberSocialMedia(socialSkins,username,{version,skin:png,head},45);
+       scheduleSocialRender();
+     }catch{/* Invalid or unavailable skins remain placeholders. */}
+     finally{skinLoads.delete(key);}
+   }))skinLoads.delete(key);
  }
 }
 async function normalizeSkinForSocial(dataUrl){
