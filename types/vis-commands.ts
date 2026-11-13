@@ -29,6 +29,12 @@ export type Snapshot = {
   recent_accounts: {username: string; provider: string}[];
   mode: 'local' | 'offline';
 };
+export type DownloadJob = {
+  id:number; owner:string; label:string; stage:string; detail:string;
+  completed:number; total:number;
+  status:'running'|'cancelling'|'completed'|'cancelled'|'failed';
+  cancel_requested:boolean; started_at:number; finished_at:number|null;
+};
 export type LaunchResult = {pid: number; log_file: string; offline: boolean};
 export type LaunchExit = {
   pid: number; success: boolean; exit_code: number | null;
@@ -63,6 +69,8 @@ export type NativeCommandMap = {
   configure_shared_ram: {args:{sourceOwner:string;projectId:string;name:string;ramMb:number};result:Snapshot};
   set_instance_auto_backup: {args:{projectId:string;name:string;enabled:boolean};result:Snapshot};
   install_minecraft: {args: {projectId: string;name: string}; result: Snapshot};
+  download_jobs: {args:Record<string,never>; result:DownloadJob[]};
+  cancel_download: {args:{id:number}; result:DownloadJob};
   launch_minecraft: {args: {projectId: string;name: string;sourceOwner: string|null}; result: LaunchResult};
   maintenance_preview: {args: Record<string, never>; result: MaintenanceReport};
   maintenance_clean: {args: {confirmed: boolean}; result: MaintenanceReport};
