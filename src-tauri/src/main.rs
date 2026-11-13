@@ -15,6 +15,7 @@ mod updates;
 mod ombu;
 mod horizon;
 mod horizon_download;
+mod download_manager;
 mod social;
 
 // Reserved namespace for player-owned instances; project editor slugs cannot create this ID.
@@ -1465,6 +1466,17 @@ async fn launch_horizon(
 }
 
 #[tauri::command]
+fn download_jobs(state:State<'_,Mutex<Backend>>)->Result<Vec<download_manager::DownloadJob>,String>{
+    let s=locked(&state)?;
+    download_manager::list(s.username()?)
+}
+#[tauri::command]
+fn cancel_download(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,id:u64)
+    ->Result<download_manager::DownloadJob,String>{
+    let s=locked(&state)?;
+    download_manager::cancel(&app,s.username()?,id)
+}
+#[tauri::command]
 async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Snapshot,String>{
     let (username,instance,data_root,other_instances,curated_mods)={
         let s=locked(&state)?;
@@ -1481,7 +1493,11 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
     };
     let cloned_app=app.clone();let chosen=instance.clone();let user=username.clone();
     let prepared=tauri::async_runtime::spawn_blocking(move||->Result<Instance,String>{
+        let mut job=download_manager::begin(&cloned_app,&user,&format!("{} · {}",chosen.name,
+            if chosen.engine=="horizon"{"Horizon Rust"}else{"Minecraft Java"}))?;
+        let result=(||->Result<Instance,String>{
         let mut chosen=chosen;
+        download_manager::checkpoint()?;
         if chosen.engine=="horizon" {
             let dir=minecraft::instance_dir(&data_root,&user,&chosen)?;
             // Lite launcher: no Horizon game in AppImage or Windows installer.
@@ -1495,25 +1511,34 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
                 || chosen.horizon_build_dir==horizon::SOURCE_BUILD_ID
                 || !Path::new(&chosen.horizon_build_dir).is_dir() {
                 let game=horizon_download::install_fork(&cloned_app,&dir,&chosen.version)?;
+                download_manager::checkpoint()?;
                 chosen.horizon_build_dir=game.build_dir;
             }
             chosen.horizon_build_dir=horizon::install_instance_engine(&dir,&chosen)?;
+            download_manager::checkpoint()?;
             if !horizon::private_mojang_ready(&dir,&chosen){
                 let (mc,server,jdk)=minecraft::horizon_prerequisites(&cloned_app,&data_root,&user,&chosen,&other_instances)?;
                 chosen.horizon_minecraft_dir=mc;
                 chosen.horizon_server_jar=server;
                 chosen.java_path=jdk;
             }
+            download_manager::checkpoint()?;
             let dir=minecraft::instance_dir(&data_root,&user,&chosen)?;
             horizon::prepare(&cloned_app,&dir,&chosen)?;
+            download_manager::checkpoint()?;
         } else {
             chosen.java_path.clear();
             minecraft::install(&cloned_app,&data_root,&user,&chosen,&other_instances)?;
+            download_manager::checkpoint()?;
             if let Some(mod_ids)=curated_mods.as_ref() {
                 project_mods::sync(&data_root,&user,&chosen,mod_ids)?;
             }
         }
+        download_manager::checkpoint()?;
         Ok(chosen)
+        })();
+        job.finish(&result);
+        result
     }).await.map_err(|e|e.to_string())??;
     let s=locked(&state)?;
     let mut prefs=s.storage.prefs(&username);
@@ -1788,7 +1813,7 @@ fn main() {
             social::social_cloud_register, social::social_cloud_login,
             social::social_enable_cloud_password,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
-            set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft,
+            set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe
