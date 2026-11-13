@@ -75,7 +75,7 @@ async function deliver(from,to,phrase){
 }
 const health=await request("/health");
 assert.equal(health.status,"ready");
-assert.equal(health.schema,11);
+assert.equal(health.schema,12);
 // The actual launcher derives this Ed25519 key using Argon2id/password.
 // The network protocol proves possession of the key, never transmits a PIN.
 const cloudSigning=await crypto.subtle.generateKey("Ed25519",true,["sign","verify"]);
