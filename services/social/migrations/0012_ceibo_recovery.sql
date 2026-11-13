@@ -58,3 +58,7 @@ ALTER TABLE auth_sessions ADD COLUMN auth_method TEXT NOT NULL DEFAULT 'device';
 ALTER TABLE auth_sessions ADD COLUMN mfa_verified_at INTEGER NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ceibo_session_id ON auth_sessions(session_id) WHERE session_id!='';
 UPDATE auth_sessions SET session_id=lower(hex(randomblob(16))) WHERE session_id='';
+
+-- Cloud-only accounts have no local signing key yet; keep uniqueness only for real keys.
+DROP INDEX IF EXISTS idx_social_users_signing_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_social_users_signing_key ON social_users(signing_public_key) WHERE signing_public_key!='';
