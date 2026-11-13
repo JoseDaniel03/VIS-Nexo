@@ -1,6 +1,6 @@
 # VIS Portals — WebSocket en tiempo real (fase de integración)
 
-Estado: código integrado a `main` el **13/11/2026**. **Sin despliegue de Cloudflare ni nueva build** de VIS Nexo en esta tanda. La versión de producción seguirá usando polling hasta desplegar el Worker con el nuevo Durable Object y hasta que el jugador actualice VIS Nexo.
+Estado: código integrado a `main` el **13/11/2026**. **Sin despliegue de Cloudflare**. El nuevo workflow de pruebas ejecutó correctamente el test del Worker/DO simulado en GitHub Actions (run `43442452013`), pero no valida un upgrade real de Cloudflare ni la compilación nativa de Rust. Al activar estas pruebas, el antiguo workflow de binarios se disparó automáticamente por el cambio en `tools/`; se corrigió su trigger para que, en adelante, **solo pueda ejecutarse manualmente**. La versión de producción seguirá usando polling hasta desplegar el Worker con el nuevo Durable Object y hasta que el jugador actualice VIS Nexo.
 
 ## Arquitectura
 
@@ -43,3 +43,12 @@ Estado: código integrado a `main` el **13/11/2026**. **Sin despliegue de Cloudf
 6. Si falta binding `REALTIME` o el Worker aún no está publicado, comprobar que la interfaz funciona con el antiguo polling sin mostrar errores repetidos al usuario.
 
 Cloudflare recomienda DO SQLite para nuevas clases y WebSockets con hibernación para coste y estabilidad, según la documentación oficial de Cloudflare de 2026.
+
+## Refuerzos de seguridad y pruebas de la revisión
+
+- El cliente evita solicitudes de tickets WebSocket simultáneas y descarta respuestas que terminan después de cambiar de usuario o cerrar sesión (contador de generación e intento).
+- El Durable Object guarda en el attachment hibernante una caducidad de **15 minutos** para cada socket. Cuando recibe un aviso, cierra cualquier socket vencido sin entregarle el wakeup. El cliente renueva la conexión antes de que venza.
+- Logout y deshabilitación administrativa solicitan al DO cerrar todas las conexiones anteriores de esa cuenta. Otros dispositivos aún autenticados pueden reabrirlas con nuevos tickets. El servidor espera la operación de revocación antes de confirmar la acción, aunque un fallo temporal de DO no impide invalidar la sesión en D1.
+- Los tests con DO simulado incluyen HTTP 101 sintético, límite de seis sockets, pinning de Origin y tickets, cierre de sockets caducados, revocación, rechazo de mensajes de aplicación y envío de aviso exclusivo al destinatario.
+- El nuevo `.github/workflows/vis-social-tests.yml` ejecuta **solamente Node/Python**: pruebas de cifrado/Worker/DO y contratos estáticos. Su ejecución `43442452013` resultó exitosa. La compilación portable real y el Worker de Cloudflare siguen requiriendo sus propias validaciones.
+- El workflow portable `.github/workflows/vis-nexo-build.yml` y el despliegue `.github/workflows/vis-social-deploy.yml` ahora utilizan `workflow_dispatch` manual para evitar ejecuciones involuntarias de builds y migraciones.
