@@ -4,6 +4,7 @@
 #[path = "../src/instance_guard.rs"] mod instance_guard;
 #[path = "../src/instance_lock.rs"] mod instance_lock;
 #[path = "../src/instance_backup.rs"] mod instance_backup;
+#[path = "../src/download_manager.rs"] mod download_manager;
 #[path = "../src/minecraft.rs"] mod minecraft;
 #[path = "../src/horizon.rs"] mod horizon;
 #[path = "../src/horizon_download.rs"] mod horizon_download;
