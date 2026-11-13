@@ -237,18 +237,19 @@ export function createSocialRemote(command, onUpdate, onStatus) {
           if(String(error).includes('ALERTA:'))securityError=String(error);
         }
       }
-      if (ack.length) {
-        await rpc('/v1/messages/ack', 'POST', { ids: ack });
-        if(!valid())return;
-      }
+      // Show decrypted, locally stored messages immediately. A slow ACK round
+      // trip must not delay chat rendering; an ACK error leaves the pending
+      // envelope on the server so it can be re-delivered safely.
       state = fresh;
-      // IndexedDB is read once at login and only after received/sent messages,
-      // not on every periodic online/presence poll.
       if(newMessages)messages = await localHistory();
       if(!valid())return;
       consecutiveErrors=0;
       status(securityError?'security_warning':'connected',securityError);
       notify();
+      if (ack.length) {
+        await rpc('/v1/messages/ack', 'POST', { ids: ack });
+        if(!valid())return;
+      }
     } catch (error) {
       if(!valid())return;
       consecutiveErrors=Math.min(4,consecutiveErrors+1);
