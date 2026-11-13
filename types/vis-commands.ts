@@ -11,7 +11,8 @@ export type Instance = {
   name: string; project_id: string; version: string; game_dir: string;
   ram_mb: number; fullscreen: boolean; installed: boolean;
   loader: InstanceLoader; loader_version: string; engine: InstanceEngine;
-  share_offline: boolean; horizon_build_dir: string; horizon_minecraft_dir: string;
+  share_offline: boolean; share_game_data: boolean; auto_backup: boolean;
+  horizon_build_dir: string; horizon_minecraft_dir: string;
   horizon_server_jar: string; java_path: string; player_name: string; source_owner: string;
 };
 export type SafeUser = {
@@ -60,6 +61,7 @@ export type NativeCommandMap = {
   launch_horizon: {args: {projectId:string;name:string;sessionFile:string;sourceOwner:string|null};result: LaunchResult};
   ensure_project_instance: {args: {projectId:string;gameDir:string;ramMb:number};result: Snapshot};
   configure_shared_ram: {args:{sourceOwner:string;projectId:string;name:string;ramMb:number};result:Snapshot};
+  set_instance_auto_backup: {args:{projectId:string;name:string;enabled:boolean};result:Snapshot};
   install_minecraft: {args: {projectId: string;name: string}; result: Snapshot};
   launch_minecraft: {args: {projectId: string;name: string;sourceOwner: string|null}; result: LaunchResult};
   maintenance_preview: {args: Record<string, never>; result: MaintenanceReport};
