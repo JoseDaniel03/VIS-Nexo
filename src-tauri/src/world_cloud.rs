@@ -4,7 +4,7 @@
 use serde::{Deserialize,Serialize};
 use rand_core::{OsRng,RngCore};
 use sha2::{Digest,Sha256};
-use std::{collections::BTreeMap,fs::{self,File,OpenOptions},io::{self,Read,Write},
+use std::{collections::{BTreeMap,BTreeSet},fs::{self,File,OpenOptions},io::{self,Read,Write},
     path::{Component,Path,PathBuf},time::{SystemTime,UNIX_EPOCH}};
 use zip::{ZipArchive,ZipWriter,write::SimpleFileOptions,CompressionMethod};
 
@@ -178,16 +178,23 @@ pub fn unlink(game:&Path,world:&str)->Result<(),String>{
 pub fn status(game:&Path)->Result<Vec<WorldCloudStatus>,String>{
     let settings=load(game)?;
     let mut out=Vec::new();
-    for world in list_world_dirs(game)? {
+    // Include cloud-linked worlds even after the local world was deleted or
+    // the instance was reinstalled. Otherwise the user cannot restore them.
+    let mut names=list_world_dirs(game)?.into_iter().collect::<BTreeSet<_>>();
+    names.extend(settings.worlds.keys().cloned());
+    for world in names {
         let Some(link)=settings.worlds.get(&world) else {
             out.push(WorldCloudStatus{world,status:"grey".into(),
                 detail:"Sin carpeta de nube vinculada".into(),provider:String::new(),saved_at:0,bytes:0});continue;
         };
         let state=(||->Result<(&str,String),String>{
-            let dir=world_dir(game,&world)?;
-            let (_,fingerprint)=files_and_stamp(&dir)?;
             let base=location(game,&world,Path::new(&link.folder),&link.namespace)?;
             if link.archive.is_empty() {return Ok(("orange","Todavía no guardaste una copia".into()));}
+            let dir=match world_dir(game,&world){
+                Ok(path)=>path,
+                Err(_)=>return Err("Mundo local ausente; usá Restaurar copia si tenés un respaldo".into())
+            };
+            let (_,fingerprint)=files_and_stamp(&dir)?;
             let archive=Path::new(&link.archive);
             if archive.parent()!=Some(base.as_path()){return Err("La ruta de la copia no es válida".into());}
             let meta=fs::symlink_metadata(archive).map_err(|_|"No se encontró la copia en la carpeta sincronizada".to_string())?;
