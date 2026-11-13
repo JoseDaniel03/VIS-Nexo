@@ -263,7 +263,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     const fingerprint = JSON.stringify({
       friends: state.friends, incoming: state.incoming_requests,
       outgoing: state.outgoing_requests, messages: messages.map(m => m.id),
-      status: state.presence, role: state.role, developer: state.developer,display_name:state.display_name,
+      status: state.presence, role: state.role, developer: state.developer,
+      display_name:state.display_name,public_handle:state.public_handle,
       projects: state.projects
     });
     if (force || fingerprint !== lastFingerprint) {
@@ -527,6 +528,18 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     await sync();
     return reply;
   }
+  async function setPublicHandle(handle){
+    if(!connected())throw Error('Conectá VIS Social para elegir tu identificador');
+    if(typeof handle!=='string'||!(/^[a-z0-9_]{3,24}$/.test(handle.trim().toLowerCase())))
+      throw Error('El identificador debe tener de 3 a 24 letras, números o _');
+    const saved=await rpc('/v1/account/handle','POST',{handle:handle.trim().toLowerCase()});
+    if(state){state.public_handle=saved.public_handle;
+      state.public_handle_updated_at=saved.next_change_at-7*24*60*60;
+      notify(true);
+    }
+    await sync();
+    return saved;
+  }
   async function accountInfo() {
     if (!connected()) throw Error('Primero iniciá sesión en VIS Social');
     return rpc('/v1/account');
@@ -559,5 +572,5 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
-    setAccountRole, setAccountDisabled, accountInfo, setDisplayName, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
+    setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
 }
