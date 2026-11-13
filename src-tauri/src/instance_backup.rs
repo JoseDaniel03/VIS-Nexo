@@ -71,12 +71,52 @@ fn add_tree(writer:&mut ZipWriter<File>,base:&Path,current:&Path,
     }
     Ok(())
 }
+/// User-triggered backups always run, independently of automatic backups.
 pub fn create(game:&Path)->Result<BackupInfo,String>{
+    create_internal(game,false)?.ok_or("No se pudo crear la copia manual".into())
+}
+
+/// Opt-in daily safety point before launching Minecraft, limited to the latest
+/// three automatic ZIPs. No timers, cloud uploads or background processes.
+pub fn create_if_due(game:&Path)->Result<Option<BackupInfo>,String>{
+    create_internal(game,true)
+}
+const AUTO_BACKUP_INTERVAL_SECS:u64=24*60*60;
+const MAX_AUTO_BACKUPS:usize=3;
+fn automatic_backups(dir:&Path)->Result<Vec<BackupInfo>,String>{
+    let mut backups=Vec::new();
+    for item in fs::read_dir(dir).map_err(|e|e.to_string())?.take(5_000){
+        let item=item.map_err(|e|e.to_string())?;
+        let name=item.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("vis-data-auto-")||validate_id(&name).is_err(){continue;}
+        let meta=fs::symlink_metadata(item.path()).map_err(|e|e.to_string())?;
+        if !meta.is_file()||meta.file_type().is_symlink(){continue;}
+        let created=meta.modified().ok().and_then(|t|t.duration_since(UNIX_EPOCH).ok())
+            .map(|t|t.as_secs()).unwrap_or(0);
+        backups.push(BackupInfo{name,bytes:meta.len(),created});
+    }
+    backups.sort_by(|a,b|b.created.cmp(&a.created).then(b.name.cmp(&a.name)));
+    Ok(backups)
+}
+fn create_internal(game:&Path,automatic:bool)->Result<Option<BackupInfo>,String>{
     crate::minecraft::prepare_player_directory(game)?;
     let _locked=crate::minecraft::acquire_game_run(game)?;
     let backups=root_dir(game)?;
     let stamp=secs();
-    let id=format!("vis-data-{stamp}-{}.zip",std::process::id());
+    if automatic{
+        // Do not make a meaningless ZIP before the very first game launch.
+        let worlds=game.join("saves");
+        let has_world=worlds.is_dir()
+            &&fs::read_dir(&worlds).map_err(|e|e.to_string())?.next().is_some();
+        if !has_world && !game.join("options.txt").is_file()
+            && !game.join("servers.dat").is_file(){return Ok(None);}
+        let existing=automatic_backups(&backups)?;
+        if existing.first().is_some_and(|b|b.created.saturating_add(AUTO_BACKUP_INTERVAL_SECS)>stamp){
+            return Ok(None);
+        }
+    }
+    let id=if automatic{format!("vis-data-auto-{stamp}-{}.zip",std::process::id())}
+           else{format!("vis-data-{stamp}-{}.zip",std::process::id())};
     validate_id(&id)?;
     let target=backups.join(&id);
     if target.exists(){return Err("Ya existe una copia con este identificador".into());}
@@ -108,7 +148,16 @@ pub fn create(game:&Path)->Result<BackupInfo,String>{
         Ok(BackupInfo{name:id,bytes:meta.len(),created:stamp})
     })();
     if result.is_err(){let _=fs::remove_file(partial);}
-    result
+    let info=result?;
+    if automatic{
+        // Prune only auto-prefixed completed regular files. Never delete a
+        // manual backup or user-managed rollback archive.
+        for old in automatic_backups(&backups)?.into_iter().skip(MAX_AUTO_BACKUPS){
+            let path=backups.join(old.name);
+            let _=fs::remove_file(path);
+        }
+    }
+    Ok(Some(info))
 }
 fn valid_member(name:&str)->Result<PathBuf,String>{
     if name.contains('\\')||name.starts_with('/')||name.len()>4096{
@@ -312,6 +361,22 @@ mod tests{
         assert_eq!(fs::read(&live).unwrap(),b"saved");
         assert!(!added.exists());
         assert!(!previous.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test] fn auto_backup_requires_existing_data_and_respects_interval(){
+        let root=std::env::temp_dir().join(format!("vis-backup-auto-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        assert!(create_if_due(&root).unwrap().is_none());
+        fs::create_dir_all(root.join("saves/demo")).unwrap();
+        fs::write(root.join("saves/demo/level.dat"),b"demo").unwrap();
+        let first=create_if_due(&root).unwrap().unwrap();
+        assert!(first.name.starts_with("vis-data-auto-"));
+        assert!(create_if_due(&root).unwrap().is_none());
+        let manual=create(&root).unwrap();
+        assert!(manual.name.starts_with("vis-data-"));
+        assert!(!manual.name.starts_with("vis-data-auto-"));
+        assert_eq!(list(&root).unwrap().len(),2);
         fs::remove_dir_all(root).unwrap();
     }
     #[test] fn rejects_zip_slip_and_unsafe_categories(){
