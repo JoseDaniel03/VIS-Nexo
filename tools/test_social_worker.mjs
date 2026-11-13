@@ -412,10 +412,15 @@ assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get
   try{
     globalThis.WebSocketPair=class {
       constructor(){
-        this[0]={sent:[],closed:[],send(value){this.sent.push(value);},
-          close(code,reason){this.closed.push({code,reason});}};
-        this[1]={sent:[],closed:[],send(value){this.sent.push(value);},
-          close(code,reason){this.closed.push({code,reason});}};
+        const endpoint=()=>({
+          sent:[],closed:[],attachment:null,
+          send(value){this.sent.push(value);},
+          close(code,reason){this.closed.push({code,reason});},
+          serializeAttachment(value){this.attachment=value;},
+          deserializeAttachment(){return this.attachment;}
+        });
+        this[0]=endpoint();
+        this[1]=endpoint();
       }
     };
     globalThis.Response=class {
@@ -435,13 +440,25 @@ assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get
     assert(first.webSocket,'WebSocket client endpoint returned by DO');
     assert.equal(accepted.length,1);
     assert.deepEqual(accepted[0].sent,['{"type":"ready"}']);
+    assert(accepted[0].deserializeAttachment().expiresAt>Date.now(),
+      'WebSocket authorization lease must persist through DO hibernation');
     room.webSocketMessage(accepted[0],'ping');
     assert(accepted[0].sent.includes('pong'),'heartbeat acknowledged');
     assert.equal((await room.fetch(new Request(origin+'/_vis/notify',{method:'POST'}))).status,204);
     assert(accepted[0].sent.includes('{"type":"wakeup"}'),
       'DO sends notification only, no sender identity or ciphertext');
+    accepted[0].serializeAttachment({expiresAt:1});
+    const delivered=accepted[0].sent.filter(x=>x==='{"type":"wakeup"}').length;
+    await room.fetch(new Request(origin+'/_vis/notify',{method:'POST'}));
+    assert(accepted[0].closed.some(x=>x.code===1008),
+      'Expired authorization must close the WebSocket');
+    assert.equal(accepted[0].sent.filter(x=>x==='{"type":"wakeup"}').length,delivered,
+      'Expired socket must not receive additional notifications');
     for(let i=1;i<6;i++)assert.equal((await room.fetch(upgrade())).status,101);
     assert.equal((await room.fetch(upgrade())).status,429,'per-user socket cap');
+    assert.equal((await room.fetch(new Request(origin+'/_vis/revoke',{method:'POST'}))).status,204);
+    assert(accepted.every(ws=>ws.closed.some(entry=>entry.code===1008)),
+      'Explicit account revocation must terminate every old WebSocket');
     room.webSocketMessage(accepted[0],JSON.stringify({type:'message',body:'plaintext'}));
     assert(accepted[0].closed.some(entry=>entry.code===1008),
       'DO must never accept chat text or application commands');
