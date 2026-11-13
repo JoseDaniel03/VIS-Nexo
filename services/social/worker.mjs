@@ -124,7 +124,7 @@ async function register(request, db) {
   ).bind(username).first();
   if(historicallyClaimed)bad(409,"Este usuario está reservado por una identidad VIS");
   const takenHandle=await db.prepare(
-    "SELECT id FROM social_users WHERE public_handle=? OR public_id=?"
+    "SELECT id FROM social_users WHERE public_handle=? OR lower(public_id)=?"
   ).bind(username,username).first();
   if(takenHandle)bad(409,"Este nombre o ID público ya está ocupado");
   const id = crypto.randomUUID();
@@ -202,7 +202,7 @@ async function cloudRegister(request, db) {
   if (existing) bad(409,"Username already taken; sign in or migrate existing device account");
   const reserved=await db.prepare("SELECT user_id FROM public_handle_history WHERE handle=?")
     .bind(username).first();
-  const assigned=await db.prepare("SELECT id FROM social_users WHERE public_handle=? OR public_id=?")
+  const assigned=await db.prepare("SELECT id FROM social_users WHERE public_handle=? OR lower(public_id)=?")
     .bind(username,username).first();
   if(reserved||assigned)bad(409,"Este nombre ya pertenece a una identidad VIS");
   const publicId=crypto.randomUUID().replaceAll("-","").slice(0,24);
@@ -643,7 +643,7 @@ async function changePublicHandle(request,db,user){
   if(current.public_handle_updated_at&&now()-current.public_handle_updated_at<HANDLE_COOLDOWN)
     bad(429,"Podés cambiar tu @usuario una vez cada siete días");
   const other=await db.prepare(
-    "SELECT id FROM social_users WHERE id<>? AND (username=? OR public_id=? OR public_handle=?)"
+    "SELECT id FROM social_users WHERE id<>? AND (username=? OR lower(public_id)=? OR public_handle=?)"
   ).bind(user.id,handle,handle,handle).first();
   if(other)bad(409,"Este identificador pertenece a otra cuenta");
   const used=await db.prepare("SELECT user_id FROM public_handle_history WHERE handle=?")
@@ -664,7 +664,7 @@ async function changePublicHandle(request,db,user){
       "WHERE id=? AND disabled_at IS NULL "+
       "AND (public_handle_updated_at=0 OR public_handle_updated_at<=?) "+
       "AND EXISTS(SELECT 1 FROM public_handle_history WHERE handle=? AND user_id=?) "+
-      "AND NOT EXISTS(SELECT 1 FROM social_users WHERE id<>? AND (username=? OR public_id=? OR public_handle=?))"
+      "AND NOT EXISTS(SELECT 1 FROM social_users WHERE id<>? AND (username=? OR lower(public_id)=? OR public_handle=?))"
     ).bind(handle,now(),now(),user.id,now()-HANDLE_COOLDOWN,
       handle,user.id,user.id,handle,handle,handle)
   ]);
