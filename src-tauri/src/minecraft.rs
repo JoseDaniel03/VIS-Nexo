@@ -1106,6 +1106,7 @@ fn launch_with_game_directory(app:&AppHandle,data_root:&Path,username:&str,ins:&
  let game_dir=game_override.unwrap_or(&dir);
  if !installed(&dir,ins){return Err("Primero instalá la instancia".into())}
  prepare_player_directory(game_dir)?;
+ crate::instance_backup::require_clean_restore_state(game_dir)?;
  let game_run=acquire_game_run(game_dir)?;
  let meta_dir=dir.join(".vslauncher");
  let profile:Value=serde_json::from_slice(&fs::read(meta_dir.join("version.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
