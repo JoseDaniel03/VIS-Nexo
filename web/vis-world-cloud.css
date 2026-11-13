@@ -1,0 +1,13 @@
+/* VIS Worlds cloud folder-sync status; green means local copy, not remote acknowledgement. */
+.vis-cloud-worlds { min-width:0; }
+.vis-cloud-world-row { padding:10px 0; border-top:1px solid rgba(255,255,255,.1); display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; }
+.vis-cloud-world-info { display:flex; flex-direction:column; gap:3px; min-width:190px; max-width:100%; overflow-wrap:anywhere; }
+.vis-cloud-world-info small { opacity:.7; }
+.vis-world-cloud-state { display:inline-flex; align-items:center; gap:6px; font-size:.8rem; }
+.vis-world-cloud-state i {display:block; width:9px; height:9px; border-radius:50%; background:#9ca3af; }
+.vis-world-cloud-state.is-grey i { background:#9ca3af; }
+.vis-world-cloud-state.is-green i { background:#34c879; }
+.vis-world-cloud-state.is-orange i { background:#f49a36; }
+.vis-world-cloud-state.is-red i { background:#eb555c; }
+.vis-cloud-world-row .vis-data-actions { display:flex; gap:6px; flex-wrap:wrap; }
+@media(max-width:650px){.vis-cloud-world-row{align-items:stretch; flex-direction:column;}.vis-cloud-world-row button{flex:1;}}
