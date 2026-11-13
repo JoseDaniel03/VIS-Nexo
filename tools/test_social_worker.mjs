@@ -661,4 +661,74 @@ assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get
     globalThis.Response=originalResponse;
   }
 }
+// VIS Ceibo Recovery — end-to-end account ownership and old-device revocation.
+const recoverAccount=await account('recover_me');
+const oldPasswordKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const oldSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const oldPub=to64(await crypto.subtle.exportKey('raw',oldPasswordKey.publicKey));
+assert.equal((await call('/v1/accounts/upgrade',{
+  username:'recover_me',password_salt:oldSalt,password_public_key:oldPub,
+  registration_signature:to64(await sign(oldPasswordKey.privateKey,
+    'VIS-CLOUD-REGISTER-V2\nrecover_me\n'+oldSalt))
+},recoverAccount.token)).status,200);
+assert.equal((await call('/v1/account/email/request',{
+  email:'Recover.Me@Example.org'
+},recoverAccount.token)).status,200);
+const emailCode=lastRecoveryCode();
+assert.equal((await call('/v1/recovery/email/verify',{code:emailCode})).data.verified,true);
+assert.equal((await call('/v1/recovery/email/verify',{code:emailCode})).status,400,
+ 'email confirmation codes are single use');
+assert.equal((await call('/v1/account',undefined,recoverAccount.token)).data.account.verified_email,
+ 'recover.me@example.org');
+const activeSessions=await call('/v1/account/sessions',undefined,recoverAccount.token);
+assert.equal(activeSessions.status,200);
+assert(activeSessions.data.sessions.some(s=>s.current===true),'sessions should be visible');
+assert.equal((await call('/v1/account/sessions/revoke',{
+  session_id:activeSessions.data.sessions[0].session_id
+},bob.token)).status,404,'a user must not revoke another account session');
+const unknown=await call('/v1/recovery/start',{kind:'password',identity:'unknown@example.org'});
+const known=await call('/v1/recovery/start',{kind:'password',identity:'recover_me'});
+assert.equal(unknown.status,200);
+assert.deepEqual(unknown.data,known.data,'forgot-password must not enumerate accounts');
+const resetToken=lastRecoveryCode();
+const newerKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const newerSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const newerPub=to64(await crypto.subtle.exportKey('raw',newerKey.publicKey));
+const newProof={
+  code:resetToken,password_salt:newerSalt,password_public_key:newerPub,
+  registration_signature:to64(await sign(newerKey.privateKey,
+    'VIS-CLOUD-REGISTER-V2\nrecover_me\n'+newerSalt))
+};
+assert.equal((await call('/v1/recovery/reset',{...newProof,registration_signature:'invalid'})).status,400);
+assert.equal((await call('/v1/recovery/reset',newProof)).status,200);
+assert.equal((await call('/v1/recovery/reset',newProof)).status,400,
+ 'reset code replay must be rejected');
+assert.equal((await call('/v1/state',undefined,recoverAccount.token)).status,401,
+ 'old sessions must expire after recovery');
+const oldDeviceChallenge=await call('/v1/auth/challenge',{username:'recover_me'});
+assert.equal(oldDeviceChallenge.status,200);
+assert.equal((await call('/v1/auth/session',{
+  username:'recover_me',challenge_id:oldDeviceChallenge.data.id,
+  signature:to64(await sign(recoverAccount.signing.privateKey,
+    authText('recover_me',oldDeviceChallenge.data)))
+})).status,401,'old device keys must stop working after password reset');
+const newChallenge=await call('/v1/accounts/login/challenge',{identifier:'recover_me'});
+assert.equal(newChallenge.status,200);
+const newLogin=await call('/v1/accounts/login/verify',{
+  identifier:'recover_me',challenge_id:newChallenge.data.challenge_id,
+  signature:to64(await sign(newerKey.privateKey,
+    'VIS-CLOUD-AUTH-V2\nrecover_me\n'+newChallenge.data.challenge_id+'\n'+newChallenge.data.nonce))
+});
+assert.equal(newLogin.status,200,JSON.stringify(newLogin));
+const emailReminder=await call('/v1/recovery/start',{
+  kind:'username',identity:'recover.me@example.org'
+});
+assert.equal(emailReminder.status,200);
+assert(recoveryDeliveries.at(-1).text.includes('recover_me'));
+assert(!recoveryDeliveries.some(d=>JSON.stringify(d).includes(oldSalt)),
+ 'email must never contain password verifier salts');
+assert.equal((await call('/v1/account/mfa/verify',{code:'000000'},newLogin.data.token)).status,409,
+ 'MFA verifies only after enrollment');
+console.log('VIS Ceibo email, recovery, MFA and session tests passed');
+
 console.log('VIS Social authentication, encrypted delivery and D1 migrations passed');
