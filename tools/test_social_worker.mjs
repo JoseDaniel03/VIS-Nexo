@@ -147,6 +147,9 @@ assert.equal((await call('/v1/account/handle',{handle:'alice_second'},alice.toke
 assert.equal((await call('/v1/account/handle',{handle:'alice_new'},bob.token)).status,409);
 assert.equal((await call('/v1/account/handle',{handle:'bob_public'},bob.token)).status,200);
 const bobId=(await call('/v1/account',undefined,bob.token)).data.account.public_id;
+// Advance the test fixture beyond the cooldown before checking collisions:
+// a normal user must wait seven days before attempting another change.
+DB.sqlite.prepare("UPDATE social_users SET public_handle_updated_at=1 WHERE username='alice'").run();
 assert.equal((await call('/v1/account/handle',{handle:bobId},alice.token)).status,409);
 assert.equal((await call('/v1/state',undefined,alice.token)).data.public_handle,'alice_new');
 // Renaming after the cooldown must NOT permit impersonation via the old handle.
