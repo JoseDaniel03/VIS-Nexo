@@ -44,7 +44,7 @@ checks={
     and "social-save-public-handle" in app
     and "setPublicHandle" in crypto,
  "ECDH message identity still uses original username":
-    "currentUser+':'+item.id" in crypto
+    "key: currentUser + ':' + item.id" in crypto
     and "keys.pair.privateKey" in crypto
     and "username, incoming.client_message_id, aes" in crypto,
  "Premium local profile derived from official Minecraft UUID, not name":
