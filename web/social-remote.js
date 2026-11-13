@@ -110,6 +110,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
   let historyRequest=0;
   let realtimeSocket=null,realtimeRetry=null,realtimeFailures=0;
+  let realtimeConnecting=false,realtimeAttempt=0;
   let wakeupQueued=false;
   // Cache only non-extractable derived AES CryptoKeys for this live identity.
   // A peer key change is still checked against its persisted TOFU pin.
@@ -119,6 +120,9 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   const rpc = (path, method = 'GET', body = null) => command('social_request',
     { path, method, body });
   function stopRealtime(){
+    // Invalidate the request currently waiting for its one-use ticket, too.
+    // Closing a WebSocket alone does not cancel a pending native HTTP request.
+    realtimeAttempt++;realtimeConnecting=false;
     if(realtimeRetry){clearTimeout(realtimeRetry);realtimeRetry=null;}
     const ws=realtimeSocket;realtimeSocket=null;realtimeFailures=0;wakeupQueued=false;
     if(ws){
@@ -128,18 +132,21 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   function scheduleRealtime(epoch){
     if(epoch!==sessionEpoch||!connected()||document.hidden||!navigator.onLine
-        ||realtimeRetry||realtimeSocket)return;
+        ||realtimeRetry||realtimeSocket||realtimeConnecting)return;
     const delay=Math.min(60000,1000*Math.pow(2,Math.min(6,realtimeFailures++)));
     realtimeRetry=setTimeout(()=>{realtimeRetry=null;void connectRealtime(epoch);},delay);
   }
   async function connectRealtime(epoch){
     if(epoch!==sessionEpoch||!connected()||document.hidden||!navigator.onLine
-        ||realtimeSocket)return;
+        ||realtimeSocket||realtimeConnecting)return;
+    const attempt=++realtimeAttempt;
+    realtimeConnecting=true;
     try{
       // The native bridge supplies only a single-use 20s notification ticket.
       // The long-lived authenticated VIS Social bearer remains inside Rust.
       const access=await command('social_realtime_ticket');
-      if(epoch!==sessionEpoch||!connected()||document.hidden)return;
+      if(epoch!==sessionEpoch||attempt!==realtimeAttempt
+          ||!connected()||document.hidden)return;
       const target=new URL(access.ws_url);
       if(target.protocol!=='wss:'||target.username||target.password
           ||target.pathname!=='/v1/realtime/connect'
@@ -172,10 +179,13 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       };
       ws.onerror=()=>{/* onclose handles retry and fallback */};
     }catch{
-      if(epoch===sessionEpoch){
+      if(epoch===sessionEpoch&&attempt===realtimeAttempt){
         realtimeSocket=null;
+        realtimeConnecting=false;
         scheduleRealtime(epoch);
       }
+    }finally{
+      if(attempt===realtimeAttempt)realtimeConnecting=false;
     }
   }
 
