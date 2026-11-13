@@ -22,7 +22,7 @@ function resetAccountView(){
  accountGeneration++;
  mcSelected=null;modResults=[];installedFiles=[];horizonChecks=[];
  bulkInstanceMode=false;bulkInstanceSelection.clear();
- cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;
+ cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;downloadJobs=[];
   premiumSkinSync=true;premiumSkinModel='classic';
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;
 }
@@ -132,6 +132,7 @@ let lastMinecraftExit = null;
 let horizonChecks = [];
 let horizonLibraryBuilds = [];
 let mcSelected = null, modKind = 'mod', modSearchQuery = '', installProgress = null, minecraftBusy = false;
+let downloadJobs = []; // Native, in-memory, account-filtered installer history.
 let bulkInstanceMode=false;
 const bulkInstanceSelection=new Set();
 const instanceSelectionKey=(instance)=>JSON.stringify([instance.source_owner||'',instance.project_id,instance.name]);
@@ -1025,7 +1026,7 @@ function minecraftPage(){if(isGuest())return `<div class="content-inner"><div cl
  ${minecraftExitNotice()}
  <div class="mc-disclaimer">${I('info',17)} Las cuentas locales ejecutan Minecraft en modo sin autenticación oficial (pruebas/singleplayer). Para acceder a servidores online-mode, skins y capas oficiales se requiere Microsoft OAuth.</div>`}</div>`;}
 function settingsPage(){if(isGuest())return `<div class="content-inner"><h1>Modo offline</h1><p>Para personalizar la cuenta, cerrá el modo offline e iniciá sesión.</p></div>`;return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">PREFERENCIAS</span><h1>Configuración</h1><p>Personalizá la experiencia del launcher.</p></div></div><div class="settings-grid">
- ${updateSection()}${isAdmin()?`<section class="surface-card cloud-settings"><div class="card-heading">${I('cloud',20)} Publicación de VIS Universe</div><p class="muted">URL HTTPS del JSON público en GitHub Pages o Cloudflare R2. Se configura localmente; para distribuirla a todos, incluí VIS_CATALOG_URL al compilar el launcher.</p><form id="cloud-catalog-form" class="settings-form"><label class="field-label">Dirección del catálogo<input type="url" name="url" placeholder="https://usuario.github.io/vis/catalog.json" value="${attr(cloudCatalog?.source||'')}"/></label><button class="outline-btn">Guardar catálogo</button></form><form id="universe-publish-form" class="settings-form"><label class="field-label">Credencial de publicación del servidor (no se guarda)<input type="password" name="token" minlength="32" autocomplete="off" required placeholder="Credencial Cloudflare Worker"/></label><button class="primary-btn">Publicar proyectos y novedades</button><small>Publica los proyectos locales de VIS STUDIOS en el catálogo central. Los usuarios recibirán los cambios cuando abran VIS.</small></form></section>`:''}<section class="surface-card"><div class="card-heading">${I('monitor',21)} Rendimiento</div><label class="toggle-line"><span><b>Reducir animaciones</b><small>Evita movimientos decorativos innecesarios.</small></span><input type="checkbox" id="reduced-motion" ${prefs.reducedMotion?'checked':''}/></label><label class="toggle-line"><span><b>Panel de amigos</b><small>Mostrar el panel social a la derecha.</small></span><input type="checkbox" id="social-visibility" ${socialVisible?'checked':''}/></label></section>
+ ${updateSection()}${downloadsHistorySection()}${isAdmin()?`<section class="surface-card cloud-settings"><div class="card-heading">${I('cloud',20)} Publicación de VIS Universe</div><p class="muted">URL HTTPS del JSON público en GitHub Pages o Cloudflare R2. Se configura localmente; para distribuirla a todos, incluí VIS_CATALOG_URL al compilar el launcher.</p><form id="cloud-catalog-form" class="settings-form"><label class="field-label">Dirección del catálogo<input type="url" name="url" placeholder="https://usuario.github.io/vis/catalog.json" value="${attr(cloudCatalog?.source||'')}"/></label><button class="outline-btn">Guardar catálogo</button></form><form id="universe-publish-form" class="settings-form"><label class="field-label">Credencial de publicación del servidor (no se guarda)<input type="password" name="token" minlength="32" autocomplete="off" required placeholder="Credencial Cloudflare Worker"/></label><button class="primary-btn">Publicar proyectos y novedades</button><small>Publica los proyectos locales de VIS STUDIOS en el catálogo central. Los usuarios recibirán los cambios cuando abran VIS.</small></form></section>`:''}<section class="surface-card"><div class="card-heading">${I('monitor',21)} Rendimiento</div><label class="toggle-line"><span><b>Reducir animaciones</b><small>Evita movimientos decorativos innecesarios.</small></span><input type="checkbox" id="reduced-motion" ${prefs.reducedMotion?'checked':''}/></label><label class="toggle-line"><span><b>Panel de amigos</b><small>Mostrar el panel social a la derecha.</small></span><input type="checkbox" id="social-visibility" ${socialVisible?'checked':''}/></label></section>
  <section class="surface-card"><div class="card-heading">${I('database',21)} VIS Maintenance</div><p class="muted">Analizá espacio recuperable de forma segura, sin tocar mundos, mods, cuentas ni conversaciones.</p><button class="outline-btn" data-action="go-maintenance">${I('sliders',17)} Abrir centro de mantenimiento</button></section>
  <section class="surface-card"><div class="card-heading">${I('shield',21)} Estado de integraciones</div><div class="detail-line"><span>Cliente Tauri 2</span><strong class="success-text">Interfaz local</strong></div><div class="detail-line"><span>Inicio de sesión</span><strong class="success-text">Local Argon2id</strong></div><div class="detail-line"><span>Microsoft OAuth</span><strong>Por conectar</strong></div><div class="detail-line"><span>Minecraft installer</span><strong>Motor local Vanilla / Fabric</strong></div><div class="detail-line"><span>Chat por Internet</span><strong>Por conectar</strong></div></section>
  ${isAdmin()?`<section class="surface-card wide"><div class="card-heading">${I('sliders',21)} Identidad del launcher</div><p class="muted">El acceso utiliza un fondo violeta sólido. Podés personalizar la marca con el editor de imágenes.</p><form id="brand-form" class="settings-form"><label class="field-label">Nombre del launcher<input name="name" maxlength="40" value="${attr(db.branding?.name||'VIS Nexo')}"/></label><button class="outline-btn">Guardar nombre</button></form><div class="asset-settings"><button class="asset-setting" data-action="import-launcher-logo">${I('upload',17)} Logo del launcher</button><button class="asset-setting" data-action="import-home">${I('image',17)} Portada de Inicio</button>${db.branding?.home_image?`<button class="asset-setting" data-action="clear-client-asset" data-kind="home">${I('trash',16)} Quitar portada</button>`:''}${db.branding?.launcher_logo?`<button class="asset-setting" data-action="clear-client-asset" data-kind="launcher_logo">${I('trash',16)} Quitar logo del launcher</button>`:''}</div></section>`:''}
@@ -1106,23 +1107,54 @@ async function refreshCloudCatalog(silent=false){
  finally{cloudCatalogBusy=false;if(generation===accountGeneration)render();}
 }
 async function downloadCloudBundle(id){const project=cloudCatalog?.projects?.find(p=>p.id===id);if(!project||!confirm(`¿Descargar el archivo de ${project.name}? Se guardará en VIS/descargas. El archivo no se ejecutará automáticamente.`))return;try{const path=await command('download_cloud_bundle',{projectId:id});message(`Paquete descargado: ${path}`);}catch(e){message(String(e),true);}}
+function activeDownload(){
+ return downloadJobs.find(j=>j.owner===db.user?.username&&['running','cancelling'].includes(j.status))||null;
+}
+function downloadStatusName(status){
+ return ({running:'En curso',cancelling:'Cancelando',completed:'Completada',
+  cancelled:'Cancelada',failed:'Con error'})[status]||'Desconocida';
+}
+function downloadsHistorySection(){
+ const jobs=downloadJobs.filter(j=>j.owner===db.user?.username).slice(0,8);
+ return '<section class="surface-card wide vis-download-history">'+
+   '<div class="card-heading">'+I('download',20)+' VIS Download Manager</div>'+
+   '<p class="muted">Instalaciones de Minecraft Java y Horizon de esta sesión. Una instalación a la vez. Cancelar detiene la próxima operación segura sin borrar archivos verificados.</p>'+
+   '<button class="outline-btn" data-action="refresh-downloads">'+I('refresh',16)+' Actualizar estado</button>'+
+   (jobs.length?jobs.map(job=>'<div class="detail-line"><span>'+esc(job.label)+
+     ' · '+esc(job.stage)+'</span><strong>'+esc(downloadStatusName(job.status))+'</strong></div>').join(''):
+     '<p class="muted">Todavía no hay instalaciones registradas en esta sesión.</p>')+
+   '</section>';
+}
+async function refreshDownloadJobs(){
+ if(!native||!db.user)return;
+ try{downloadJobs=await command('download_jobs');}
+ catch(error){message('No se pudo consultar Descargas: '+String(error),true);}
+}
 function downloadDock(){
  if(!minecraftBusy)return '';
- const progress=installProgress||{stage:'init',completed:0,total:0,detail:'Preparando instalación'};
- const total=Number(progress.total)||0,completed=Math.max(0,Math.min(total,Number(progress.completed)||0));
+ const job=activeDownload();
+ const progress=job?.total?job:(installProgress||job||{stage:'init',completed:0,total:0,detail:'Preparando instalación'});
+ const total=Math.max(0,Number(progress.total)||0);
+ const completed=Math.max(0,Math.min(total,Number(progress.completed)||0));
  const pct=total?Math.min(100,Math.round(completed*100/total)):0;
- const stage={libraries:'Bibliotecas y versión',indexes:'Índice de recursos',assets:'Archivos de Minecraft',java:'Java',done:'Instalación completada'}[progress.stage]||'Preparación';
- return `<aside class="vis-download-dock" id="vis-download-dock" role="status" aria-live="polite"><div class="vis-download-head"><span>${I('upload',15)} <b>Instalando Minecraft · ${esc(stage)}</b></span><strong id="vis-download-percent">${total?pct+'%':'…'}</strong></div><div class="vis-download-track" role="progressbar" aria-label="Progreso de etapa" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span id="vis-download-fill" style="width:${pct}%"></span></div><small id="vis-download-detail">${esc(progress.detail||'Preparando archivos')} ${total?`· ${completed}/${total} archivos de esta etapa`:''}</small></aside>`;
+ const stage={libraries:'Bibliotecas y versión',indexes:'Índice de recursos',assets:'Archivos de Minecraft',
+  java:'Java',done:'Instalación completada',init:'Preparación'}[progress.stage]||progress.stage||'Preparación';
+ const cancelling=job?.status==='cancelling';
+ return '<aside class="vis-download-dock" id="vis-download-dock" role="status" aria-live="polite">'+
+  '<div class="vis-download-head"><span>'+I('download',15)+' <b>'+
+  esc(cancelling?'Cancelando instalación':job?.label||'Instalando Minecraft')+' · '+esc(stage)+'</b></span>'+
+  '<strong id="vis-download-percent">'+(total?pct+'%':'…')+'</strong></div>'+
+  '<div class="vis-download-track" role="progressbar" aria-label="Progreso de la etapa" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+pct+'">'+
+   '<span id="vis-download-fill" style="width:'+pct+'%"></span></div>'+
+  '<small id="vis-download-detail">'+esc(job?.detail||progress.detail||'Preparando archivos')+
+     (total?' · '+completed+'/'+total+' en la etapa':'')+'</small>'+
+  (job?'<button class="outline-btn" data-action="cancel-active-download" '+(cancelling?'disabled':'')+'>'+
+      I('x',14)+' '+(cancelling?'Cancelación solicitada':'Cancelar instalación')+'</button>':'')+
+  '</aside>';
 }
 function updateDownloadDock(){
- const bar=root.querySelector('#vis-download-dock');if(!bar)return;
- const p=installProgress||{};const count=Number(p.total)||0;const done=Math.max(0,Math.min(count,Number(p.completed)||0));const pct=count?Math.round(done*100/count):0;
- const stage={libraries:'Bibliotecas y versión',indexes:'Índice de recursos',assets:'Archivos de Minecraft',java:'Java',done:'Instalación completada'}[p.stage]||'Preparación';
- const headline=bar.querySelector('b');if(headline)headline.textContent='Instalando Minecraft · '+stage;
- const percent=bar.querySelector('#vis-download-percent');if(percent)percent.textContent=count?pct+'%':'…';
- const fill=bar.querySelector('#vis-download-fill');if(fill)fill.style.width=pct+'%';
- const track=bar.querySelector('.vis-download-track');if(track)track.setAttribute('aria-valuenow',String(pct));
- const detail=bar.querySelector('#vis-download-detail');if(detail)detail.textContent=String(p.detail||'Preparando archivos')+(count?` · ${done}/${count} archivos de esta etapa`:'');
+ const dock=root.querySelector('#vis-download-dock');
+ if(dock){const next=downloadDock();if(next)dock.outerHTML=next;}
 }
 function shell(){return `<div class="app-shell ${socialVisible&&!isGuest()?'has-social':''}">${sidebar()}<div class="main-column">${header()}<main class="main-scroll" id="main-scroll">${page==='home'?homePage():page==='project'?projectPage():page==='profile'?profilePage():page==='instances'?instancesPage():page==='minecraft'?minecraftPage():page==='settings'?settingsPage():page==='maintenance'?maintenancePage():page==='cloud'?cloudPage():assetsPage()}</main></div>${isGuest()?'':socialPanel()}</div>${downloadDock()}${contextMenu?contextMenuView():''}${dialog?dialogView():''}`;}
 function contextMenuView(){const p=db.projects.find(p=>p.id===contextMenu.id);if(!p||!isAdmin())return '';return `<div class="context-menu" style="left:${Math.min(contextMenu.x,innerWidth-230)}px;top:${Math.min(contextMenu.y,innerHeight-170)}px"><div class="context-title">${esc(p.title)}</div><button data-action="edit-project" data-id="${attr(p.id)}">${I('edit',16)} Editar proyecto</button><button data-action="open-project" data-id="${attr(p.id)}">${I('external',16)} Abrir página</button><button data-action="toggle-project-execution" data-id="${attr(p.id)}">${I('shield',16)} ${db.project_execution?.[p.id]===false?'Habilitar Minecraft':'Bloquear Minecraft'}</button><button class="destructive" data-action="delete-project" data-id="${attr(p.id)}">${I('trash',16)} Eliminar proyecto</button></div>`;}
@@ -1771,6 +1803,17 @@ root.addEventListener('click',async event=>{
  else if(act==='refresh-cloud')await refreshCloudCatalog();
  else if(act==='download-cloud-bundle')await downloadCloudBundle(id);
  else if(act==='check-update')await checkAppUpdate();
+ else if(act==='refresh-downloads'){await refreshDownloadJobs();render();}
+ else if(act==='cancel-active-download'){
+   const job=activeDownload();
+   if(!job||job.status!=='running')return;
+   if(!window.confirm('¿Cancelar la instalación en curso? Los archivos completos y verificados se conservarán; la etapa actual puede tardar en detenerse.'))return;
+   try{const status=await command('cancel_download',{id:job.id});
+     downloadJobs=[status,...downloadJobs.filter(j=>j.id!==status.id)];
+     updateDownloadDock();
+     message('Cancelación solicitada. VIS detendrá la descarga en un punto seguro.');
+   }catch(error){message('No se pudo cancelar la instalación: '+String(error),true);}
+ }
  else if(act==='install-update')await installAppUpdate();
  else if(act==='go-maintenance'){navigate('maintenance');void loadMaintenance();}
  else if(act==='legacy-cleanup-preview')await loadLegacy();
@@ -2368,6 +2411,13 @@ async function removeMcFile(kind,file){
 async function boot(){
  if(native&&T?.event?.listen){
   T.event.listen('minecraft-progress',e=>{installProgress=e.payload;const el=document.querySelector('#minecraft-progress');if(el)el.textContent=`${e.payload.stage}: ${e.payload.completed}/${e.payload.total} · ${e.payload.detail}`;updateDownloadDock();}).catch(()=>{});
+  T.event.listen('vis-download-state',e=>{
+     const job=e.payload;
+     if(!job||!db.user||job.owner!==db.user.username)return;
+     downloadJobs=[job,...downloadJobs.filter(j=>j.id!==job.id)].slice(0,9);
+     if(page==='settings'&&['completed','cancelled','failed'].includes(job.status))render();
+     else updateDownloadDock();
+   }).catch(()=>{});
   T.event.listen('minecraft-process-exited',e=>{
     lastMinecraftExit=e.payload;
     if(!e.payload.success)message(`Minecraft finalizó con error (${e.payload.exit_code??'sin código'}). Revisá el log: ${e.payload.log_file}`,true);
@@ -2375,7 +2425,7 @@ async function boot(){
     if(page==='minecraft'||page==='instances')render();
   }).catch(()=>{});
 }
- try {db=await command('get_state');await refreshAssets();}
+ try {db=await command('get_state');await refreshAssets();await refreshDownloadJobs();}
  catch(e){message(`No se pudo inicializar el cliente: ${String(e)}`,true);}
  render();
  if(native){void checkAppUpdate(true);void refreshCloudCatalog(true);}
