@@ -715,7 +715,7 @@ function socialPanel(){
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
  ${socialTab==='projects'&&!projectId?`<p class="social-empty">Abrí un proyecto para ver contactos que también lo siguen.</p>`:''}
- ${projectFriends.filter(f=>(f.username+' '+(f.alias||'')+' '+(f.display_name||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${socialAvatarHtml(f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.display_name||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span>${socialSkins.get(f.username)?.head?`<img class="friend-skin-thumb" src="${attr(socialSkins.get(f.username).head)}" alt="Skin VIS de ${attr(f.username)}" title="Skin compartida en VIS"/>`:''}<span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
+ ${projectFriends.filter(f=>(f.username+' '+(f.public_handle||'')+' '+(f.alias||'')+' '+(f.display_name||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${socialAvatarHtml(f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.display_name||f.username)}</b><small>${esc(f.alias?f.username+' · ':'')}${names[f.presence]||'Desconectado'}</small></span>${socialSkins.get(f.username)?.head?`<img class="friend-skin-thumb" src="${attr(socialSkins.get(f.username).head)}" alt="Skin VIS de ${attr(f.username)}" title="Skin compartida en VIS"/>`:''}<span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
@@ -725,8 +725,8 @@ function socialPanel(){
  `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
- <div class="social-bottom"><button type="button" class="mini-add" data-action="skin-lookup" title="Ver la skin pública de cualquier cuenta VIS">${I('game',14)} Buscar skin pública VIS</button><button type="button" class="mini-add" data-action="social-copy-handle" title="Compartir este usuario para que te agreguen a VIS Portals">${I('copy',14)} Copiar mi usuario VIS</button><form id="friend-form" class="friend-add-row"><input name="username" placeholder="Usuario VIS (no gamertag)" aria-label="Usuario VIS de tu amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
- <small class="muted">Para agregar amigos Premium compartan su <b>usuario VIS</b>, no el nombre de Minecraft.</small>
+ <div class="social-bottom"><button type="button" class="mini-add" data-action="skin-lookup" title="Ver la skin pública de cualquier cuenta VIS">${I('game',14)} Buscar skin pública VIS</button><button type="button" class="mini-add" data-action="social-copy-handle" title="Compartir este usuario para que te agreguen a VIS Portals">${I('copy',14)} Copiar mi usuario VIS</button><form id="friend-form" class="friend-add-row"><input name="username" placeholder="@usuario VIS o ID" aria-label="@usuario VIS o ID pública de tu amigo" minlength="3" maxlength="24" required/><button title="Enviar solicitud">${I('plus',19)}</button></form>
+ <small class="muted">Para encontrar amigos usá su <b>@usuario VIS</b> o ID; su nombre de Minecraft puede cambiar.</small>
  <span class="local-hint" title="${attr(socialError)}">${I('shield',13)} ${socialMode==='connected'?'VIS Social · Mensajes cifrados':socialMode==='connecting'?'Conectando VIS Social…':socialMode==='degraded'?'VIS Social · Reconectando…':socialMode==='security_warning'?'ALERTA: verificar clave del contacto':'Modo local · VIS Social desconectado'}</span>${native&&socialMode!=='connected'?`<button type="button" class="icon-btn" data-action="social-retry" title="Reintentar VIS Social" aria-label="Reintentar conexión">${I('cloud',14)}</button>`:''}</div>
  ${chatWith?chatDock():''}
  </aside>`;
@@ -1808,7 +1808,7 @@ root.addEventListener('submit',async event=>{
  if(form.id==='modrinth-search-form'){await performModSearch(formData);return;}
  if(form.id==='quick-publish-form'){await saveQuickPublish(form);return;}
  if(form.id==='friend-form'){
-  const username=String(formData.get('username')||'');
+  const username=String(formData.get('username')||'').trim().replace(/^@/,'').toLowerCase();
   if(!username)return;
   if(!social.connected()){message('VIS Social sin conexión: solicitud no enviada.',true);return;}
   try {await social.friendRequest(username);message('Solicitud enviada a '+username);}
@@ -2093,11 +2093,20 @@ root.addEventListener('click',async event=>{
    try{await social.setDisplayName(text);message('Nombre público actualizado. No cambia tu usuario técnico ni tus amigos.');render();}
    catch(error){message(String(error),true);}
  }
+ else if(act==='social-save-public-handle'){
+   const requested=document.getElementById('social-public-handle')?.value?.trim().toLowerCase()||'';
+   if(!social.connected())return message('Conectá VIS Social para elegir tu @usuario.',true);
+   if(!/^[a-z0-9_]{3,24}$/.test(requested))return message('Usá de 3 a 24 letras, números o guion bajo.',true);
+   try{
+     const saved=await social.setPublicHandle(requested);
+     message('Tu identidad pública es @'+saved.public_handle+'. Conservaste tus amigos y chats.');render();
+   }catch(error){message(String(error),true);}
+ }
  else if(act==='social-copy-handle'){
-   const handle=db.user?.username||'';
-   if(!handle)return message('No hay cuenta VIS activa.',true);
+   if(!social.connected())return message('Conectá VIS Social para compartir tu identidad.',true);
+   const handle='@'+publicVisHandle();
    try{await navigator.clipboard.writeText(handle);message('Usuario VIS copiado: '+handle);}
-   catch{window.prompt('Compartí este usuario VIS para recibir solicitudes (no el gamertag):',handle);}
+   catch{window.prompt('Compartí este @usuario VIS para recibir solicitudes:',handle);}
  }
  else if(act==='social-retry'){if(!social.connected())void connectSocial();}
  else if(act==='social-custom-status'){
