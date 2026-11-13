@@ -24,6 +24,7 @@ pub struct TeamPreview {
     pub project_id:String,
     pub files:Vec<String>,
     pub total_bytes:u64,
+    pub review_sha256:String,
     pub excluded:Vec<String>,
     pub warnings:Vec<String>,
 }
@@ -195,16 +196,32 @@ fn gather(game:&Path,project:&GameProject,options:TeamOptions)
     files.sort();
     Ok((files,excluded,bytes))
 }
+fn file_entries(game:&Path,files:&[PathBuf])->Result<Vec<FileEntry>,String>{
+    files.iter().map(|file|{
+        let path=file.strip_prefix(game).map_err(|_|"Ruta fuera de la instancia")?
+            .to_string_lossy().replace('\\',"/");
+        let (sha256,size_bytes)=fingerprint_file(file)?;
+        Ok(FileEntry{path,sha256,size_bytes})
+    }).collect()
+}
+fn review_sha256(project:&GameProject,options:TeamOptions,entries:&[FileEntry])->Result<String,String>{
+    let serialized=serde_json::to_vec(&(
+        &project.id,&project.engine,&project.mc_version,&project.loader,
+        &project.loader_version,&project.modrinth_mods,options,entries
+    )).map_err(|e|e.to_string())?;
+    Ok(format!("{:x}",Sha256::digest(serialized)))
+}
 pub fn preview(game:&Path,project:&GameProject,options:TeamOptions)->Result<TeamPreview,String>{
     let (files,excluded,total_bytes)=gather(game,project,options)?;
+    let entries=file_entries(game,&files)?;
+    let review_sha256=review_sha256(project,options,&entries)?;
     let mut warnings=vec!["Revisá cada configuración antes de publicar: algunos mods pueden guardar datos personales o claves en archivos de texto.".into()];
     if options.include_servers{warnings.push("Se compartirán las IP y direcciones guardadas en servers.dat.".into());}
     if options.include_waypoints{warnings.push("Se compartirán coordenadas y puntos de mapa privados.".into());}
     if options.include_packs{warnings.push("Publicá únicamente paquetes de recursos que tengas permiso de redistribuir.".into());}
     Ok(TeamPreview{project_id:project.id.clone(),
-        files:files.iter().map(|p|p.strip_prefix(game).unwrap_or(p)
-            .to_string_lossy().replace('\\',"/")).collect(),
-        excluded,total_bytes,warnings})
+        files:entries.iter().map(|e|e.path.clone()).collect(),
+        review_sha256,excluded,total_bytes,warnings})
 }
 fn fingerprint_file(path:&Path)->Result<(String,u64),String>{
     let mut input=File::open(path).map_err(|e|e.to_string())?;
@@ -218,14 +235,13 @@ fn fingerprint_file(path:&Path)->Result<(String,u64),String>{
     }
     Ok((format!("{:x}",hash.finalize()),total))
 }
-pub fn build(game:&Path,output_root:&Path,project:&GameProject,options:TeamOptions)->Result<TeamPack,String>{
+pub fn build(game:&Path,output_root:&Path,project:&GameProject,options:TeamOptions,
+             expected_review:&str)->Result<TeamPack,String>{
     let (files,_,_)=gather(game,project,options)?;
-    let entries=files.iter().map(|file|{
-        let path=file.strip_prefix(game).map_err(|_|"Ruta fuera de la instancia")?
-            .to_string_lossy().replace('\\',"/");
-        let (sha256,size_bytes)=fingerprint_file(file)?;
-        Ok(FileEntry{path,sha256,size_bytes})
-    }).collect::<Result<Vec<_>,String>>()?;
+    let entries=file_entries(game,&files)?;
+    if expected_review.len()!=64||review_sha256(project,options,&entries)?!=expected_review{
+        return Err("Los archivos cambiaron desde la vista previa. Revisá antes de publicar.".into());
+    }
     let manifest=serde_json::json!({
         "format_version":1,
         "project_id":&project.id,
@@ -453,7 +469,7 @@ mod tests{
             ..Default::default()};
         let list=preview(&game,&project,TeamOptions::default()).unwrap();
         assert_eq!(list.files,vec!["config/test.json"]);
-        let package=build(&game,&root,&project,TeamOptions::default()).unwrap();
+        let package=build(&game,&root,&project,TeamOptions::default(),&list.review_sha256).unwrap();
         assert!(package.size_bytes>0);
         let imported=apply(&dest,Path::new(&package.archive),&project,false,false).unwrap();
         assert_eq!(imported.installed,1);
