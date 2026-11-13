@@ -72,6 +72,8 @@ export type NativeCommandMap = {
   login_offline: {args: {nickname: string}; result: Snapshot};
   minecraft_versions: {args: Record<string, never>; result: {id: string;kind: string}[]};
   fabric_loaders: {args: {version: string}; result: string[]};
+  portals_games: {args: Record<string,never>;result:{pid:number;name:string}[]};
+  portals_command: {args:{pid:number;action:'host'|'stop'|'status'|'join';code:string|null};result:{ok:boolean|null;sharing:boolean|null;code:string|null;can_join:boolean|null;summary:string|null;sessions:number|null}};
   horizon_probe: {args: {projectId:string;name:string};result:{build:string;minecraft:string;api:string;java_major:number;resources_ready:boolean}};
   horizon_installed_builds: {args: Record<string, never>;result:{tag:string;build_dir:string;integrity:string;detail:string}[]};
   horizon_latest_release: {args: Record<string, never>;result:{tag:string;archive:string;size:number;published:string}};
@@ -111,3 +113,4 @@ export async function typedInvoke<K extends NativeCommandName>(
 ): Promise<NativeCommandResult<K>> {
   return await invoke(command, args) as NativeCommandResult<K>;
 }
+

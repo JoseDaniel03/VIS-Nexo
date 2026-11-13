@@ -18,7 +18,8 @@ class D1Database {
       '../services/social/migrations/0007_public_skins.sql',
       '../services/social/migrations/0008_fix_cloud_device_key_unique.sql',
        '../services/social/migrations/0009_realtime_tickets.sql',
-       '../services/social/migrations/0010_public_handles.sql'
+       '../services/social/migrations/0010_public_handles.sql',
+       '../services/social/migrations/0011_world_invites.sql'
     ]) this.sqlite.exec(readFileSync(new URL(path, import.meta.url), 'utf8'));
   }
   prepare(sql) {
@@ -104,7 +105,7 @@ async function account(username) {
 }
 let response = await call('/health');
 assert.equal(response.status, 200, JSON.stringify(response));
-assert.equal(response.data.schema, 10);
+assert.equal(response.data.schema, 11);
 assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
@@ -212,6 +213,7 @@ const png64=png.toString('base64');
 assert.equal((await call('/v1/skins/upload',{mime:'image/webp',data:png64},bob.token)).status,400);
 assert.equal((await call('/v1/skins/upload',{mime:'image/png',data:png64},bob.token)).status,200);
 const charlie=await account('charlie');
+
 const publicSkin=await call('/v1/skins/get',{username:'bob'},charlie.token);
 assert.equal(publicSkin.status,200,'public to authenticated non-friend');
 assert.equal(publicSkin.data.skin,'data:image/png;base64,'+png64);
@@ -539,3 +541,4 @@ assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get
   }
 }
 console.log('VIS Social authentication, encrypted delivery and D1 migrations passed');
+

@@ -15,6 +15,7 @@ mod team_pack;
 mod updates;
 mod ombu;
 mod horizon;
+mod portals;
 mod horizon_download;
 mod download_manager;
 mod social;
@@ -1457,13 +1458,33 @@ async fn launch_horizon(
         let effective=session_path.as_ref()
             .map(|p|p.to_string_lossy().into_owned())
             .unwrap_or(session_file);
+        let game_dir=if let Some(player)=visitor.as_ref() {
+            minecraft::shared_game_directory(&root,&owner,&instance,player)?
+        }else{dir.clone()};
         let outcome=if let Some(player)=visitor {
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
             horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir)
         }else{horizon::launch(&app,&dir,&instance,&effective)};
+        if let Ok(ref launched)=outcome {
+            portals::register(active,launched.pid,instance.name.clone(),game_dir.join(".vis/portals.json"));
+        }
         if let Some(path)=session_path{let _=fs::remove_file(path);}
         outcome
     }).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+fn portals_games(state:State<'_,Mutex<Backend>>)->Result<Vec<portals::Game>,String>{
+    let s=locked(&state)?;
+    Ok(portals::list(s.username()?))
+}
+#[tauri::command]
+async fn portals_command(state:State<'_,Mutex<Backend>>,pid:u32,action:String,code:Option<String>)->Result<serde_json::Value,String>{
+    let owner={let s=locked(&state)?;s.username()?.to_owned()};
+    let task_owner=owner.clone();
+    let result=tauri::async_runtime::spawn_blocking(move||portals::command(&task_owner,pid,&action,code.as_deref())).await.map_err(|e|e.to_string())??;
+    {let s=locked(&state)?;if s.username()?!=owner{return Err("Cambió la cuenta activa".into());}}
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1889,7 +1910,7 @@ fn main() {
             social::social_cloud_register, social::social_cloud_login,
             social::social_enable_cloud_password,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
-            set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
+            portals_games, portals_command, set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project
@@ -1897,3 +1918,4 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
 }
+

@@ -324,7 +324,7 @@ pub(crate) async fn social_request(
     social: State<'_, Mutex<SocialSession>>,
     path: String, method: String, body: Option<Value>
 ) -> Result<Value, String> {
-    const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects"];
+    const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects", "/v1/worlds/inbox"];
     const POST: &[&str] = &[
         "/v1/keys", "/v1/presence", "/v1/avatar/upload", "/v1/avatar/get",
         "/v1/skins/upload", "/v1/skins/get", "/v1/skins/delete", "/v1/account/display", "/v1/account/handle",
@@ -333,7 +333,8 @@ pub(crate) async fn social_request(
         "/v1/admin/projects/staff", "/v1/admin/accounts/role",
         "/v1/admin/accounts/disable", "/v1/friends/request",
         "/v1/friends/accept", "/v1/friends/alias",
-        "/v1/messages/send", "/v1/messages/ack"
+        "/v1/messages/send", "/v1/messages/ack",
+        "/v1/worlds/host", "/v1/worlds/close", "/v1/worlds/invite", "/v1/worlds/accept", "/v1/worlds/decline"
     ];
     if !(method == "GET" && GET.contains(&path.as_str())
         || method == "POST" && POST.contains(&path.as_str())) {
@@ -409,3 +410,4 @@ pub(crate) async fn social_disconnect(
     }
     Ok(())
 }
+

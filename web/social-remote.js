@@ -109,6 +109,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
   let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
   let historyRequest=0;
+  let worldInvitations=[];
   let realtimeSocket=null,realtimeRetry=null,realtimeFailures=0;
   let realtimeConnecting=false,realtimeAttempt=0,realtimeOpenedAt=0;
   let wakeupQueued=false;
@@ -326,6 +327,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       // trip must not delay chat rendering; an ACK error leaves the pending
       // envelope on the server so it can be re-delivered safely.
       state = fresh;
+      // An older service remains usable for chat until its migration is deployed.
+      await refreshWorldInvitations().catch(()=>{worldInvitations=[];});
       if(newMessages)await refreshLocalMessages();
       if(!valid())return;
       consecutiveErrors=0;
@@ -345,7 +348,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         if(interval){clearTimeout(interval);interval=null;}
         stopRealtime();
         sessionEpoch++;
-        state=null;keys=null;messages=[];lastFingerprint='';currentUser='';
+        worldInvitations=[];state=null;keys=null;messages=[];lastFingerprint='';currentUser='';
         historyRequest++;pinnedPeers.clear();derivedKeys.clear();
         if(privateDb){privateDb.close();privateDb=null;}
         status('disconnected','La sesión VIS Social expiró. Volvé a conectar la cuenta.');
@@ -425,7 +428,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('online', onOnline);
     const wasConnected=!!state;
-    state=null;keys=null;currentUser='';messages=[];lastFingerprint='';
+    worldInvitations=[];state=null;keys=null;currentUser='';messages=[];lastFingerprint='';
     historyRequest++;pinnedPeers.clear();derivedKeys.clear();
     lastHeartbeat=0;consecutiveErrors=0;busy=false;
     if(privateDb){privateDb.close();privateDb=null;}
@@ -480,6 +483,55 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if(!valid())return;
     await refreshLocalMessages();
     if(valid())notify(true);
+  }
+  async function hostWorld(roomId) {
+    if(!connected())throw Error('Conectá VIS Portals para compartir');
+    return rpc('/v1/worlds/host','POST',{room_id:roomId});
+  }
+  async function closeWorld(roomId) {
+    if(connected())return rpc('/v1/worlds/close','POST',{room_id:roomId});
+  }
+  async function inviteWorld(to, roomId, code) {
+    if(!connected())throw Error('Conectá VIS Portals para invitar');
+    const epoch=sessionEpoch,from=currentUser;
+    const friend=(state.friends||[]).find(f=>f.username===to);
+    if(!friend?.public_key)throw Error('Tu amigo debe conectar VIS Portals');
+    const id=crypto.randomUUID().replace(/-/g,'');
+    const pub=await verifiedPeerKey(friend),aes=await peerAesKey(to,pub);
+    const payload=await encrypt(JSON.stringify({v:1,room:roomId,code,minecraft:'26.3'}),from,to,id,aes);
+    if(epoch!==sessionEpoch||from!==currentUser)throw Error('Cambió la cuenta activa');
+    return rpc('/v1/worlds/invite','POST',{id,to,room_id:roomId,payload});
+  }
+  async function refreshWorldInvitations() {
+    if(!connected())return;
+    const epoch=sessionEpoch,username=currentUser;
+    const inbox=await rpc('/v1/worlds/inbox');
+    const invitations=[];
+    for(const row of inbox.invitations||[]){
+      const friend=(state?.friends||[]).find(f=>f.username===row.sender);
+      if(!friend?.public_key)continue;
+      const pub=await verifiedPeerKey(friend),aes=await peerAesKey(row.sender,pub);
+      const value=JSON.parse(await decrypt(row.payload,row.sender,username,row.id,aes));
+      if(value.v!==1||value.room!==row.room_id||value.minecraft!=='26.3'||
+         typeof value.code!=='string'||!/^[a-zA-Z0-9-]{8,1000}$/.test(value.code))continue;
+      invitations.push({...row,code:value.code});
+    }
+    if(epoch===sessionEpoch&&username===currentUser){worldInvitations=invitations;notify(true);}
+  }
+  async function acceptWorld(id) {
+    const epoch=sessionEpoch;
+    // Re-read the live lease and membership before consuming an invitation.
+    await refreshWorldInvitations();
+    const invite=worldInvitations.find(i=>i.id===id);
+    if(!invite||epoch!==sessionEpoch)throw Error('La invitación venció o el mundo está cerrado');
+    await rpc('/v1/worlds/accept','POST',{id});
+    if(epoch!==sessionEpoch)throw Error('Cambió la cuenta activa');
+    worldInvitations=worldInvitations.filter(i=>i.id!==id);notify(true);
+    return invite.code;
+  }
+  async function declineWorld(id) {
+    await rpc('/v1/worlds/decline','POST',{id});
+    worldInvitations=worldInvitations.filter(i=>i.id!==id);notify(true);
   }
   async function getAvatar(username) {
     if (!connected()) throw Error('VIS Social no está conectado');
@@ -570,7 +622,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
     return rpc('/v1/admin/accounts/disable','POST',{username,disabled});
   }
-  return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
+  return { hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
     setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
 }
+

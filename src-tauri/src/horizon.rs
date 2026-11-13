@@ -564,6 +564,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
         let log=File::create(&log_path).map_err(|e|e.to_string())?;
         let mut cmd=Command::new(executable(&folder,"horizon-client"));
         crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
+        cmd.env("VIS_PORTALS_ENDPOINT",game_dir.join(".vis/portals.json"));
         cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
             .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir);
         if !ins.player_name.is_empty(){cmd.arg("--name").arg(&ins.player_name);}
@@ -581,6 +582,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
                 Err(error)=>LaunchExit{pid,success:false,exit_code:None,log_file:exit_log,error:error.to_string()}
             };
             if let Some(window)=emitter.get_webview_window("main"){let _=window.unminimize();}
+            crate::portals::remove(pid);
             let _=emitter.emit("minecraft-process-exited",event);
         });
         return Ok(LaunchResult{pid,log_file,offline:true});
@@ -615,6 +617,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     let log=File::create(&log_path).map_err(|e|e.to_string())?;
     let mut cmd=Command::new(executable(&folder,"horizon-client"));
     crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
+        cmd.env("VIS_PORTALS_ENDPOINT",game_dir.join(".vis/portals.json"));
     // Keep any relative game writes in this player's folder. The engine
     // executable and --resources remain absolute paths in the owner install.
     cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
@@ -641,7 +644,8 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
             Err(error)=>LaunchExit{pid,success:false,exit_code:None,log_file:exit_log,error:error.to_string()}
         };
         if let Some(window)=emitter.get_webview_window("main"){let _=window.unminimize();}
-        let _=emitter.emit("minecraft-process-exited",event);
+        crate::portals::remove(pid);
+            let _=emitter.emit("minecraft-process-exited",event);
     });
     Ok(LaunchResult{pid,log_file,offline:false})
 }
@@ -696,3 +700,4 @@ mod tests {
         assert!(compatible(&client,&prepare,&instance).is_err());
     }
 }
+

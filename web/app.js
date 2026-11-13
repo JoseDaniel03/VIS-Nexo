@@ -1,5 +1,6 @@
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 import { createSocialRemote } from './social-remote.js';
+import { createWorldsPortals } from './worlds-portals.js';
 /* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
    VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
    VIS Nexo 2.17 — Universe / Worlds / Horizon Rust Edition + compartir instancias offline.
@@ -559,6 +560,13 @@ const social = createSocialRemote(command, (snapshot, messages) => {
   socialError = error || '';
   if (db.user) scheduleSocialRender();
 });
+const portalsWorlds=createWorldsPortals(command,social,()=>db.user?.username||'',games=>{
+ const value=window.prompt('Elegí la partida Horizon:\n'+games.map((g,i)=>(i+1)+'. '+g.name).join('\n'),'1');
+ if(value===null)return null;
+ const selected=games[Number(value)-1];
+ if(!selected)throw Error('Partida inválida');
+ return selected;
+},error=>message(String(error),true));
 async function enableSocialCloudPassword(){
  if(!social.connected()){message('Conectá VIS Social para vincular la cuenta.',true);return;}
  const password=window.prompt('Nueva contraseña online (mínimo 10 caracteres, no uses el PIN local):');
@@ -712,6 +720,8 @@ function socialPanel(){
  <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(socialDisplayName(db.user?.username||''))}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')} · Cuenta VIS</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
 
  <div class="social-group-head"><span class="social-contacts-label">${I('users',15)} ${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'} ${db.incoming_requests?.length?`<span class="contact-notification" title="Solicitudes de amistad pendientes">${db.incoming_requests.length}</span>`:''} </span><span>${projectFriends.length}</span></div>
+ ${native&&social.connected()?`<button class="mini-add" data-action="world-stop">Dejar de compartir mundo</button>`:''}
+ ${social.worldInvitations().map(inv=>`<div class="request-row"><span>${esc(inv.sender)} te invita a su mundo · 26.3</span><button class="mini-add" data-action="world-join" data-id="${attr(inv.id)}">Unirme</button><button class="mini-add" data-action="world-decline" data-id="${attr(inv.id)}">Rechazar</button></div>`).join('')}
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
  ${socialTab==='projects'&&!projectId?`<p class="social-empty">Abrí un proyecto para ver contactos que también lo siguen.</p>`:''}
@@ -743,7 +753,7 @@ function chatDrawer(){
  const msgs=db.messages.filter(m=>(m.from===db.user?.username&&m.to===chatWith)||(m.to===db.user?.username&&m.from===chatWith));
  // Bounded DOM rendering: O(min(messages, window)), older messages stay in data.
  const visible=msgs.slice(-chatWindowSize);
- return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b><button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="1300" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
+ return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b>${native&&social.connected()?`<button class="mini-add" data-action="world-invite" data-id="${attr(chatWith)}">Invitar a mi mundo</button>`:''}<button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="1300" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
 }
 function emptyHome(){return `<div class="empty-projects"><div class="empty-orbit">${I('layers',38)}</div><h3>Todavía no hay proyectos</h3><p>${isAdmin()?'Creá el primer proyecto y personalizá su identidad visual desde el administrador.':'Los proyectos publicados aparecerán acá automáticamente. Si no tenés un catálogo configurado, VIS Studios debe vincular primero la URL pública de Universe.'}</p>${isAdmin()?`<button class="outline-btn" data-action="create-project">${I('plus',17)} Crear proyecto</button>`:''}</div>`;}
 function modeSelector(){
@@ -1987,6 +1997,10 @@ root.addEventListener('click',async event=>{
  else if(act==='toggle-social'){if(socialVisible){beginSurfaceDismiss(root,'.social-pane',()=>{socialVisible=false;render();},{reducedMotion:prefs.reducedMotion});}else{socialVisible=true;render();}}
  else if(act==='social-global'){socialTab='global';render();}
  else if(act==='social-projects'){socialTab='projects';render();}
+ else if(act==='world-invite'){try{await portalsWorlds.invite(id);message('Invitación enviada. El mundo se ejecuta en tu PC.');}catch(error){message(String(error),true);}}
+ else if(act==='world-join'){try{await portalsWorlds.join(id);message('Conectando al mundo de tu amigo…');}catch(error){message(String(error),true);}}
+ else if(act==='world-decline'){try{await social.declineWorld(id);}catch(error){message(String(error),true);}}
+ else if(act==='world-stop'){try{await portalsWorlds.stop();message('Dejaste de compartir el mundo.');}catch(error){message(String(error),true);}}
  else if(act==='open-chat'){chatWith=id;chatWindowSize=100;social.setChatActive(true);render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';social.setChatActive(false);render();},{reducedMotion:prefs.reducedMotion});}
@@ -2622,3 +2636,4 @@ async function boot(){
  if(native){void checkAppUpdate(true);void refreshCloudCatalog(true);}
 }
 boot();
+

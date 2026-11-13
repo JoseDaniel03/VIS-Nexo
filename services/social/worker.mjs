@@ -1,3 +1,4 @@
+import { worldInvites } from "./world-invites.mjs";
 // VIS Social, authenticated Cloudflare Worker. The launcher PIN never leaves the PC.
 // Ed25519 proof-of-possession authenticates a local device. D1 stores only hashes of
 // temporary bearer sessions and opaque ECDH/AES-GCM encrypted message envelopes.
@@ -919,7 +920,8 @@ async function cleanup(db) {
     db.prepare("DELETE FROM auth_sessions WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM auth_rate_limits WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM pending_messages WHERE expires_at<? OR acknowledged_at IS NOT NULL").bind(t),
-    db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t)
+    db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM world_rooms WHERE lease_until<?").bind(t-3600)
   ]);
 }
 export default {
@@ -938,15 +940,15 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets','public_handle_history')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets','public_handle_history','world_rooms','world_invites')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
           "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version','public_handle','public_handle_updated_at')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 15 &&
+        const ready = new Set((tables.results || []).map(x => x.name) ).size === 17 &&
           new Set((columns.results || []).map(x=>x.name)).size === 8;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 10 : 0 },
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 11 : 0 },
           ready ? 200 : 503);
       }
       if (method === "GET" && path === "/v1/realtime/connect")return await consumeRealtimeTicket(request,db,env);
@@ -976,6 +978,10 @@ export default {
       if (method === "POST" && path === "/v1/skins/upload") return await uploadSkin(request,db,user);
       if (method === "POST" && path === "/v1/skins/get") return await getSkin(request,db,user);
       if (method === "POST" && path === "/v1/skins/delete") return await deleteSkin(request,db,user);
+      if ((method === "GET" && path === "/v1/worlds/inbox") ||
+          (method === "POST" && ["host","close","invite","accept","decline"].some(action=>path===`/v1/worlds/${action}`)))
+        return await worldInvites(path,request,db,user,{parseBody,bad,reply,now,areFriends,lookupUser,rateLimit,
+          wakeRealtime:(env,id,ctx)=>notifyUser(env,ctx,id),env,ctx});
       if (method === "POST" && path === "/v1/keys") return await setKey(request, db, user);
       if (method === "POST" && path === "/v1/friends/request") return await friendRequest(request, db, user,env,ctx);
       if (method === "POST" && path === "/v1/friends/accept") return await friendAccept(request, db, user,env,ctx);
@@ -1002,3 +1008,4 @@ export default {
     if (env?.DB) await cleanup(env.DB);
   }
 };
+
