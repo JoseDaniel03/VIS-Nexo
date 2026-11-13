@@ -44,13 +44,14 @@ class D1Database {
   }
 }
 const DB = new D1Database();
-const notifications=[];
+const notifications=[],revocations=[];
 const env={
   DB,DEBUG_ERRORS:true,
   REALTIME:{
     idFromName:id=>id,
     get:id=>({fetch:async(url,opts)=>{
       if(String(url).endsWith('/_vis/notify'))notifications.push(id);
+      if(String(url).endsWith('/_vis/revoke'))revocations.push(id);
       // Only the Cloudflare runtime can return HTTP 101; the mock verifies
       // authorization and one-time consumption independently of upgrade I/O.
       return new Response(null,{status:204});
@@ -219,10 +220,14 @@ const envelope = JSON.stringify({v:1,iv:to64(iv),ct:to64(ct)});
 assert.equal((await call('/v1/messages/send', {
   to:'bob',client_message_id:id,payload:envelope
 })).status,401);
+notifications.length=0;
 response = await call('/v1/messages/send', {
   to:'bob',client_message_id:id,payload:envelope
 },alice.token);
 assert.equal(response.status,200,JSON.stringify(response));
+const bobUserId=DB.sqlite.prepare("SELECT id FROM social_users WHERE username='bob'").get().id;
+assert.deepEqual(notifications,[bobUserId],
+  'Encrypted message event must notify only the intended recipient DO');
 response = await call('/v1/state',undefined,bob.token);
 assert.equal(response.data.pending_messages.length,1);
 assert(!JSON.stringify(response.data).includes('hello encrypted chat'));
@@ -394,7 +399,8 @@ DB.sqlite.exec("UPDATE auth_challenges SET expires_at=1");
 DB.sqlite.exec("UPDATE auth_rate_limits SET expires_at=1");
 await worker.scheduled({},env);
 assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM auth_sessions').get().n,0);
-assert(notifications.length>=1,'Encrypted message delivery should signal recipient DO');
+assert(notifications.includes(bobUserId),'Encrypted message delivery must notify recipient DO');
+assert(revocations.length>=1,'Explicit logout or account disabling should revoke old notification channels');
 DB.sqlite.exec("UPDATE realtime_tickets SET expires_at=1");
 await worker.scheduled({},env);
 assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get().n,0);
