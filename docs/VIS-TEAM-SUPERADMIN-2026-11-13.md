@@ -40,7 +40,7 @@ Un mundo plantilla publicado debe ser una función separada, con respaldo, confi
 
 1. Iniciá sesión con un perfil **administrador local** que posea el proyecto y una instancia instalada, con el mismo motor, loader y versión.
 2. Entrá en **Configuración → VIS Team · Proyecto compartido**. Elegí la instancia y marcá únicamente las categorías que quieras compartir.
-3. Pulsá **Revisar archivos a compartir**. VIS enumera la lista seleccionada, exclusiones y advertencias; el tamaño máximo es 96 MiB sin comprimir y 32 MiB como ZIP. Ningún archivo individual puede superar 16 MiB; máximo 1.500 archivos.
+3. Pulsá **Revisar archivos a compartir**. VIS enumera la lista seleccionada, exclusiones y advertencias, calcula SHA-256 de todos los archivos y genera una **firma de la vista previa**. Si cualquier contenido cambia, el backend cancela la publicación y exige revisar nuevamente. El tamaño máximo es 96 MiB sin comprimir y 32 MiB como ZIP; máximo 1.500 archivos y 16 MiB por archivo.
 4. Ingresá el token privado del **Worker VIS Universe** solo en el formulario de publicación y confirmá. El backend hace la copia con la instancia bloqueada para impedir cambios durante la lectura, y verifica hashes SHA-256.
 5. Rust transmite el ZIP como streaming a `PUT /packs/{id}/{sha256}.zip` con autorización del publicador. El Worker verifica tamaño, el prefijo ZIP y SHA-256, guarda el archivo en R2 y registra el puntero del proyecto. Después se republica el catálogo VIS Universe, que ya incluye el enlace inmutable del paquete.
 
