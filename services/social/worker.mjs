@@ -218,14 +218,17 @@ async function cloudRegister(request, db) {
 async function cloudChallenge(request, db) {
   await rateLimit(db,request,"cloud-login-challenge",20);
   const body=await parseBody(request);
-  const identifier=typeof body.identifier==="string"?body.identifier.trim().toLowerCase():"";
-  if(!/^[a-z0-9_]{3,24}$/.test(identifier))
+  // Preserve case for legacy base64url public IDs; usernames and handles
+  // remain case-insensitive. Optional @ is only a visual prefix.
+  const identifier=typeof body.identifier==="string"?body.identifier.trim().replace(/^@/,""):"";
+  const name=identifier.toLowerCase();
+  if(!/^[A-Za-z0-9_-]{3,24}$/.test(identifier))
     bad(401,"Invalid username/ID or password");
   await rateLimit(db,request,"cloud-identifier:"+identifier,9);
   const user=await db.prepare(
     "SELECT id,username,public_id,password_hash,password_salt,password_iterations "+
     "FROM social_users WHERE (username=? OR public_id=? OR public_handle=?) AND disabled_at IS NULL"
-  ).bind(identifier,identifier,identifier).first();
+  ).bind(name,identifier,name).first();
   if(!user || !user.password_hash?.startsWith("ed25519:") ||
      user.password_iterations!==PASSWORD_ARGON2_PASSES)
     bad(401,"Invalid username/ID or password");
@@ -239,8 +242,11 @@ async function cloudChallenge(request, db) {
 async function cloudVerify(request, db) {
   await rateLimit(db,request,"cloud-login-verify",15);
   const body=await parseBody(request);
-  const identifier=typeof body.identifier==="string"?body.identifier.trim().toLowerCase():"";
-  if(!/^[a-z0-9_]{3,24}$/.test(identifier) ||
+  // Preserve case for legacy base64url public IDs; usernames and handles
+  // remain case-insensitive. Optional @ is only a visual prefix.
+  const identifier=typeof body.identifier==="string"?body.identifier.trim().replace(/^@/,""):"";
+  const name=identifier.toLowerCase();
+  if(!/^[A-Za-z0-9_-]{3,24}$/.test(identifier) ||
      typeof body.challenge_id!=="string" || body.challenge_id.length>80)
     bad(401,"Invalid username/ID or password");
   const row=await db.prepare(
@@ -248,7 +254,7 @@ async function cloudVerify(request, db) {
     "FROM auth_challenges c JOIN social_users u ON u.id=c.user_id "+
     "WHERE c.id=? AND (u.username=? OR u.public_id=? OR u.public_handle=?) "+
     "AND u.disabled_at IS NULL AND c.expires_at>?"
-  ).bind(body.challenge_id,identifier,identifier,identifier,now()).first();
+  ).bind(body.challenge_id,name,identifier,name,now()).first();
   if(!row || !row.password_hash?.startsWith("ed25519:"))
     bad(401,"Invalid username/ID or password");
   const proof="VIS-CLOUD-AUTH-V2\n"+row.username+"\n"+row.id+"\n"+row.nonce;
