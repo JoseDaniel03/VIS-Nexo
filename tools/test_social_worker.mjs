@@ -149,6 +149,13 @@ assert.equal((await call('/v1/account/handle',{handle:'bob_public'},bob.token)).
 const bobId=(await call('/v1/account',undefined,bob.token)).data.account.public_id;
 assert.equal((await call('/v1/account/handle',{handle:bobId},alice.token)).status,409);
 assert.equal((await call('/v1/state',undefined,alice.token)).data.public_handle,'alice_new');
+// Renaming after the cooldown must NOT permit impersonation via the old handle.
+DB.sqlite.prepare("UPDATE social_users SET public_handle_updated_at=1 WHERE username='alice'").run();
+assert.equal((await call('/v1/account/handle',{handle:'alice_next'},alice.token)).status,200);
+assert.equal((await call('/v1/account/handle',{handle:'alice_new'},bob.token)).status,409);
+const oldAliasLookup=await call('/v1/skins/get',{username:'alice_new'},bob.token);
+assert.equal(oldAliasLookup.status,200);
+assert.equal(oldAliasLookup.data.username,'alice','old aliases resolve to the same stable account');
 assert.equal((await call('/v1/state',undefined,alice.token)).data.display_name,'Mi Cuenta Premium');
 assert.equal((await call('/v1/keys', {public_key: 'not_a_key'}, alice.token)).status, 400);
 assert.equal((await call('/v1/friends/request', {username: 'bob_public'}, alice.token)).status, 201);
@@ -214,6 +221,7 @@ assert.equal((await call('/v1/skins/get',{username:'bob'},charlie.token)).data.s
 response = await call('/v1/state', undefined, alice.token);
 assert.equal(response.data.friends[0].username, 'bob');
 assert.equal(response.data.friends[0].public_key, bob.encryptionPublic);
+assert.equal(response.data.friends[0].public_handle,'bob_public');
 assert.equal((await call('/v1/friends/alias', {username:'bob',alias:'Best friend'}, alice.token)).status,200);
 assert.equal((await call('/v1/state',undefined,alice.token)).data.friends[0].alias, 'Best friend');
 
