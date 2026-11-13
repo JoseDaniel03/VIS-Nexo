@@ -365,6 +365,21 @@ const claimedIdRegistration={
 };
 assert.equal((await call('/v1/accounts/register',claimedIdRegistration)).status,409,
   'new usernames must not impersonate another account public ID');
+// Existing VIS device accounts once used case-sensitive base64url public IDs.
+// They must continue to authenticate after the public @handle migration.
+const legacyPublicId='AbCdEfGhIjKlMnOpQrStUv_-';
+assert.equal(legacyPublicId.length,24);
+DB.sqlite.prepare("UPDATE social_users SET public_id=? WHERE username='cloudsecond'")
+  .run(legacyPublicId);
+const legacyChallenge=await call('/v1/accounts/login/challenge',{identifier:legacyPublicId});
+assert.equal(legacyChallenge.status,200);
+assert.equal(legacyChallenge.data.username,'cloudsecond');
+const legacyProof='VIS-CLOUD-AUTH-V2\ncloudsecond\n'+legacyChallenge.data.challenge_id+
+  '\n'+legacyChallenge.data.nonce;
+assert.equal((await call('/v1/accounts/login/verify',{
+  identifier:legacyPublicId,challenge_id:legacyChallenge.data.challenge_id,
+  signature:to64(await sign(secondCloudKey.privateKey,legacyProof))
+})).status,200,'legacy public IDs remain usable without changing their spelling');
 
 const challenge=await call('/v1/accounts/login/challenge',{
   identifier:cloud.data.public_id
