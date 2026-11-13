@@ -354,6 +354,14 @@ const secondCloud=await call('/v1/accounts/register',{
 });
 assert.equal(secondCloud.status,200,'independent cloud-only accounts must coexist');
 assert.notEqual(secondCloud.data.public_id,cloud.data.public_id);
+// A known immutable public ID cannot be stolen as a new login username.
+const claimedIdRegistration={
+  username:bobId,password_salt:cloudSalt,password_public_key:cloudPub,
+  registration_signature:to64(await sign(cloudKey.privateKey,
+    'VIS-CLOUD-REGISTER-V2\n'+bobId+'\n'+cloudSalt))
+};
+assert.equal((await call('/v1/accounts/register',claimedIdRegistration)).status,409,
+  'new usernames must not impersonate another account public ID');
 
 const challenge=await call('/v1/accounts/login/challenge',{
   identifier:cloud.data.public_id
