@@ -376,6 +376,18 @@ assert.equal((await call('/v1/accounts/login/verify',{
     'VIS-CLOUD-AUTH-V2\nclouduser\n'+cloudByNameChallenge.data.challenge_id+
     '\n'+cloudByNameChallenge.data.nonce))
 })).status,200);
+// Login accepts a mutable public @handle but still signs the IMMUTABLE
+// internal username: renaming must never change the identity proof.
+assert.equal((await call('/v1/account/handle',{handle:'cloudhero'},cloudLogin.data.token)).status,200);
+const aliasChallenge=await call('/v1/accounts/login/challenge',{identifier:'cloudhero'});
+assert.equal(aliasChallenge.status,200);
+assert.equal(aliasChallenge.data.username,'clouduser');
+assert.equal((await call('/v1/accounts/login/verify',{
+  identifier:'cloudhero',challenge_id:aliasChallenge.data.challenge_id,
+  signature:to64(await sign(cloudKey.privateKey,
+    'VIS-CLOUD-AUTH-V2\nclouduser\n'+aliasChallenge.data.challenge_id+
+    '\n'+aliasChallenge.data.nonce))
+})).status,200,'cloud sign-in accepts @handle while retaining stable key binding');
 const cloudAccount=(await call('/v1/account',undefined,cloudLogin.data.token)).data.account;
 assert.equal(cloudAccount.role,'user');
 assert.equal(cloudAccount.cloud_login_enabled,true);
