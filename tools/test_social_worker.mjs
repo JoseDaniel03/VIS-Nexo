@@ -155,6 +155,7 @@ assert.equal((await call('/v1/state',undefined,alice.token)).data.public_handle,
 // Renaming after the cooldown must NOT permit impersonation via the old handle.
 DB.sqlite.prepare("UPDATE social_users SET public_handle_updated_at=1 WHERE username='alice'").run();
 assert.equal((await call('/v1/account/handle',{handle:'alice_next'},alice.token)).status,200);
+DB.sqlite.prepare("UPDATE social_users SET public_handle_updated_at=1 WHERE username='bob'").run();
 assert.equal((await call('/v1/account/handle',{handle:'alice_new'},bob.token)).status,409);
 const oldAliasLookup=await call('/v1/skins/get',{username:'alice_new'},bob.token);
 assert.equal(oldAliasLookup.status,200);
