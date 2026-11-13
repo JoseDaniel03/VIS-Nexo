@@ -310,6 +310,63 @@ assert.equal((await call('/v1/admin/projects/upsert',{
 assert.equal((await call('/v1/admin/projects/staff',{
   project_id:'virgoland',username:'bob',staff_role:'editor'
 },alice.token)).status,200);
+
+// Community permissions must remain on the server, not in the editable launcher.
+let community=await call('/v1/projects/community',{project_id:'virgoland'},bob.token);
+assert.equal(community.status,200,JSON.stringify(community));
+assert.equal(community.data.can_manage,false);
+assert.equal(community.data.admission,'request');
+assert.equal((await call('/v1/admin/projects/community-policy',{
+ project_id:'virgoland',admission:'request',play_access:'members'
+},bob.token)).status,403,'regular accounts cannot change admission');
+assert.equal((await call('/v1/admin/projects/community-policy',{
+ project_id:'virgoland',admission:'request',play_access:'members'
+},alice.token)).status,200);
+assert.equal((await call('/v1/projects/request-join',{
+ project_id:'virgoland',note:'Me gustaría participar'
+},bob.token)).data.status,'pending');
+community=await call('/v1/projects/community',{project_id:'virgoland'},alice.token);
+assert.equal(community.data.pending.length,1,'manager sees pending join request');
+assert.equal((await call('/v1/admin/projects/review-join',{
+ project_id:'virgoland',username:'bob',action:'approve'
+},bob.token)).status,403);
+assert.equal((await call('/v1/admin/projects/review-join',{
+ project_id:'virgoland',username:'bob',action:'approve'
+},alice.token)).status,200);
+community=await call('/v1/projects/community',{project_id:'virgoland'},bob.token);
+assert.equal(community.data.role,'participant');
+assert.equal(community.data.can_play,true);
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'bob',role:'creator',can_play:true,action:'grant'
+},bob.token)).status,403);
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'bob',role:'content_creator',can_play:false,action:'grant'
+},alice.token)).status,200);
+community=await call('/v1/projects/community',{project_id:'virgoland'},bob.token);
+assert.equal(community.data.role,'content_creator');
+assert.equal(community.data.can_play,false);
+assert.equal((await call('/v1/admin/projects/community-media',{
+ project_id:'virgoland',action:'add',title:'Video inseguro',kind:'video',
+ url:'https://example.com/fake'
+},bob.token)).status,400,'block arbitrary media origins');
+assert.equal((await call('/v1/admin/projects/community-media',{
+ project_id:'virgoland',action:'add',title:'Presentación del proyecto',kind:'video',
+ url:'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+},bob.token)).status,200);
+community=await call('/v1/projects/community',{project_id:'virgoland'},alice.token);
+assert.equal(community.data.media.length,1);
+assert.equal((await call('/v1/admin/accounts/global-admin',{
+ username:'bob',enabled:true
+},bob.token)).status,403,'global admin cannot self-promote');
+assert.equal((await call('/v1/admin/accounts/global-admin',{
+ username:'bob',enabled:true
+},alice.token)).status,200);
+assert.equal((await call('/v1/account',undefined,bob.token)).data.account.global_admin,true);
+assert.equal((await call('/v1/admin/accounts/global-admin',{
+ username:'bob',enabled:false
+},alice.token)).status,200);
+assert.equal((await call('/v1/account',undefined,bob.token)).data.account.global_admin,false);
+
 assert.equal((await call('/v1/admin/accounts/role',{
   username:'bob',role:'super_admin'
 },alice.token)).status,400,'super_admin elevation must not be exposed by HTTP');
