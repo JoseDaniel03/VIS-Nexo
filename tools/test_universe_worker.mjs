@@ -31,18 +31,25 @@ const sample=Uint8Array.from([80,75,3,4,...new Array(32).fill(0)]);
 const sha=[...new Uint8Array(await crypto.subtle.digest('SHA-256',sample))]
   .map(x=>x.toString(16).padStart(2,'0')).join('');
 let packUrl=base+'/packs/virgoland/'+sha+'.zip';
+const releaseHeaders={
+  'Authorization':'Bearer '+env.VIS_PUBLISH_TOKEN,
+  'X-VIS-Engine':'horizon',
+  'X-VIS-Minecraft-Version':'26.3',
+  'X-VIS-Loader':'horizon',
+  'X-VIS-Loader-Version':''
+};
 response=await worker.fetch(new Request(packUrl,{method:'PUT',body:sample}),env);
 assert.equal(response.status,401,'team packs require publisher token');
 response=await worker.fetch(new Request(base+'/packs/virgoland/'+'a'.repeat(64)+'.zip',{
-  method:'PUT',body:sample,headers:{Authorization:'Bearer '+env.VIS_PUBLISH_TOKEN}
+  method:'PUT',body:sample,headers:releaseHeaders
 }),env);
 assert.equal(response.status,422,'team uploads must match SHA-256');
 response=await worker.fetch(new Request(base+'/packs/../etc/'+sha+'.zip',{
-  method:'PUT',body:sample,headers:{Authorization:'Bearer '+env.VIS_PUBLISH_TOKEN}
+  method:'PUT',body:sample,headers:releaseHeaders
 }),env);
 assert.equal(response.status,404,'no path traversal in object keys');
 response=await worker.fetch(new Request(packUrl,{
-  method:'PUT',body:sample,headers:{Authorization:'Bearer '+env.VIS_PUBLISH_TOKEN}
+  method:'PUT',body:sample,headers:releaseHeaders
 }),env);
 assert.equal(response.status,200,'valid SHA-verified pack accepted');
 const uploaded=await response.json();
@@ -59,4 +66,13 @@ const published=(await response.json()).projects[0];
 assert.equal(published.sha256,sha);
 assert.equal(published.size_bytes,sample.length);
 assert.equal(published.bundle_url,packUrl);
+const different={...project,engine:'java',loader:'fabric',loader_version:'0.17.1',
+  mc_version:'1.21.1'};
+response=await worker.fetch(new Request(base+'/publish',{method:'POST',
+  body:JSON.stringify({format_version:1,projects:[different]}),
+  headers:{Authorization:'Bearer '+env.VIS_PUBLISH_TOKEN}}),env);
+assert.equal(response.status,200);
+const afterChange=(await (await worker.fetch(new Request(base+'/catalog.json'),env)).json()).projects[0];
+assert.equal(afterChange.bundle_url,'','stale team package cannot cross versions/loaders');
+
 console.log("VIS Universe Worker tests passed");
