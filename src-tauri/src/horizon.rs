@@ -555,6 +555,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     if !probe.resources_ready{return Err("Prepará y verificá los recursos de Horizon antes de jugar".into())}
     // Java and Horizon now share game data per instance by default.
     crate::minecraft::prepare_player_directory(game_dir)?;
+    crate::instance_backup::require_clean_restore_state(game_dir)?;
     let game_run=crate::minecraft::acquire_game_run(game_dir)?;
     if session_file.is_empty(){
         fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
