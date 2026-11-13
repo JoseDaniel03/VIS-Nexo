@@ -38,6 +38,8 @@ checks = {
         "AUTO_BACKUP_INTERVAL_SECS:u64=24*60*60" in backup
         and "MAX_AUTO_BACKUPS:usize=3" in backup
         and 'name.starts_with("vis-data-auto-")' in backup,
+    "Rust backup result has explicit type (fix E0283 on Linux/Windows)":
+        "let result:Result<BackupInfo,String>=(||{" in backup,
     "Manual backups are not expired by automatic rotation":
         "pub fn create(game:&Path)" in backup
         and "create_internal(game,false)" in backup
