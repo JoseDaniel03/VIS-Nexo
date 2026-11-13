@@ -38,6 +38,7 @@ async function onceOperation(key,operation){
  try{return await operation();}finally{pendingOperations.delete(key);}
 }
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
+let ceiboRecoveryKind='password',ceiboRecoveryStep='request',ceiboSecurity=null,ceiboSessions=null;
 let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
 let premiumCosmetics=null, premiumCosmeticsBusy=false;
 let premiumSkinSync=true, premiumSkinModel='classic';
@@ -628,7 +629,37 @@ async function apply(name,args={},success=''){
  });
 }
 function brandLabel(){return esc(db.branding?.name||'VIS Nexo');}
+function ceiboRecoveryView(){
+ const password=ceiboRecoveryKind==='password',reset=ceiboRecoveryStep==='reset'&&password;
+ return '<main class="auth-screen"><section class="auth-glass vis-ceibo-recovery">'+
+  '<div class="auth-brand">'+logo(true)+'<span>'+brandLabel()+'</span></div>'+
+  '<div class="auth-intro"><span class="kicker">VIS CEIBO / SEGURIDAD</span><h1>'+
+  (reset?'Crear nueva contraseña':password?'Olvidé mi contraseña':'Olvidé mi usuario')+'</h1>'+
+  '<p>'+(reset?'Pegá el código recibido en tu correo verificado. Nunca compartas el código.':
+     'Las instrucciones se envían solamente a correos previamente verificados. Nunca confirmamos si una cuenta existe.')+'</p></div>'+
+  (reset?'<form id="ceibo-recovery-reset-form" class="auth-form">'+
+    '<label class="field-label" for="ceibo-reset-code">Código de un solo uso</label>'+
+    '<div class="auth-input">'+I('key',17)+'<input id="ceibo-reset-code" name="code" required minlength="43" maxlength="43" autocomplete="off" spellcheck="false"/></div>'+
+    '<label class="field-label" for="ceibo-reset-new">Nueva contraseña VIS</label>'+
+    '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-new" name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
+    '<label class="field-label" for="ceibo-reset-confirm">Confirmarla</label>'+
+    '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-confirm" name="confirm" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
+    '<label class="field-label" for="ceibo-reset-backup">Código MFA de emergencia (solo cuentas administradoras)</label>'+
+    '<div class="auth-input">'+I('shield',17)+'<input id="ceibo-reset-backup" name="recovery_code" autocomplete="off" placeholder="Código de respaldo, si corresponde"/></div>'+
+    '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Cambiar contraseña</button></form>':
+    '<form id="ceibo-recovery-start-form" class="auth-form">'+
+    '<label class="field-label" for="ceibo-recovery-identity">'+
+     (password?'Correo verificado o @usuario VIS':'Correo electrónico verificado')+'</label>'+
+    '<div class="auth-input">'+I('mail',17)+'<input id="ceibo-recovery-identity" name="identity" required maxlength="254" autocomplete="email" placeholder="'+(password?'tu@email.com o @usuario':'tu@email.com')+'"/></div>'+
+    '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Enviar instrucciones</button></form>')+
+  '<div class="vis-ceibo-auth-nav">'+
+    (password?'<button type="button" class="auth-footer" data-action="ceibo-recovery-step">'+(reset?'Solicitar otro código':'Ya tengo el código')+'</button>':'')+
+    '<button type="button" class="auth-footer" data-action="ceibo-recovery-back">Volver al inicio de sesión</button>'+
+  '</div><p class="muted">Para cuentas Microsoft, la recuperación de contraseña se hace en Microsoft.</p>'+
+  '</section></main>';
+}
 function loginView(){
+ if(authMode==='recover')return ceiboRecoveryView();
   const reg=authMode==='register', guest=authMode==='offline';
   return `<main class="auth-screen">
     <section class="auth-glass" aria-label="${guest?'Acceso offline':reg?'Crear cuenta':'Inicio de sesión'}">
@@ -657,9 +688,11 @@ function loginView(){
         ${guest?'':`<div class="field-header"><label class="field-label" for="auth-password">Contraseña</label></div>
         <div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" id="auth-password" name="password" autocomplete="${reg?'new-password':'current-password'}" placeholder="${reg?'Creá una contraseña':'Ingresá tu contraseña'}"/><button class="eye-button" type="button" data-action="toggle-password" aria-label="Mostrar u ocultar contraseña">${I(showPassword?'eyeoff':'eye',19)}</button></div>
         `}
+        ${reg&&authProvider==='cloud'?'<label class="field-label" for="auth-register-email">Correo de recuperación (recomendado)</label><div class="auth-input">'+I('mail',17)+'<input type="email" maxlength="254" id="auth-register-email" name="email" autocomplete="email" placeholder="tu@email.com" /></div>':''}
         ${reg?`<label class="field-label" for="auth-repeat">Confirmar contraseña</label><div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" name="confirm" id="auth-repeat" autocomplete="new-password" placeholder="Repetí tu contraseña" /></div>`:''}
         <button class="primary-btn auth-submit" type="submit" ${authBusy?'disabled':''}>${authBusy?I('timer',20):I('arrow',20)}<span>${authBusy?'Validando...':guest?'Continuar sin cuenta':reg?'Crear cuenta':'Entrar al launcher'}</span></button>
       </form>`}
+      ${authProvider==='cloud'&&!reg&&!guest?'<div class="vis-ceibo-auth-nav"><button type="button" class="auth-footer" data-action="auth-forgot-password">¿Olvidaste tu contraseña?</button><button type="button" class="auth-footer" data-action="auth-forgot-username">¿Olvidaste tu usuario?</button></div>':''}
       ${authProvider==='microsoft'?'':guest?`<button class="auth-footer" data-action="auth-local" type="button">Volver al inicio de sesión</button>`:`<button class="auth-footer" data-action="switch-auth" type="button">${reg?'¿Ya tenés cuenta?':'¿Todavía no tenés cuenta?'} <strong>${reg?'Iniciá sesión':'Registrate'}</strong></button>`}
       ${!native?`<p class="auth-preview">Vista previa en navegador · Los datos de prueba no se guardan.</p>`:''}
     </section>
@@ -932,6 +965,63 @@ function premiumCosmeticsPanel(){
    '</section>';
 }
 
+
+async function refreshCeiboSecurity(){
+ if(!social.connected())return;
+ const generation=accountGeneration,username=db.user?.username;
+ try{
+   const [info,mfa]=await Promise.all([social.accountInfo(),social.ceiboMfaStatus()]);
+   if(generation!==accountGeneration||db.user?.username!==username)return;
+   ceiboSecurity={...info.account,mfa};render();
+ }catch(error){if(generation===accountGeneration)message('Seguridad Ceibo: '+String(error),true);}
+}
+function displayRecoveryCodes(codes,warning=''){
+ if(!Array.isArray(codes)||!codes.length)return;
+ // Never write one-time recovery codes to disk or the social chat history.
+ const result=codes.join('\n');
+ window.prompt((warning||'Guardá estos códigos FUERA del launcher. Solo se muestran una vez.')+
+   '\nCopiá los ocho códigos de recuperación:',result);
+}
+function ceiboSecuritySection(){
+ const email=ceiboSecurity?.verified_email||'Sin verificar';
+ const mfa=ceiboSecurity?.mfa;
+ const sessions=ceiboSessions?.sessions||[];
+ return '<section class="surface-card vis-ceibo-security">'+
+   '<div class="card-heading">'+I('shield',20)+' VIS Ceibo · Seguridad y recuperación</div>'+
+   '<p class="muted">Vinculá un correo verificado para recuperar tu contraseña y usuario. Las cuentas administradoras necesitan además MFA y códigos de emergencia.</p>'+
+   (!social.connected()?'<p>Conectá tu cuenta VIS Cloud para configurar la recuperación.</p>'+
+    '<button class="outline-btn" data-action="social-retry">Conectar VIS Social</button>':
+    '<div class="vis-ceibo-section"><b>Correo verificado</b><small>'+esc(email)+'</small>'+
+      '<div class="vis-ceibo-input-line"><input type="email" id="ceibo-email-input" maxlength="254" placeholder="tu@email.com" autocomplete="email"/>'+
+      '<button class="outline-btn" type="button" data-action="ceibo-email-request">Vincular / cambiar correo</button>'+
+      '<button class="outline-btn" type="button" data-action="ceibo-email-verify">Verificar código</button></div>'+
+      '<p class="muted">Al cambiar un correo ya verificado, se pide la aprobación del correo viejo y del nuevo.</p></div>'+
+    '<div class="vis-ceibo-section"><b>Autenticación en dos pasos</b><small>'+
+      (mfa?.enrolled?'Activada · clave protegida en el servidor': 'Sin configurar')+
+      (mfa?.verified_for_seconds?' · Verificación reciente':'')+'</small>'+
+      '<div class="profile-quick-actions">'+
+      (mfa?.enrolled?'<button class="outline-btn" data-action="ceibo-mfa-verify">Verificar segundo factor</button>'+
+       '<button class="outline-btn" data-action="ceibo-mfa-rotate">Regenerar códigos de recuperación</button>':
+       '<button class="outline-btn" data-action="ceibo-mfa-setup">Configurar app de autenticación</button>')+
+      '</div></div>'+
+    '<div class="vis-ceibo-section"><b>Dispositivos y sesiones</b>'+
+      '<div class="profile-quick-actions"><button class="outline-btn" data-action="ceibo-sessions-refresh">Ver sesiones activas</button>'+
+      '<button class="outline-btn" data-action="ceibo-rebind-device">Autorizar este dispositivo</button>'+
+      '<button class="outline-btn" data-action="ceibo-logout-all">Cerrar todas las sesiones</button></div>'+
+      (sessions.length?'<div class="vis-ceibo-sessions">'+sessions.map(entry=>
+        '<div class="vis-ceibo-session"><span>'+esc(entry.auth_method==='password'?'Contraseña VIS':'Dispositivo local')+
+         (entry.current?' · Esta sesión':'')+'</span><small>'+esc(new Date(entry.created_at*1000).toLocaleString())+'</small>'+
+         '<button class="outline-btn" data-action="ceibo-revoke-session" data-id="'+attr(entry.session_id)+'">Cerrar</button></div>').join('')+'</div>':'')+
+      '</div>'+
+    '<div class="vis-ceibo-section"><b>Cambiar contraseña online</b>'+
+      '<p class="muted">Requiere haber ingresado con tu contraseña VIS. Cierra todas las sesiones, incluidas las de otros dispositivos.</p>'+
+      '<form id="ceibo-change-password-form" class="vis-ceibo-input-line">'+
+      '<input type="password" name="password" required minlength="10" maxlength="128" placeholder="Nueva contraseña" autocomplete="new-password"/>'+
+      '<input type="password" name="confirm" required minlength="10" maxlength="128" placeholder="Repetir contraseña" autocomplete="new-password"/>'+
+      '<button type="submit" class="outline-btn">Actualizar contraseña</button></form></div>'
+   )+'</section>';
+}
+
 function profilePage(){
  if(isGuest())return '<div class="content-inner"><div class="page-heading"><h1>Modo offline</h1></div>'+
    '<section class="surface-card"><p>Las cuentas offline pueden usar juegos instalados, sin identidad social.</p>'+
@@ -969,7 +1059,7 @@ function profilePage(){
   '<div class="profile-overview"><div><strong>'+skins.length+'</strong><span>Instancias propias</span></div>'+
    '<div><strong>'+db.friends.length+'</strong><span>Amigos VIS</span></div>'+
    '<div><strong>'+(publicSkin?.skin?'Publicada':localSkin?'Local':'Sin skin')+'</strong><span>Skin VIS</span></div></div>'+
-  '<div class="profile-v21-grid">'+
+  '<div class="profile-v21-grid">'+ceiboSecuritySection()+
    '<section class="surface-card profile-identity-card">'+
     '<div class="card-heading">'+I('users',20)+' Comunidad e identidad</div>'+
     '<p class="muted">Compartí tu @usuario VIS. Podés cambiarlo sin perder amigos ni chats. Tu ID permanente es distinta del nombre oficial de Minecraft.</p>'+
@@ -1742,6 +1832,7 @@ function navigate(to,id='') {
    contextMenu=null;render();
    if(to==='project'&&native&&db.user)void refreshAssets().catch(()=>{});
    if(to==='project'&&social.connected())void loadProjectCommunity(id||selectedId);
+   if(to==='profile'&&social.connected())void refreshCeiboSecurity();
    root.querySelector('#main-scroll')?.scrollTo(0,0);
  },{reducedMotion:prefs.reducedMotion});
 }
@@ -1886,6 +1977,48 @@ root.addEventListener('submit',async event=>{
  const form=event.target;
  if(!(form instanceof HTMLFormElement))return;
  event.preventDefault();const formData=new FormData(form);
+
+ if(form.id==='ceibo-recovery-start-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     await command('social_recovery_start',{kind:ceiboRecoveryKind,identity:String(formData.get('identity')||'')});
+     message('Si existe una cuenta vinculada a un correo verificado, recibirás instrucciones.');
+     if(ceiboRecoveryKind==='password'){ceiboRecoveryStep='reset';render();}
+   }catch(error){message('Recuperación: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
+ if(form.id==='ceibo-recovery-reset-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     await command('social_recovery_reset',{
+       code:String(formData.get('code')||'').trim(),
+       password:String(formData.get('password')||''),
+       confirm:String(formData.get('confirm')||''),
+       recoveryCode:String(formData.get('recovery_code')||'').trim()
+     });
+     ceiboRecoveryStep='request';authMode='login';render();
+     message('Contraseña restablecida. Iniciá sesión con la nueva clave.');
+   }catch(error){message('No se pudo restablecer la contraseña: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
+ if(form.id==='ceibo-change-password-form'){
+   const password=String(formData.get('password')||'');
+   const confirm=String(formData.get('confirm')||'');
+   if(password!==confirm)return message('Las nuevas contraseñas no coinciden.',true);
+   if(!window.confirm('Cambiar la contraseña cerrará todas las sesiones actuales. ¿Continuar?'))return;
+   try{
+     await command('social_change_cloud_password',{password,confirm});
+     await social.stop();resetAccountView();db=await command('logout');
+     authMode='login';authProvider='cloud';page='home';render();
+     message('Contraseña modificada. Volvé a ingresar.');
+   }catch(error){message('Contraseña VIS: '+String(error),true);}
+   return;
+ }
+
  if(form.id==='auth-form'){
   if(authBusy)return;
   const username=String(formData.get('username')||''),password=String(formData.get('password')||'');
@@ -1901,8 +2034,15 @@ root.addEventListener('submit',async event=>{
        await command(authMode==='register'?'register':'login',
          authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
    }
+   const email=cloud&&authMode==='register'?String(formData.get('email')||'').trim():'';
    resetAccountView();page='home';render();void refreshAssets().catch(()=>{});message(`Sesión iniciada · ${db.user?.username}`);
-   if(native&&db.mode!=='offline')void connectSocial(cloud);
+   if(native&&db.mode!=='offline')void (async()=>{
+     await connectSocial(cloud);
+     if(email&&social.connected()){
+       try{await social.ceiboAccountEmail(email);message('Te enviamos un código para verificar el correo. Podés ingresarlo desde Mi perfil.');}
+       catch(error){message('No se pudo enviar la verificación de correo: '+String(error),true);}
+     }
+   })();
   }catch(e){message(String(e),true)}finally{authBusy=false;}
   return;
  }
@@ -2001,6 +2141,17 @@ root.addEventListener('click',async event=>{
  const act=button.dataset.action,id=button.dataset.id||'',projectId=button.dataset.project||'';
  if(['create-project','edit-project','edit-avatar','open-instance','edit-instance','delete-instance','delete-project'].includes(act))lastDialogTrigger=button;
  if(act==='modal-backdrop'){if(event.target===button)closeDialog();return;}
+
+ if(act==='auth-forgot-password'||act==='auth-forgot-username'){
+   authProvider='cloud';authMode='recover';ceiboRecoveryKind=act==='auth-forgot-password'?'password':'username';
+   ceiboRecoveryStep='request';render();return;
+ }
+ if(act==='ceibo-recovery-back'){
+   authMode='login';authProvider='cloud';ceiboRecoveryStep='request';render();return;
+ }
+ if(act==='ceibo-recovery-step'){
+   ceiboRecoveryStep=ceiboRecoveryStep==='request'?'reset':'request';render();return;
+ }
  if(act==='auth-microsoft'){void beginMicrosoftLogin();return;}
  if(act==='microsoft-copy-code'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.user_code,'Código Microsoft');return;}
  if(act==='microsoft-copy-url'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.verification_uri,'Enlace Microsoft');return;}
@@ -2041,6 +2192,84 @@ root.addEventListener('click',async event=>{
  else if(act==='sidebar-instance'){mcSelected={projectId:projectId||PERSONAL_PROJECT_ID,name:id};navigate('instances');}
  else if(act==='open-project')navigate('project',id);
  else if(act==='go-profile')navigate('profile');
+
+ else if(act==='ceibo-email-request'){
+   if(!social.connected())return message('Conectá VIS Cloud para verificar el correo.',true);
+   const email=document.getElementById('ceibo-email-input')?.value?.trim()||'';
+   if(!email)return message('Ingresá un correo electrónico válido.',true);
+   try{const result=await social.ceiboAccountEmail(email);
+     message(result.already_verified?'Este correo ya está verificado.':
+       result.dual_approval?'Revisá ambos correos: anterior y nuevo.':'Revisá tu correo e ingresá el código de verificación.');
+   }catch(error){message('Correo Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-email-verify'){
+   const code=window.prompt('Pegá el código de verificación recibido por correo:');
+   if(!code)return;
+   try{
+     const result=await command('social_recovery_verify_email',{code:code.trim()});
+     message(result.verified?'Correo verificado correctamente.':'Código confirmado. Falta aprobar desde el otro correo.');
+     await refreshCeiboSecurity();
+   }catch(error){message('Verificación Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-setup'){
+   if(!social.connected())return;
+   try{
+     const setup=await social.ceiboMfaSetup();
+     window.prompt('Configurá tu aplicación Authenticator con esta clave TOTP. Copiala y no la compartas:',setup.secret);
+     const code=window.prompt('Ingresá el código de 6 dígitos que muestra tu aplicación de autenticación:');
+     if(!code)return;
+     const confirmed=await social.ceiboMfaConfirm(code.trim());
+     displayRecoveryCodes(confirmed.recovery_codes,confirmed.warning);
+     message('Segundo factor habilitado. Guardá tus códigos fuera de VIS Nexo.');
+     await refreshCeiboSecurity();
+   }catch(error){message('MFA: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-verify'){
+   if(!social.connected())return;
+   const input=window.prompt('Código de 6 dígitos o código de emergencia MFA:');
+   if(!input)return;
+   try{await social.ceiboMfaVerify(input.trim());message('Verificación de seguridad aceptada por 10 minutos.');
+     await refreshCeiboSecurity();
+   }catch(error){message('MFA: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-rotate'){
+   if(!social.connected())return;
+   if(!window.confirm('Generar códigos nuevos invalidará todos los anteriores. ¿Continuar?'))return;
+   try{
+     const result=await social.ceiboMfaRotate();
+     displayRecoveryCodes(result.recovery_codes,result.warning);
+     message('Códigos de emergencia nuevos generados.');
+   }catch(error){message('Códigos de recuperación: '+String(error),true);}
+ }
+ else if(act==='ceibo-sessions-refresh'){
+   if(!social.connected())return;
+   try{ceiboSessions=await social.ceiboSessions();render();}
+   catch(error){message('Sesiones Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-revoke-session'){
+   if(!social.connected()||!id)return;
+   if(!window.confirm('¿Cerrar esta sesión de VIS Ceibo?'))return;
+   try{
+     await social.ceiboRevokeSession(id);
+     ceiboSessions=await social.ceiboSessions().catch(()=>null);render();
+     message('Sesión revocada.');
+   }catch(error){message('Revocar sesión: '+String(error),true);}
+ }
+ else if(act==='ceibo-logout-all'){
+   if(!social.connected())return;
+   if(!window.confirm('Esto cerrará TODAS las sesiones VIS Ceibo, incluida la actual. ¿Confirmar?'))return;
+   try{
+     await social.ceiboRevokeSession();
+     await social.stop();resetAccountView();db=await command('logout');
+     authMode='login';authProvider='cloud';page='home';render();message('Todas las sesiones fueron revocadas.');
+   }catch(error){message('Cerrar sesiones: '+String(error),true);}
+ }
+ else if(act==='ceibo-rebind-device'){
+   if(!native||!social.connected())return message('Necesitás iniciar sesión VIS Cloud con contraseña.',true);
+   try{await command('social_rebind_device');message('La identidad de este dispositivo volvió a vincularse.');
+   }catch(error){message('Dispositivo: '+String(error),true);}
+ }
+
  else if(act==='go-instances')navigate('instances');
  else if(act==='go-minecraft'){navigate('minecraft');void refreshInstalledFiles();}
  else if(act==='go-settings')navigate('settings');
