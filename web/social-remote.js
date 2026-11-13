@@ -109,6 +109,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
   let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
   let historyRequest=0;
+  let realtimeSocket=null,realtimeRetry=null,realtimeFailures=0;
+  let wakeupQueued=false;
   // Cache only non-extractable derived AES CryptoKeys for this live identity.
   // A peer key change is still checked against its persisted TOFU pin.
   const pinnedPeers=new Map(), derivedKeys=new Map();
@@ -116,6 +118,66 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   const status = (value, error = '') => onStatus?.(value, error);
   const rpc = (path, method = 'GET', body = null) => command('social_request',
     { path, method, body });
+  function stopRealtime(){
+    if(realtimeRetry){clearTimeout(realtimeRetry);realtimeRetry=null;}
+    const ws=realtimeSocket;realtimeSocket=null;realtimeFailures=0;wakeupQueued=false;
+    if(ws){
+      ws.onopen=ws.onmessage=ws.onerror=ws.onclose=null;
+      try{ws.close(1000,'VIS Nexo session changed');}catch{}
+    }
+  }
+  function scheduleRealtime(epoch){
+    if(epoch!==sessionEpoch||!connected()||document.hidden||!navigator.onLine
+        ||realtimeRetry||realtimeSocket)return;
+    const delay=Math.min(60000,1000*Math.pow(2,Math.min(6,realtimeFailures++)));
+    realtimeRetry=setTimeout(()=>{realtimeRetry=null;void connectRealtime(epoch);},delay);
+  }
+  async function connectRealtime(epoch){
+    if(epoch!==sessionEpoch||!connected()||document.hidden||!navigator.onLine
+        ||realtimeSocket)return;
+    try{
+      // The native bridge supplies only a single-use 20s notification ticket.
+      // The long-lived authenticated VIS Social bearer remains inside Rust.
+      const access=await command('social_realtime_ticket');
+      if(epoch!==sessionEpoch||!connected()||document.hidden)return;
+      const target=new URL(access.ws_url);
+      if(target.protocol!=='wss:'||target.username||target.password
+          ||target.pathname!=='/v1/realtime/connect'
+          ||!(/^[A-Za-z0-9_-]{43}$/.test(target.searchParams.get('ticket')||'')))
+        throw Error('Endpoint de avisos no seguro');
+      const ws=new WebSocket(target.href);
+      realtimeSocket=ws;
+      ws.onopen=()=>{
+        if(epoch!==sessionEpoch||realtimeSocket!==ws){ws.close();return;}
+        realtimeFailures=0;
+        // A notification may have arrived between the initial state fetch
+        // and upgrading the socket: fetch state once on successful connect.
+        void sync();
+      };
+      ws.onmessage=event=>{
+        if(epoch!==sessionEpoch||realtimeSocket!==ws||document.hidden)return;
+        if(typeof event.data!=='string'||event.data.length>128)return;
+        if(event.data==='pong')return;
+        let message;try{message=JSON.parse(event.data);}catch{return;}
+        if(message?.type==='wakeup'){
+          if(busy)wakeupQueued=true;
+          else void sync();
+        }
+      };
+      ws.onclose=()=>{
+        if(epoch!==sessionEpoch||realtimeSocket!==ws)return;
+        realtimeSocket=null;
+        scheduleNext(epoch); // Immediate safe fallback to polling.
+        scheduleRealtime(epoch);
+      };
+      ws.onerror=()=>{/* onclose handles retry and fallback */};
+    }catch{
+      if(epoch===sessionEpoch){
+        realtimeSocket=null;
+        scheduleRealtime(epoch);
+      }
+    }
+  }
 
   async function verifiedPeerKey(friend) {
     if (!privateDb || !currentUser || !friend?.username || !friend.public_key)
@@ -200,7 +262,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if(epoch!==sessionEpoch||!connected()||document.hidden)return;
     if(interval)clearTimeout(interval);
     interval=setTimeout(()=>{interval=null;void sync();},
-      socialPollDelay(chatActive,consecutiveErrors));
+      (realtimeSocket?.readyState===WebSocket.OPEN)
+        ? 45000 : socialPollDelay(chatActive,consecutiveErrors));
   }
   async function sync() {
     if (!connected() || busy || document.hidden) return;
@@ -266,6 +329,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         // Do not keep issuing unauthorized requests using an expired token.
         // A fresh, explicit authenticated login/reconnect is required.
         if(interval){clearTimeout(interval);interval=null;}
+        stopRealtime();
         sessionEpoch++;
         state=null;keys=null;messages=[];lastFingerprint='';currentUser='';
         historyRequest++;pinnedPeers.clear();derivedKeys.clear();
@@ -275,7 +339,11 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     } finally {
       if(epoch===sessionEpoch){
         busy = false;
-        scheduleNext(epoch);
+        if(wakeupQueued&&consecutiveErrors===0){
+          wakeupQueued=false;
+          if(interval){clearTimeout(interval);interval=null;}
+          interval=setTimeout(()=>{interval=null;void sync();},180);
+        }else{wakeupQueued=false;scheduleNext(epoch);}
       }
     }
   }
@@ -303,6 +371,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       document.addEventListener('visibilitychange', onVisibility);
       window.addEventListener('online', onOnline);
       await sync();
+      if(epoch===sessionEpoch)void connectRealtime(epoch);
       return epoch===sessionEpoch;
     } catch (error) {
       if(epoch===sessionEpoch){
@@ -313,11 +382,15 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     }
   }
   function onVisibility() {
-    if(document.hidden){if(interval){clearTimeout(interval);interval=null;}}
-    else if(connected())void sync();
+    if(document.hidden){
+      if(interval){clearTimeout(interval);interval=null;}
+      stopRealtime();
+    }else if(connected()){
+      void sync();void connectRealtime(sessionEpoch);
+    }
   }
   function onOnline() {
-    if(connected()){consecutiveErrors=0;void sync();}
+    if(connected()){consecutiveErrors=0;void sync();void connectRealtime(sessionEpoch);}
   }
   function setChatActive(open) {
     chatActive=!!open;
@@ -327,6 +400,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   async function stop() {
     sessionEpoch++;
+    stopRealtime();
     if (interval) { clearTimeout(interval); interval = null; }
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('online', onOnline);
