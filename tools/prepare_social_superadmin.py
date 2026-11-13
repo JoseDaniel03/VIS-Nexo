@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate one-time VIS Social super-admin bootstrap SQL.
 Run only in the GitHub production environment. Public key is NOT a secret.
-Requires an already-registered VIS Social account on the chosen device.
+Requires an existing VIS online account with an Argon2id-derived Ed25519 public credential.
+No account is auto-created and no plaintext password or signing seed is used.
 """
 import base64
 import hashlib
@@ -26,15 +27,20 @@ print("Requested super-admin user:", name)
 print("Device Ed25519 public-key SHA-256:", fp)
 print("No device private key, local PIN or Cloudflare token is needed here.")
 
-# No account is created, transferred or guessed. User must first enroll from
-# the intended launcher device. Existing superadmins cannot be replaced by CI.
+# VIS Cloud accounts use password_hash='ed25519:<PUBLIC verifier>' and
+# deliberately have signing_public_key=''. Matching signing_public_key instead
+# would silently prevent promotion of every native VIS Cloud account.
+# Require the verifier AND an enabled normal user; never transfer existing admins.
 grant = """UPDATE social_users SET role='super_admin',updated_at=unixepoch()
-WHERE username='{name}' AND signing_public_key='{pub}' AND role='user'
+WHERE username='{name}' AND password_hash='ed25519:{pub}' AND role='user'
+  AND disabled_at IS NULL
   AND NOT EXISTS(SELECT 1 FROM social_users WHERE role='super_admin');
 """.format(name=name, pub=public_key)
-verify = """SELECT username,role,signing_public_key
+verify = """SELECT username,role,
+SUBSTR(password_hash,9) AS cloud_credential_public_key
 FROM social_users WHERE username='{name}'
-AND signing_public_key='{pub}' AND role='super_admin';
+AND password_hash='ed25519:{pub}' AND role='super_admin'
+AND disabled_at IS NULL;
 """.format(name=name, pub=public_key)
 directory = Path("services/social")
 (directory / ".vis-superadmin-grant.sql").write_text(grant, encoding="utf-8")
