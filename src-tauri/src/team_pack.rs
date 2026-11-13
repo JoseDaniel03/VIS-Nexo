@@ -53,6 +53,21 @@ pub struct TeamApplyReport {
     pub modrinth_mods:usize,
 }
 fn version_now()->u64{SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()}
+fn unique_stage()->String{
+    let nanos=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    format!("{}-{nanos}",std::process::id())
+}
+fn safe_pack_path(path:&str)->bool {
+    !path.is_empty()&&path.len()<=360&&
+    !path.contains('\\')&&!path.contains("//")&&
+    !path.bytes().any(|b|b<32||b==b':'||b==b'<'||b==b'>'||
+        b==b'"'||b==b'|'||b==b'*'||b==b'?')
+    && path.split('/').all(|part|{
+        let stem=part.split('.').next().unwrap_or("").to_ascii_lowercase();
+        !part.is_empty()&&part!="."&&part!=".."&&
+        !matches!(stem.as_str(),"con"|"prn"|"aux"|"nul"|"com1"|"com2"|"lpt1"|"lpt2")
+    })
+}
 fn safe_id(id:&str)->bool{
     !id.is_empty()&&id.len()<=100
         &&id.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-')
@@ -91,6 +106,7 @@ fn visit(game:&Path,root:&Path,options:TeamOptions,files:&mut Vec<PathBuf>,
         let relative=path.strip_prefix(game).map_err(|_|"Ruta fuera de la instancia")?;
         let name=entry.file_name().to_string_lossy().into_owned();
         let display=relative.to_string_lossy().replace('\\',"/");
+        if !safe_pack_path(&display){return Err(format!("Ruta incompatibile con Windows/Linux: {display}"));}
         let metadata=fs::symlink_metadata(&path).map_err(|e|e.to_string())?;
         if metadata.file_type().is_symlink(){
             return Err(format!("No se permiten enlaces simbólicos dentro del paquete: {display}"));
@@ -196,13 +212,14 @@ pub fn build(game:&Path,output_root:&Path,project:&GameProject,options:TeamOptio
         "include_waypoints":options.include_waypoints
     });
     let json=serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?;
+    if json.len()>512*1024{return Err("El .bsconfig es demasiado grande".into());}
     let base=output_root.join("project-packages").join("teams").join(&project.id);
     crate::instance_guard::private_paths(output_root,&[
         "project-packages","project-packages/teams",
         &format!("project-packages/teams/{}",project.id)
     ])?;
     fs::create_dir_all(&base).map_err(|e|e.to_string())?;
-    let stage=base.join(format!("pack-{}-{}.tmp",std::process::id(),version_now()));
+    let stage=base.join(format!("pack-{}.tmp",unique_stage()));
     let outcome=(||->Result<TeamPack,String>{
         let file=File::create(&stage).map_err(|e|e.to_string())?;
         let mut writer=ZipWriter::new(file);
@@ -264,8 +281,8 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
     if zip.len()==0||zip.len()>MAX_FILES+1{return Err("Cantidad de entradas ZIP inválida".into());}
     let manifest:TeamManifest={
         let mut file=zip.by_name(".bsconfig").map_err(|_|"El paquete no contiene .bsconfig")?;
-        if file.size()>256*1024{return Err("Manifiesto de proyecto demasiado grande".into());}
-        serde_json::from_reader(file.by_ref().take(256*1024+1))
+        if file.size()>512*1024{return Err("Manifiesto de proyecto demasiado grande".into());}
+        serde_json::from_reader(file.by_ref().take(512*1024+1))
             .map_err(|_|".bsconfig tiene un formato inválido")?
     };
     if manifest.format_version!=1||manifest.project_id!=project.id
@@ -284,7 +301,7 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
         let path=Path::new(&file.path);
         let parts=path.components().collect::<Vec<_>>();
         if parts.is_empty()||parts.iter().any(|p|!matches!(p,Component::Normal(_)))
-            ||file.path.contains('\\')||file.path.len()>360
+            ||!safe_pack_path(&file.path)
             ||file.sha256.len()!=64||!file.sha256.bytes().all(|b|b.is_ascii_hexdigit())
             ||file.size_bytes>MAX_FILE{
             return Err("Ruta o verificador ZIP inseguro".into());
@@ -294,7 +311,7 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
         let first=parts[0].as_os_str().to_str().ok_or("Carpeta inválida")?;
         if file.path=="servers.dat"{
             if !manifest.include_servers{return Err("Lista de servidores sin permiso en manifiesto".into());}
-        }else if !allow_root(first,TeamOptions{include_packs:true,
+        }else if parts.len()<2||!allow_root(first,TeamOptions{include_packs:true,
             include_servers:manifest.include_servers,include_waypoints:manifest.include_waypoints}){
             return Err("El ZIP contiene una carpeta fuera del catálogo permitido".into());
         }
@@ -307,11 +324,10 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
         if total>MAX_UNCOMPRESSED{return Err("ZIP expandido demasiado grande".into());}
         by_name.insert(file.path.clone(),file);
     }
-    let stage=game.join(".vslauncher").join(format!("team-stage-{}-{}",std::process::id(),version_now()));
-    crate::instance_guard::private_paths(game,&[
-        ".vslauncher",
-        &format!(".vslauncher/team-stage-{}-{}",std::process::id(),version_now())
-    ])?;
+    let stage_name=format!("team-stage-{}",unique_stage());
+    let stage=game.join(".vslauncher").join(&stage_name);
+    crate::instance_guard::private_paths(game,&[".vslauncher",
+        &format!(".vslauncher/{stage_name}")])?;
     fs::create_dir_all(&stage).map_err(|e|e.to_string())?;
     let outcome=(||->Result<TeamApplyReport,String>{
         let mut eligible=Vec::new();
@@ -363,8 +379,13 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
             let mut source=File::open(&staged).map_err(|e|e.to_string())?;
             let mut output=fs::OpenOptions::new().write(true).create_new(true)
                 .open(&destination).map_err(|e|e.to_string())?;
-            std::io::copy(&mut source,&mut output).map_err(|e|e.to_string())?;
-            output.sync_all().map_err(|e|e.to_string())?;
+            let copied=std::io::copy(&mut source,&mut output)
+                .and_then(|_|output.sync_all());
+            drop(output);
+            if let Err(e)=copied{
+                let _=fs::remove_file(&destination);
+                return Err(format!("No se pudo instalar un archivo de equipo: {e}"));
+            }
             installed+=1;
         }
         Ok(TeamApplyReport{project_id:project.id.clone(),installed,preserved,
@@ -383,6 +404,10 @@ mod tests{
         assert!(exclusions("private-key.pem"));
         assert!(exclusions("Minecraft-Server.jar"));
         assert!(!exclusions("sodium-client.toml"));
+        assert!(safe_pack_path("config/sodium.json"));
+        assert!(!safe_pack_path("config/../saves/world"));
+        assert!(!safe_pack_path("config/session:stream"));
+        assert!(!safe_pack_path("config/CON.txt"));
         let defaults=TeamOptions::default();
         assert!(allow_root("config",defaults));
         assert!(!allow_root("saves",defaults));
