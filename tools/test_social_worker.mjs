@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import {createHmac} from 'node:crypto';
 import {deflateSync} from 'node:zlib';
 import worker, { VisRealtimeRoom } from '../services/social/worker.mjs';
 
@@ -61,6 +62,49 @@ const env={
     }})
   }
 };
+const recoveryDeliveries=[];
+env.RESEND_API_KEY='re_test_unit_only_not_a_real_secret';
+env.CEIBO_FROM_EMAIL='cuentas@example.org';
+env.CEIBO_MFA_ENCRYPTION_KEY=Buffer.alloc(32,113).toString('base64');
+const realFetch=globalThis.fetch;
+globalThis.fetch=async(url,options)=>{
+  if(String(url)==='https://api.resend.com/emails'){
+    recoveryDeliveries.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({id:'test-mail'}),{status:200});
+  }
+  return realFetch(url,options);
+};
+function lastRecoveryCode(){
+  const mail=recoveryDeliveries.at(-1);
+  const match=mail?.text?.match(/[A-Za-z0-9_-]{43}/);
+  assert(match,'a one-time email recovery code is expected');
+  return match[0];
+}
+function decodeBase32(input){
+  const letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let value=0,bits=0;const out=[];
+  for(const char of input){value=(value<<5)|letters.indexOf(char);bits+=5;
+    if(bits>=8){bits-=8;out.push((value>>>bits)&255);}}
+  return Buffer.from(out);
+}
+function otpFromSecret(secret){
+  const counter=Math.floor(Date.now()/30000);
+  const msg=Buffer.alloc(8);msg.writeUInt32BE(Math.floor(counter/2**32),0);
+  msg.writeUInt32BE(counter>>>0,4);
+  const mac=createHmac('sha1',decodeBase32(secret)).update(msg).digest();
+  const off=mac[19]&15;
+  return String((mac.readUInt32BE(off)&0x7fffffff)%1000000).padStart(6,'0');
+}
+async function enrollMfa(user){
+  const start=await call('/v1/account/mfa/setup',{},user.token);
+  assert.equal(start.status,200,JSON.stringify(start));
+  assert.match(start.data.secret,/^[A-Z2-7]{32}$/);
+  const confirm=await call('/v1/account/mfa/confirm',{code:otpFromSecret(start.data.secret)},user.token);
+  assert.equal(confirm.status,200,JSON.stringify(confirm));
+  assert.equal(confirm.data.recovery_codes.length,8);
+  assert.equal((await call('/v1/account/mfa/status',undefined,user.token)).data.enrolled,true);
+  return confirm.data.recovery_codes;
+}
 const origin = 'https://vis-social.example';
 const to64 = bytes => Buffer.from(bytes).toString('base64');
 async function call(path, body, token) {
@@ -294,6 +338,10 @@ assert.equal((await call('/v1/admin/accounts/role',{
 // No public API endpoint provides this promotion.
 DB.sqlite.prepare("UPDATE social_users SET role='super_admin' WHERE username='alice'").run();
 assert.equal((await call('/v1/account',undefined,alice.token)).data.account.role,'super_admin');
+assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'virgoland',title:'Unauthorized',visibility:'published'
+},alice.token)).status,403,'super administrators must enroll MFA before acting');
+const aliceRecoveryCodes=await enrollMfa(alice);
 assert.equal((await call('/v1/admin/projects/upsert',{
   id:'virgoland',title:'Virgoland',summary:'Project catalog',visibility:'published'
 },alice.token)).status,200);
