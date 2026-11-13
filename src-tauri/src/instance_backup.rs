@@ -3,7 +3,7 @@
 use std::{fs::{self,File,OpenOptions},io::{self,Read,Write},path::{Component,Path,PathBuf},
     time::{SystemTime,UNIX_EPOCH}};
 use serde::Serialize;
-use zip::{ZipArchive,ZipWriter,write::FileOptions,CompressionMethod};
+use zip::{ZipArchive,ZipWriter,write::SimpleFileOptions,CompressionMethod};
 const PARTS:&[&str]=&["saves","resourcepacks","shaderpacks","config","mods",
     "servers.dat","options.txt","optionsof.txt"];
 const MAX_FILES:usize=40_000;
@@ -86,7 +86,7 @@ fn add_tree(writer:&mut ZipWriter<File>,base:&Path,current:&Path,
             if *count>MAX_FILES||*total>MAX_BYTES{
                 return Err("Copia demasiado grande: máximo 40.000 archivos / 16 GiB".into());
             }
-            let options=FileOptions::default().compression_method(CompressionMethod::Deflated)
+            let options=SimpleFileOptions::default().compression_method(CompressionMethod::Deflated)
                 .unix_permissions(0o600);
             writer.start_file(name,options).map_err(|e|e.to_string())?;
             let mut reader=File::open(item.path()).map_err(|e|e.to_string())?;
@@ -160,7 +160,7 @@ fn create_internal(game:&Path,automatic:bool)->Result<Option<BackupInfo>,String>
             else if kind.is_file(){
                 count+=1;total+=kind.len();
                 if count>MAX_FILES||total>MAX_BYTES{return Err("Copia demasiado grande".into())}
-                zip.start_file(*part,FileOptions::default().compression_method(CompressionMethod::Deflated))
+                zip.start_file(*part,SimpleFileOptions::default().compression_method(CompressionMethod::Deflated))
                     .map_err(|e|e.to_string())?;
                 io::copy(&mut File::open(path).map_err(|e|e.to_string())?,&mut zip)
                     .map_err(|e|e.to_string())?;
