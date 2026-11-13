@@ -1166,7 +1166,19 @@ function cloudPage(){
  return `<div class="content-inner vis-cloud"><div class="page-heading"><div><span class="page-eyebrow">VIS UNIVERSE / PUBLICACIÓN</span><h1>Proyectos en la nube</h1><p>Catálogo compartido alojado por HTTPS. Los proyectos locales y mundos nunca se sobrescriben.</p></div><button class="outline-btn" data-action="refresh-cloud" ${cloudCatalogBusy?'disabled':''}>${I('cloud',18)} ${cloudCatalogBusy?'Conectando…':'Actualizar catálogo'}</button></div>
  <section class="surface-card cloud-guide"><div>${I('cloud',24)}<h3>Distribución sin alojar en tu PC</h3><p>Publicá el catálogo en GitHub Pages y los paquetes de proyecto en GitHub Releases o VIS Ombú (R2). Los clientes descargarán desde allí; no reciben cambios hasta que publicás una versión nueva.</p></div><span class="cloud-label">${cloudCatalog?.source?'Catálogo conectado':'Falta configurar URL'}</span></section>
  ${cloudCatalog?.source?`<p class="muted">Origen: ${esc(cloudCatalog.source)} · ${items.length} proyectos disponibles</p>`:`<p class="muted">La URL pública se configura al compilar desde <code>VIS_CATALOG_URL</code>, o por un administrador desde Configuración.</p>`}
- <div class="cloud-project-grid">${items.map(p=>`<article class="surface-card cloud-project"><div class="cloud-project-top">${I('layers',24)}<span>${esc(p.version||'Sin versión')}</span></div><h3>${esc(p.name)}</h3><p>${esc(p.description||'Proyecto de VIS Universe')}</p><div class="cloud-project-meta"><span>${I('game',14)} Minecraft ${esc(p.minecraft_version||'—')}</span><span>${esc(p.loader||'vanilla')}</span></div>${p.bundle_url?`<button class="outline-btn" data-action="download-cloud-bundle" data-id="${attr(p.id)}">${I('cloud',16)} Descargar paquete</button>`:'<small>Sin archivo publicado</small>'}</article>`).join('')||'<div class="quiet-empty">'+I('cloud',25)+'<h3>No hay publicaciones todavía</h3><p>Conectá un catálogo público para mostrar proyectos disponibles.</p></div>'}</div>
+ <div class="cloud-project-grid">${items.map(p=>`<article class="surface-card cloud-project"><div class="cloud-project-top">${I('layers',24)}<span>${esc(p.version||'Sin versión')}</span></div><h3>${esc(p.name)}</h3><p>${esc(p.description||'Proyecto de VIS Universe')}</p><div class="cloud-project-meta"><span>${I('game',14)} Minecraft ${esc(p.minecraft_version||'—')}</span><span>${esc(p.loader||'vanilla')}</span></div>${p.bundle_url?`
+  <button class="outline-btn" data-action="download-cloud-bundle" data-id="${attr(p.id)}">${I('cloud',16)} Descargar ZIP verificado</button>
+  ${(() => {const own=db.instances.filter(i=>!i.source_owner&&i.project_id===p.id);
+    return own.length?`<div class="team-install">
+     <label>Instancia destino<select data-team-destination="${attr(p.id)}">
+       ${own.map(i=>`<option value="${attr(i.name)}">${esc(i.name)}</option>`).join('')}
+     </select></label>
+     <label class="toggle-line"><span>Importar servidores/IP publicados</span><input type="checkbox" data-team-servers/></label>
+     <label class="toggle-line"><span>Importar waypoints del equipo</span><input type="checkbox" data-team-waypoints/></label>
+     <button class="outline-btn" data-action="apply-team-project" data-id="${attr(p.id)}">${I('folder',15)} Aplicar archivos nuevos</button>
+     <small>Conserva todos tus archivos existentes. Descarga el ZIP y comprueba sus hashes.</small>
+    </div>`:'<small>Instalá primero una instancia propia para aplicar el paquete.</small>';
+  })()}`:'<small>Sin archivo publicado</small>'}</article>`).join('')||'<div class="quiet-empty">'+I('cloud',25)+'<h3>No hay publicaciones todavía</h3><p>Conectá un catálogo público para mostrar proyectos disponibles.</p></div>'}</div>
  </div>`;
 }
 function updateSection(){return `<section class="surface-card update-card"><div class="card-heading">${I('cloud',20)} VIS Nexo · Actualizaciones</div><p class="muted">${updateInfo?.configured?`Versión instalada: ${esc(updateInfo.current_version)}. ${updateInfo.available?'Nueva versión '+esc(updateInfo.version)+' disponible.':'Sin actualizaciones detectadas.'}`:'Las actualizaciones firmadas se activan al configurar el repositorio y la clave pública de firma durante la compilación.'}</p>${updateInfo?.notes?`<p class="muted">${esc(updateInfo.notes)}</p>`:''}<div class="update-actions"><button class="outline-btn" data-action="check-update" ${updateBusy?'disabled':''}>${I('cloud',16)} ${updateBusy?'Comprobando…':'Buscar actualizaciones'}</button>${updateInfo?.available?`<button class="primary-btn" data-action="install-update" ${updateBusy?'disabled':''}>${I('cloud',17)} Instalar versión ${esc(updateInfo.version)}</button>`:''}</div><small>Se conserva la carpeta de datos y el identificador de aplicación anterior para preservar proyectos, mundos y perfiles.</small></section>`;}
@@ -1925,6 +1937,25 @@ root.addEventListener('click',async event=>{
  else if(act==='go-cloud'){navigate('cloud');void refreshCloudCatalog(true);}
  else if(act==='refresh-cloud')await refreshCloudCatalog();
  else if(act==='download-cloud-bundle')await downloadCloudBundle(id);
+ else if(act==='apply-team-project'){
+   if(!native||!db.user)return;
+   const card=button.closest('.cloud-project');
+   const name=card?.querySelector('[data-team-destination]')?.value||'';
+   if(!name)return message('Elegí una instancia local de este proyecto.',true);
+   const allowServers=!!card.querySelector('[data-team-servers]')?.checked;
+   const allowWaypoints=!!card.querySelector('[data-team-waypoints]')?.checked;
+   if(!window.confirm('¿Aplicar el paquete verificado de '+id+' a '+name+
+     '? Solo agregará archivos que no existan. No reemplazará mundos ni ajustes personales.'))return;
+   await onceOperation('apply-team:'+id+':'+name,async()=>{
+     try{
+       const report=await command('apply_team_project',{
+         projectId:id,name,allowServers,allowWaypoints});
+       message('VIS Team: '+report.installed+' archivos nuevos; '+
+         report.preserved+' existentes o privados conservados. '+report.modrinth_mods+
+         ' mods referenciados en Modrinth.');
+     }catch(e){message('No se pudo aplicar el paquete: '+String(e),true);}
+   });
+ }
  else if(act==='check-update')await checkAppUpdate();
  else if(act==='refresh-downloads'){await refreshDownloadJobs();render();}
  else if(act==='cancel-active-download'){
