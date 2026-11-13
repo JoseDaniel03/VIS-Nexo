@@ -1,0 +1,45 @@
+name: VIS Portals - pruebas sin despliegue
+# Fast, test-only checks. No native binaries, packages, Cloudflare migrations or deploy.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'services/social/**'
+      - 'web/social-remote.js'
+      - 'tools/test_social_worker.mjs'
+      - 'tools/test_social_peer_key.mjs'
+      - 'tools/check_vis_realtime.py'
+      - 'tools/check_vis_network_perf.py'
+      - '.github/workflows/vis-social-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vis-portals-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  social-unit-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check services/social/worker.mjs
+          node --check web/social-remote.js
+          node --check tools/test_social_worker.mjs
+          node --check tools/test_social_peer_key.mjs
+      - name: Test authentication, D1 encrypted delivery and Durable Object mock
+        run: |
+          node tools/test_social_worker.mjs
+          node tools/test_social_peer_key.mjs
+      - name: Verify native integration and performance invariants
+        run: |
+          python3 tools/check_vis_realtime.py
+          python3 tools/check_vis_network_perf.py
