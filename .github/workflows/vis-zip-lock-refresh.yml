@@ -7,6 +7,7 @@ on:
       - security/vis-shield-world-cloud-projects-20261113
     paths:
       - src-tauri/Cargo.toml
+      - .github/workflows/vis-zip-lock-refresh.yml
 permissions:
   contents: read
 jobs:
@@ -20,7 +21,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Refresh zip crate and required transitive dependencies
         run: |
-          cargo update -p zip
+          cargo metadata --no-deps --format-version 1 >/dev/null
+          echo "=== LEGACY ZIP DEPENDENTS ==="
+          cargo tree -i zip@0.6.6 || true
+          echo "=== NEW ZIP DEPENDENTS ==="
+          cargo tree -i zip@9.5.0 || true
+          cargo update -p zip@0.6.6
           cargo metadata --locked --no-deps --format-version 1 >/dev/null
       - name: Print proposed Cargo.lock in recoverable chunks
         shell: bash
