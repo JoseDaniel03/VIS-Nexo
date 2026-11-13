@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       username:
-        description: 'Existing VIS Social username to promote (no auto-created accounts)'
+        description: 'Existing VIS Cloud username to promote (register it first in VIS Nexo)'
         required: true
         type: string
       public_key:
-        description: 'Device Ed25519 public key from VIS Nexo (standard base64, NOT private key)'
+        description: 'Cloud password PUBLIC verifier (Ed25519 base64 from VIS Portals, no password)'
         required: true
         type: string
       confirm:
-        description: 'I verified the device key fingerprint and authorize first super-admin grant'
+        description: 'I verified the cloud account identity/public verifier and authorize first super-admin grant'
         required: true
         type: boolean
         default: false
@@ -39,16 +39,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Generate guarded SQL with device public key
+      - name: Generate guarded SQL for an existing VIS Cloud account
         run: python3 tools/prepare_social_superadmin.py
       - name: Grant first super-admin role only if no super-admin exists
         working-directory: services/social
         run: npx --yes wrangler@4 d1 execute DB --remote --file=.vis-superadmin-grant.sql
-      - name: Confirm account public key and granted role
+      - name: Confirm cloud verifier and granted role
         working-directory: services/social
         run: |
           npx --yes wrangler@4 d1 execute DB --remote --file=.vis-superadmin-verify.sql --json > .vis-superadmin-result.json
-          node --input-type=module -e "import fs from 'node:fs'; const d=JSON.parse(fs.readFileSync('.vis-superadmin-result.json','utf8')); const rows=Array.isArray(d)?d.flatMap(x=>x.results||[]):(d.results||[]); if(rows.length!==1||rows[0].role!=='super_admin'||rows[0].username!==process.env.VIS_SUPERADMIN_USERNAME.trim().toLowerCase()||rows[0].signing_public_key!==process.env.VIS_SUPERADMIN_PUBLIC_KEY.trim())process.exit(1);console.log('VIS Social first super admin granted to verified device key')"
+          node --input-type=module -e "import fs from 'node:fs'; const d=JSON.parse(fs.readFileSync('.vis-superadmin-result.json','utf8')); const rows=Array.isArray(d)?d.flatMap(x=>x.results||[]):(d.results||[]); if(rows.length!==1||rows[0].role!=='super_admin'||rows[0].username!==process.env.VIS_SUPERADMIN_USERNAME.trim().toLowerCase()||rows[0].cloud_credential_public_key!==process.env.VIS_SUPERADMIN_PUBLIC_KEY.trim())process.exit(1);console.log('VIS Social first super admin granted to verified VIS Cloud account')"
       - name: Remove temporary SQL files
         if: always()
         run: rm -f services/social/.vis-superadmin-grant.sql services/social/.vis-superadmin-verify.sql services/social/.vis-superadmin-result.json
