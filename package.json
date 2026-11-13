@@ -13,7 +13,7 @@
     "verify:bridge": "python3 tools/verify_bridge.py",
     "check:performance": "python3 tools/check_vis210.py",
     "test:ui:vis210": "python3 tools/test_vis210.py",
-    "check:release": "python3 tools/check_vis211.py && python3 tools/check_vis212.py && python3 tools/check_vis213.py && python3 tools/check_vis214.py && python3 tools/check_vis215.py && python3 tools/check_vis216.py && python3 tools/check_vis217.py && python3 tools/check_vis218.py && python3 tools/check_vis_reliability.py && python3 tools/test_horizon_from_source.py && node tools/test_universe_worker.mjs && node tools/test_social_worker.mjs && node tools/test_social_peer_key.mjs",
+    "check:release": "python3 tools/check_vis211.py && python3 tools/check_vis212.py && python3 tools/check_vis213.py && python3 tools/check_vis214.py && python3 tools/check_vis215.py && python3 tools/check_vis216.py && python3 tools/check_vis217.py && python3 tools/check_vis218.py && python3 tools/check_vis_reliability.py && python3 tools/check_vis_downloads.py && python3 tools/test_horizon_from_source.py && node tools/test_universe_worker.mjs && node tools/test_social_worker.mjs && node tools/test_social_peer_key.mjs",
     "test:ui:vis211": "python3 tools/test_vis211.py",
     "test:ui:vis212": "python3 tools/test_vis212.py",
     "test:ceibo:local": "python3 tools/test_vis_admin_local.py",
