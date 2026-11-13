@@ -1850,7 +1850,8 @@ root.addEventListener('submit',async event=>{
        if(token.length<32)return message('Ingresá la credencial de publicación VIS Universe.',true);
        if(!window.confirm('¿Publicar '+teamReview.report.files.length+
          ' archivos de '+projectId+' en R2? Quedarán disponibles para los usuarios del catálogo.'))return;
-       const pack=await command('publish_team_project',{projectId,name,options,token});
+       const pack=await command('publish_team_project',{
+         projectId,name,options,reviewSha256:teamReview.report.review_sha256,token});
        teamReview=null;form.reset();
        const panel=document.getElementById('vis-team-review');
        if(panel)panel.textContent='Publicado · '+pack.files+' archivos · '+
