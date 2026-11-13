@@ -717,7 +717,7 @@ function socialPanel(){
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
  ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}`:''}
- ${social.connected()&&social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-developer-key" title="Consultar clave pública de la cuenta para una habilitación manual en GitHub">Identidad de desarrollador${socialOwner?' · habilitada':''}</button>`:''}
+ ${social.connected()&&social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-developer-key" title="Consultar clave pública de la cuenta para una habilitación manual en GitHub">Identidad de desarrollador${socialOwner?' · habilitada':''}</button><button class="mini-add" type="button" data-action="social-superadmin-key" title="Preparar solicitud protegida de superadministrador, sin revelar contraseña">Identidad para superadmin${accountAdmin?' · habilitada':''}</button>`:''}
  <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>${social.connected()&&!social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-enable-cloud">Vincular contraseña online</button>`:''}
  `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
@@ -1961,6 +1961,21 @@ root.addEventListener('click',async event=>{
      '\nAbrí GitHub Actions → VIS Social - Super Developer, verificá la cuenta y solicitá grant.';
    try{await navigator.clipboard?.writeText(info);}catch{/* Clipboard unavailable. */}
    window.prompt('Datos públicos para la solicitud de desarrollador (sin contraseña):',info);
+  }catch(error){message(String(error),true);}
+ }
+ else if(act==='social-superadmin-key'){
+  try{
+   const {account}=await social.accountInfo();
+   if(!account?.cloud_credential_public_key)
+     throw Error('Iniciá sesión con una cuenta VIS Cloud con contraseña.');
+   const detail='Cuenta VIS: '+account.username+
+      '\\nID pública: '+account.public_id+
+      '\\nVerificador PÚBLICO Ed25519: '+account.cloud_credential_public_key+
+      '\\nRol actual: '+account.role+
+      '\\nGitHub Actions → VIS Social - Provision First Super Administrator'+
+      '\\nNo compartas contraseña, PIN, sal ni clave privada.';
+   try{await navigator.clipboard?.writeText(detail);}catch{}
+   window.prompt('Solicitud de superadmin: primero verificá la propiedad de la cuenta y aprobá el workflow protegido.',detail);
   }catch(error){message(String(error),true);}
  }
  else if(act==='social-public-identity'){
