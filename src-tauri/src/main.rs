@@ -1428,6 +1428,11 @@ async fn launch_horizon(
     }
     tauri::async_runtime::spawn_blocking(move||{
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
+        // Only the owner opts into backups. Visitors and guests cannot write
+        // snapshots of somebody else's shared game without permission.
+        if instance.auto_backup && instance.installed && visitor.is_none(){
+            instance_backup::create_if_due(&dir)?;
+        }
         let session_path=if let Some(ref auth)=credential {
             Some(microsoft::temporary_horizon_session(&root,auth)?)
         }else{None};
@@ -1616,6 +1621,10 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms
     }else{None};
     let shared=ins.source_owner.len()>0;
     let result=tauri::async_runtime::spawn_blocking(move||{
+        if !shared && guest_name.is_none() && ins.auto_backup && ins.installed {
+            let dir=minecraft::instance_dir(&data_root,&owner,&ins)?;
+            instance_backup::create_if_due(&dir)?;
+        }
         if shared || guest_name.is_some() {
             let player=guest_name.or(active).ok_or("Falta el perfil que ejecuta la instancia")?;
             if let Some(ref premium)=credential{
