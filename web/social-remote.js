@@ -73,18 +73,16 @@ async function sharedKey(ownPrivate, publicKey) {
 function aad(from, to, id) {
   return encoder.encode('VIS-SOCIAL-MSG-V1\n' + from + '\n' + to + '\n' + id);
 }
-async function encrypt(body, from, to, id, ownPrivate, peerPublic) {
+async function encrypt(body, from, to, id, aes) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const aes = await sharedKey(ownPrivate, peerPublic);
   const encrypted = await crypto.subtle.encrypt({
     name: 'AES-GCM', iv, additionalData: aad(from, to, id)
   }, aes, encoder.encode(body));
   return JSON.stringify({ v: 1, iv: to64(iv), ct: to64(encrypted) });
 }
-async function decrypt(payload, from, to, id, ownPrivate, peerPublic) {
+async function decrypt(payload, from, to, id, aes) {
   const obj = JSON.parse(payload);
   if (obj?.v !== 1) throw Error('Mensaje cifrado incompatible');
-  const aes = await sharedKey(ownPrivate, peerPublic);
   const clear = await crypto.subtle.decrypt({
     name: 'AES-GCM', iv: from64(obj.iv), additionalData: aad(from, to, id)
   }, aes, from64(obj.ct));
@@ -110,6 +108,9 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   let state = null, keys = null, privateDb = null, currentUser = '';
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
   let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
+  // Cache only non-extractable derived AES CryptoKeys for this live identity.
+  // A peer key change is still checked against its persisted TOFU pin.
+  const pinnedPeers=new Map(), derivedKeys=new Map();
   const connected = () => !!(state && privateDb && keys);
   const status = (value, error = '') => onStatus?.(value, error);
   const rpc = (path, method = 'GET', body = null) => command('social_request',
@@ -119,10 +120,24 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if (!privateDb || !currentUser || !friend?.username || !friend.public_key)
       throw Error('Identidad de amigo no disponible');
     const id='peer-key:'+currentUser+':'+friend.username;
-    const pinned=await store(privateDb,'keys','readonly',undefined,id);
-    const publicKey=validatePinnedPeerKey(pinned,friend.public_key);
-    if (pinned == null) await store(privateDb,'keys','readwrite',publicKey,id);
+    const saved=pinnedPeers.has(id)?pinnedPeers.get(id):
+      await store(privateDb,'keys','readonly',undefined,id);
+    const publicKey=validatePinnedPeerKey(saved,friend.public_key);
+    if(saved==null)await store(privateDb,'keys','readwrite',publicKey,id);
+    pinnedPeers.set(id,publicKey);
+    if(pinnedPeers.size>128)pinnedPeers.delete(pinnedPeers.keys().next().value);
     return publicKey;
+  }
+  async function peerAesKey(username,publicKey){
+    if(!keys?.pair?.privateKey||!currentUser)throw Error('Sesión de cifrado no disponible');
+    const cacheId=currentUser+':'+username+':'+publicKey;
+    if(derivedKeys.has(cacheId))return derivedKeys.get(cacheId);
+    // Cache promises as well, so concurrent messages share key derivation.
+    const pending=sharedKey(keys.pair.privateKey,publicKey);
+    derivedKeys.set(cacheId,pending);
+    if(derivedKeys.size>64)derivedKeys.delete(derivedKeys.keys().next().value);
+    try{return await pending;}
+    catch(error){derivedKeys.delete(cacheId);throw error;}
   }
   async function localHistory() {
     if (!privateDb || !currentUser) return [];
@@ -205,8 +220,10 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         try {
           const pub=await verifiedPeerKey(friend);
           if(!valid())return;
+          const aes=await peerAesKey(incoming.from,pub);
+          if(!valid())return;
           const text = await decrypt(incoming.payload, incoming.from,
-            username, incoming.client_message_id, keys.pair.privateKey, pub);
+            username, incoming.client_message_id, aes);
           if(!valid())return;
           await saveMessage({
             id: incoming.client_message_id, from: incoming.from, to: username,
@@ -242,6 +259,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         if(interval){clearTimeout(interval);interval=null;}
         sessionEpoch++;
         state=null;keys=null;messages=[];lastFingerprint='';currentUser='';
+        pinnedPeers.clear();derivedKeys.clear();
         if(privateDb){privateDb.close();privateDb=null;}
         status('disconnected','La sesión VIS Social expiró. Volvé a conectar la cuenta.');
       }else status('degraded',detail);
@@ -305,6 +323,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     window.removeEventListener('online', onOnline);
     const wasConnected=!!state;
     state=null;keys=null;currentUser='';messages=[];lastFingerprint='';
+    pinnedPeers.clear();derivedKeys.clear();
     lastHeartbeat=0;consecutiveErrors=0;busy=false;
     if(privateDb){privateDb.close();privateDb=null;}
     if(wasConnected)await command('social_disconnect').catch(()=>{});
@@ -342,8 +361,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if (!friend?.public_key) throw Error('Tu amigo aún no configuró su identidad cifrada');
     const id = crypto.randomUUID().replace(/-/g, '');
     const pub=await verifiedPeerKey(friend);
-    const payload = await encrypt(body.trim(), currentUser, to, id,
-      keys.pair.privateKey, pub);
+    const aes=await peerAesKey(to,pub);
+    const payload = await encrypt(body.trim(), currentUser, to, id, aes);
     if (encoder.encode(payload).length > 2048) throw Error('Mensaje cifrado demasiado largo');
     await rpc('/v1/messages/send', 'POST', { to, client_message_id: id, payload });
     await saveMessage({
