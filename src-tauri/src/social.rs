@@ -347,6 +347,39 @@ pub(crate) async fn social_request(
     }).await.map_err(|_| "Solicitud VIS Social interrumpida")?
 }
 
+// This is NOT a social bearer token. Only a 20-second, single-use,
+ // read-only WS upgrade ticket is returned to the WebView.
+#[tauri::command]
+pub(crate) async fn social_realtime_ticket(
+    backend: State<'_, Mutex<Backend>>,
+    social: State<'_, Mutex<SocialSession>>
+) -> Result<Value,String>{
+    let username=backend.lock().map_err(|_|"Estado local bloqueado")?
+        .active_user.clone().ok_or("No hay cuenta activa")?;
+    let token={
+        let active=social.lock().map_err(|_|"Estado social bloqueado")?;
+        if active.username.as_deref()!=Some(username.as_str()){
+            return Err("La conexión social no pertenece a la cuenta activa".into());
+        }
+        active.bearer.clone().ok_or("Conectá VIS Social primero")?
+    };
+    tauri::async_runtime::spawn_blocking(move||{
+        let base=base_url()?;
+        let result=request(&client()?,&base,"/v1/realtime/ticket","POST",
+            Some(&json!({})),Some(&token))?;
+        let ticket=result.get("ticket").and_then(Value::as_str)
+            .ok_or("Permiso temporal de conexión inválido")?;
+        if ticket.len()!=43 || !ticket.bytes().all(|b|
+            b.is_ascii_alphanumeric() || b==b'-' || b==b'_'){
+            return Err("Permiso de conexión inválido".into());
+        }
+        // The WebView cannot choose or redirect the endpoint. TLS hostname
+        // comes exclusively from validated VIS_SOCIAL_URL/DEFAULT_URL.
+        let ws_url=format!("{}/v1/realtime/connect?ticket={}",
+            base.replacen("https:","wss:",1),ticket);
+        Ok(json!({"ws_url":ws_url,"expires_in":20}))
+    }).await.map_err(|_|"Conexión de avisos interrumpida")?
+}
 #[tauri::command]
 pub(crate) async fn social_disconnect(
     social: State<'_, Mutex<SocialSession>>
