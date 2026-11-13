@@ -5,7 +5,7 @@ use serde::{Deserialize,Serialize};
 use sha2::{Digest,Sha256};
 use std::{collections::HashSet,fs::{self,File},io::{Read,Write},path::{Component,Path,PathBuf},time::{SystemTime,UNIX_EPOCH}};
 use vsui_core::GameProject;
-use zip::{ZipWriter,ZipArchive,write::FileOptions,CompressionMethod};
+use zip::{ZipWriter,ZipArchive,write::SimpleFileOptions,CompressionMethod};
 
 const MAX_FILES:usize=1500;
 const MAX_FILE:u64=16*1024*1024;
@@ -269,7 +269,7 @@ pub fn build(game:&Path,output_root:&Path,project:&GameProject,options:TeamOptio
     let outcome=(||->Result<TeamPack,String>{
         let file=File::create(&stage).map_err(|e|e.to_string())?;
         let mut writer=ZipWriter::new(file);
-        let opts=FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let opts=SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         writer.start_file(".bsconfig",opts).map_err(|e|e.to_string())?;
         writer.write_all(&json).map_err(|e|e.to_string())?;
         for (file,entry) in files.iter().zip(entries.iter()){
