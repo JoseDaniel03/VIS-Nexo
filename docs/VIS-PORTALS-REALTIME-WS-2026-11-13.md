@@ -37,7 +37,7 @@ Estado: código integrado a `main` el **13/11/2026**. **Sin despliegue de Cloudf
 
 1. Ejecutar `npm run validate`, `npm run check:release`, `npm run test:social` y `cargo check --all-targets --locked` en Linux y Windows; comprobar el comando Tauri.
 2. Probar `VisRealtimeRoom` con Wrangler/Miniflare, asegurando HTTP 101, que la hibernación conserva el socket, máximo 6 dispositivos y cierre ante mensajes ajenos a `ping`.
-3. Usar Secrets de GitHub Actions (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`). Aplicar migración D1 0009 y desplegar el Worker/DO desde el workflow existente cuando haya autorización. La automatización de producción revisa `/health schema:9`.
+3. Usar Secrets de GitHub Actions (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`). Aplicar migración D1 0009 y desplegar el Worker/DO **solo mediante `workflow_dispatch` manual** de `VIS Social - Cloudflare D1`, una vez autorizada la publicación. Eliminamos el despliegue automático por push para impedir que futuras revisiones publiquen migraciones sin pruebas. La automatización comprueba `/health schema:9`.
 4. En dos PCs, verificar recepción A→B y B→A con latencia medida, repetición/ACK, cambio de cuenta y uso offline. Asegurar que solo el destinatario recibe un wakeup.
 5. Probar que el mismo ticket falla al usarse por segunda vez, con Origin ajeno, sin Upgrade o tras vencer; que los tickets no quedan en logs y que la desconexión vuelve al polling.
 6. Si falta binding `REALTIME` o el Worker aún no está publicado, comprobar que la interfaz funciona con el antiguo polling sin mostrar errores repetidos al usuario.
