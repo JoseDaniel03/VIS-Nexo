@@ -25,6 +25,8 @@ function resetAccountView(){
  cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;downloadJobs=[];
   premiumSkinSync=true;premiumSkinModel='classic';
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;
+ for(const path of Object.keys(assetCache))delete assetCache[path];
+ previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
 }
 async function onceOperation(key,operation){
  if(pendingOperations.has(key))return false;
@@ -273,6 +275,26 @@ function rememberMockAccount(username){
 // loading hundreds of 12-MB images concurrently caused large UI RAM spikes.
 const previewLoading=new Map();
 const previewFailed=new Set();
+const PREVIEW_CACHE_ENTRIES=64,PREVIEW_CACHE_BYTES=32*1024*1024;
+const previewCacheOrder=[];
+let previewCacheBytes=0;
+function rememberPreview(path,source){
+  if(typeof source!=='string'||!source)return;
+  if(assetCache[path]){
+    previewCacheBytes-=assetCache[path].length;
+    const index=previewCacheOrder.indexOf(path);
+    if(index>=0)previewCacheOrder.splice(index,1);
+  }
+  assetCache[path]=source;
+  previewCacheOrder.push(path);
+  previewCacheBytes+=source.length;
+  while((previewCacheOrder.length>PREVIEW_CACHE_ENTRIES||previewCacheBytes>PREVIEW_CACHE_BYTES)
+      &&previewCacheOrder.length>1){
+    const oldest=previewCacheOrder.shift();
+    previewCacheBytes-=assetCache[oldest]?.length||0;
+    delete assetCache[oldest];
+  }
+}
 let previewBackgroundBusy=false;
 async function compactPreview(path,source){
   if(typeof source!=='string'||!source.startsWith('data:image/')||source.length<512*1024)return source;
@@ -295,42 +317,34 @@ async function compactPreview(path,source){
 async function fetchPreview(path){
   if(!path||assetCache[path]||previewFailed.has(path))return;
   if(previewLoading.has(path))return previewLoading.get(path);
+  const generation=accountGeneration;
   const pending=(async()=>{
     try{
       const source=await command('preview_asset',{path});
-      assetCache[path]=await compactPreview(path,source);
-    }catch{previewFailed.add(path);}
-    finally{previewLoading.delete(path);}
+      if(generation!==accountGeneration)return;
+      const reduced=await compactPreview(path,source);
+      if(generation===accountGeneration)rememberPreview(path,reduced);
+    }catch{if(generation===accountGeneration)previewFailed.add(path);}
+    finally{if(previewLoading.get(path)===pending)previewLoading.delete(path);}
   })();
   previewLoading.set(path,pending);
   return pending;
 }
 async function refreshAssets(){
   if(!native||!db.user)return;
+  const generation=accountGeneration;
   const selected=db.projects.find(p=>p.id===selectedId);
-  const vital=[db.user.avatar,db.user.skin,db.user.cape,db.user.avatar_layer,
+  // Fetch only assets visible now, never the entire catalogue at login.
+  const visible=[db.user.avatar,db.user.skin,db.user.cape,db.user.avatar_layer,
     db.user.profile_banner,db.branding.launcher_logo,db.branding.home_image,
     selected?.icon_path,selected?.banner_path,selected?.logo_path,
-    ...db.projects.slice(0,8).flatMap(p=>[p.icon_path,p.banner_path])].filter(Boolean);
-  // Only a small visible set blocks login or navigation.
-  const immediate=[...new Set(vital)];
-  for(let i=0;i<immediate.length;i+=3) {
-    await Promise.all(immediate.slice(i,i+3).map(fetchPreview));
+    ...db.projects.slice(0,5).flatMap(p=>[p.icon_path,p.banner_path])].filter(Boolean);
+  const items=[...new Set(visible)];
+  for(let i=0;i<items.length;i+=3){
+    if(generation!==accountGeneration)return;
+    await Promise.all(items.slice(i,i+3).map(fetchPreview));
   }
-  if(previewBackgroundBusy)return;
-  previewBackgroundBusy=true;
-  const remaining=[...new Set(db.projects.flatMap(p=>
-    [p.icon_path,p.banner_path,p.logo_path]).filter(Boolean))]
-    .filter(p=>!assetCache[p]&&!previewFailed.has(p));
-  void (async()=>{
-    for(let i=0;i<remaining.length;i+=2){
-      await Promise.all(remaining.slice(i,i+2).map(fetchPreview));
-      // At most one full DOM update per eight images, not one per picture.
-      if(i%8===0)scheduleSocialRender();
-    }
-    previewBackgroundBusy=false;
-    scheduleSocialRender();
-  })();
+  if(generation===accountGeneration)scheduleSocialRender();
 }
 let socialMode = 'disconnected', socialError = '', socialOverlay = null;
 const socialAvatars=new Map(), avatarLoads=new Set();
