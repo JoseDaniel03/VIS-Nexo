@@ -61,11 +61,11 @@ fn end(app:&AppHandle,id:u64,failed:bool){
     let Some(mut job)=state.active.take() else{return};
     if job.id!=id {state.active=Some(job);return;}
     let cancelled=job.cancel_requested;
-    job.status=if failed&&cancelled{"cancelled"}else if failed{"failed"}else{"completed"}.into();
+    job.status=(if failed&&cancelled{"cancelled"}else if failed{"failed"}else{"completed"}).to_owned();
     job.finished_at=Some(now());
-    job.detail=if failed&&cancelled{"Cancelada. Podés reintentar: los archivos verificados existentes se conservan."}
+    job.detail=(if failed&&cancelled{"Cancelada. Podés reintentar: los archivos verificados existentes se conservan."}
                else if failed{"La instalación terminó con un error. Revisá el aviso del launcher."}
-               else{"Instalación completada y archivos verificados."}.into();
+               else{"Instalación completada y archivos verificados."}).to_owned();
     state.history.insert(0,job.clone());
     state.history.truncate(HISTORY_LIMIT);
     drop(state);
@@ -96,6 +96,7 @@ pub fn cancel(app:&AppHandle,owner:&str,id:u64)->Result<DownloadJob,String>{
     let mut state=registry().lock().map_err(|_|"Gestor de descargas bloqueado".to_string())?;
     let job=state.active.as_mut().filter(|job|job.id==id && job.owner==owner)
         .ok_or("No existe una instalación activa con ese identificador para tu cuenta")?;
+    if job.stage=="done"{return Err("La instalación ya terminó; no es posible cancelarla".into());}
     job.cancel_requested=true;
     job.status="cancelling".into();
     job.detail="Cancelando cuando la operación actual alcance un punto seguro…".into();
