@@ -28,7 +28,10 @@ pub struct CloudBackup { pub world:String,pub archive:String,pub sha256:String,p
 fn now()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()}
 fn valid_name(s:&str)->bool {
     !s.is_empty()&&s.len()<=96&&s!="."&&s!=".."&&!s.starts_with(".vis-")
-        &&!s.contains('/')&&!s.contains('\\')&&!s.chars().any(|c|c.is_control())
+        &&!s.contains('/')&&!s.contains('\\')&&!s.contains(':')
+        &&!s.ends_with('.')&&!s.ends_with(' ')&&!s.chars().any(|c|c.is_control())
+        &&Path::new(s).components().count()==1
+        &&matches!(Path::new(s).components().next(),Some(Component::Normal(_)))
 }
 fn settings_path(game:&Path)->Result<PathBuf,String> {
     crate::instance_guard::private_paths(game,&[".vis/world-cloud.json"])?;
