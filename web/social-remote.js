@@ -356,21 +356,28 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   async function sendMessage(to, body) {
     if (!connected()) throw Error('VIS Social no está conectado');
+    const epoch=sessionEpoch,from=currentUser;
+    const valid=()=>epoch===sessionEpoch&&from===currentUser&&connected();
     if (typeof body !== 'string' || !body.trim()) throw Error('Mensaje vacío');
     if (encoder.encode(body).length > 1300) throw Error('Mensaje demasiado largo (máximo 1300 bytes)');
     const friend = (state.friends || []).find(f => f.username === to);
     if (!friend?.public_key) throw Error('Tu amigo aún no configuró su identidad cifrada');
     const id = crypto.randomUUID().replace(/-/g, '');
     const pub=await verifiedPeerKey(friend);
+    if(!valid())throw Error('Cambió la cuenta activa; reenviá el mensaje desde tu sesión actual');
     const aes=await peerAesKey(to,pub);
-    const payload = await encrypt(body.trim(), currentUser, to, id, aes);
+    if(!valid())throw Error('Cambió la cuenta activa; mensaje no enviado');
+    const payload=await encrypt(body.trim(), from, to, id, aes);
+    if(!valid())throw Error('Cambió la cuenta activa; mensaje no enviado');
     if (encoder.encode(payload).length > 2048) throw Error('Mensaje cifrado demasiado largo');
     await rpc('/v1/messages/send', 'POST', { to, client_message_id: id, payload });
+    if(!valid())return; // A reply from a previous profile must not reach this one's local history.
     await saveMessage({
-      id, from: currentUser, to, body: body.trim(), created: new Date().toISOString()
+      id, from, to, body: body.trim(), created: new Date().toISOString()
     });
+    if(!valid())return;
     messages = await localHistory();
-    notify(true);
+    if(valid())notify(true);
   }
   async function getAvatar(username) {
     if (!connected()) throw Error('VIS Social no está conectado');
