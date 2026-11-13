@@ -26,6 +26,7 @@ function resetAccountView(){
   premiumSkinSync=true;premiumSkinModel='classic';
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();avatarLoads.clear();
  socialMediaQueue.length=0;publicSkinLookup=null;
+ projectCommunity=null;projectCommunityId='';projectCommunityLoading=false;projectCommunityError='';
  for(const path of Object.keys(assetCache))delete assetCache[path];
  previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
  previewLoading.clear();
@@ -99,6 +100,7 @@ async function beginMicrosoftLogin(){
 }
 
 let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null, stateEditorOpen=false;
+let projectCommunity=null, projectCommunityId='', projectCommunityLoading=false, projectCommunityError='';
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
 // The display mode is a local UI preference; it does not change account permissions.
@@ -550,6 +552,7 @@ const social = createSocialRemote(command, (snapshot, messages) => {
     incoming_requests:snapshot.incoming_requests||[], outgoing_requests:snapshot.outgoing_requests||[],
     messages:messages||[] };
   mergeSocialView();
+  if(page==='project'&&selectedId&&projectCommunityId!==selectedId&&!projectCommunityLoading)void loadProjectCommunity(selectedId);
   refreshSocialAvatars(snapshot);
   refreshSocialSkins(snapshot);
   scheduleSocialRender();
@@ -778,6 +781,76 @@ function homePage(){
  <div class="portal-footer-note">${I('shield',14)} ${db.catalog_source?'VIS Universe · Catálogo online: '+esc(db.catalog_source):'VIS Universe · Falta configurar el catálogo remoto en Configuración → Publicación.'} Los borradores locales solo se muestran al administrador.</div></div>`;
 }
 function projectCard(p){const available=isExecutionEnabled(p);return `<button class="project-card portal-game-card" data-action="open-project" data-id="${attr(p.id)}" data-context="${attr(p.id)}"><div class="project-card-cover" ${p.banner_path?bgPhoto(p.banner_path):''}><span class="project-card-watermark">${projectIcon(p)}</span><span class="availability ${available?'available':''}">${available?'Disponible':p.installable?'Pausado':'Próximamente'}</span><span class="card-hover-cta">${I('arrow',17)} Abrir proyecto</span></div><div class="project-card-info"><span class="project-card-logo">${projectIcon(p)}</span><div><strong>${esc(p.title)}</strong><small>${esc(p.subtitle||p.mc_version||'Proyecto VIS Universe')}</small></div>${I('chevron',19)}</div></button>`;}
+
+const visProjectRoles=[
+ ['creator','Creadores'],['helper','Ayudantes'],['content_creator','Creadores de contenido'],
+ ['participant','Participantes'],['guest','Invitados'],['collaborator','Colaboradores'],['mention','Menciones']
+];
+async function loadProjectCommunity(id=selectedId){
+ if(!id||!social.connected()||projectCommunityLoading)return;
+ const generation=accountGeneration;
+ projectCommunityLoading=true;projectCommunityError='';
+ try{
+   const data=await social.projectCommunity(id);
+   if(generation!==accountGeneration||selectedId!==id)return;
+   projectCommunityId=id;projectCommunity=data;
+ }catch(error){
+   if(generation!==accountGeneration||selectedId!==id)return;
+   projectCommunityId=id;projectCommunity=null;projectCommunityError=String(error);
+ }finally{
+   projectCommunityLoading=false;
+   if(generation===accountGeneration&&selectedId===id&&page==='project')render();
+ }
+}
+function projectMediaThumbnail(item){
+ if(item.provider!=='youtube')return '';
+ let video='';
+ try{
+   const url=new URL(item.url);
+   if(url.hostname==='www.youtube.com'&&url.pathname==='/watch')video=url.searchParams.get('v')||'';
+ }catch{}
+ return /^[a-zA-Z0-9_-]{11}$/.test(video)?
+   '<img loading="lazy" alt="" src="https://i.ytimg.com/vi/'+attr(video)+'/mqdefault.jpg"/>':'';
+}
+function projectCommunitySection(p){
+ const c=projectCommunityId===p.id?projectCommunity:null;
+ if(!social.connected())return '<section class="vis-project-community"><h2>'+I('users',19)+' Participantes y medios</h2><p class="muted">Conectá tu cuenta VIS Cloud para ver los roles, solicitudes y videos de este proyecto.</p></section>';
+ if(!c)return '<section class="vis-project-community"><h2>'+I('users',19)+' Participantes y medios</h2><p class="muted">'+esc(projectCommunityError||'Cargando miembros del proyecto…')+'</p><button type="button" class="outline-btn" data-action="project-community-refresh">Consultar participantes</button></section>';
+ const media=(c.media||[]).map(item=>'<article class="vis-community-media-card">'+
+  '<div class="vis-community-media-thumb">'+(projectMediaThumbnail(item)||I(item.kind==='stream'?'play':'image',28))+'</div>'+
+  '<b>'+esc(item.title)+'</b><small>'+esc(item.kind==='stream'?'Directo':'Video')+' · '+esc(item.author)+'</small>'+
+  '<div class="vis-data-actions"><button class="outline-btn" type="button" data-action="project-community-open-media" data-id="'+attr(item.id)+'">Abrir '+esc(item.provider)+'</button>'+
+  (c.can_manage||item.author===db.user?.username?'<button class="outline-btn" type="button" data-action="project-community-delete-media" data-id="'+attr(item.id)+'">Quitar</button>':'')+'</div></article>').join('');
+ const roles=visProjectRoles.map(([key,label])=>{
+   const members=(c.members||[]).filter(x=>x.member_role===key);
+   return '<div class="vis-community-role"><h3>'+esc(label)+' <small>'+members.length+'</small></h3>'+
+     (members.length?members.map(m=>'<div class="vis-community-member"><span><b>'+esc(m.display_name||m.username)+'</b> <small>@'+esc(m.public_handle||m.username)+'</small></span>'+
+        (m.can_play?'<span class="vis-access-yes">Puede jugar</span>':'')+'</div>').join(''):'<p class="muted">Sin integrantes todavía</p>')+'</div>';
+ }).join('');
+ const join=c.role?'':'<div class="vis-community-join">'+
+   '<p>'+esc(c.admission==='open'?'Podés unirte libremente.':c.admission==='request'?'Podés solicitar una invitación para participar.':'Se requiere invitación de los responsables.')+'</p>'+
+   (c.admission!=='invite_only'?'<button class="outline-btn" data-action="project-community-request" '+(c.request_status==='pending'?'disabled':'')+'>'+
+    (c.request_status==='pending'?'Solicitud pendiente':c.admission==='open'?'Unirme al proyecto':'Solicitar unirme')+'</button>':'')+'</div>';
+ const controls=c.can_manage?'<div class="vis-community-manage">'+
+   '<button class="outline-btn" data-action="project-community-member">Asignar rol / acceso</button>'+
+   '<button class="outline-btn" data-action="project-community-remove-member">Quitar miembro</button>'+
+   '<button class="outline-btn" data-action="project-community-policy">Invitaciones y acceso</button></div>'+
+   '<div class="vis-community-requests">'+(c.pending||[]).map(x=>'<div class="vis-community-member"><span>'+esc(x.username)+
+   (x.note?'<small>'+esc(x.note)+'</small>':'')+'</span>'+
+   '<button class="outline-btn" data-action="project-community-review" data-mode="approve" data-user="'+attr(x.username)+'">Aceptar</button>'+
+   '<button class="outline-btn" data-action="project-community-review" data-mode="reject" data-user="'+attr(x.username)+'">Rechazar</button></div>').join('')+'</div>':'';
+ const postable=c.can_manage||c.role==='content_creator';
+ return '<section class="vis-project-community"><div class="vis-community-heading"><div><span class="page-eyebrow">VIS UNIVERSE / COMUNIDAD</span><h2>Participantes de '+esc(p.title)+'</h2></div>'+
+   '<button class="outline-btn" data-action="project-community-refresh">'+I('refresh',16)+' Actualizar</button></div>'+
+   '<p class="muted">Acceso: '+esc(c.play_access==='members'?'Solo usuarios autorizados':'Público')+' · Solicitudes: '+
+   esc(c.admission==='open'?'Abiertas':c.admission==='request'?'Con aprobación':'Solo por invitación')+'</p>'+
+   (c.play_access==='members'&&!c.can_play?'<p class="vis-community-permission">Todavía no tenés autorización del proyecto para jugar. El servidor también debe verificar este permiso.</p>':'')+
+   join+controls+'<div class="vis-community-roles">'+roles+'</div>'+
+   '<div class="vis-community-heading"><h2>Streams y videos</h2>'+
+   (postable?'<button class="outline-btn" data-action="project-community-add-media">'+I('plus',16)+' Vincular contenido</button>':'')+'</div>'+
+   (media?'<div class="vis-community-media-grid">'+media+'</div>':'<p class="muted">Todavía no hay directos o videos vinculados por los participantes.</p>')+'</section>';
+}
+
 function projectPage(){
  const p=currentProject();if(!p)return `<div class="content-inner">${emptyHome()}</div>`;
  const tabs=[['news','Noticias'],['patches','Notas de parche'],['updates','Actualizaciones'],['calendar','Eventos'],['community','Comunidad']].filter(([key])=>visibleSection(p,key));
@@ -795,7 +868,7 @@ function projectPage(){
  ${adminActions}<div class="project-lower portal-project-lower ${visibleSection(p,'notes')?'':'full-content'}"><section class="project-main"><div class="project-content-head"><div><span class="page-eyebrow">CENTRO DE NOVEDADES</span><h2>Lo último de ${esc(p.title)}</h2></div></div><div class="feed-tabs">${tabs.map(([v,label])=>`<button class="${feed===v?'active':''}" data-action="feed-tab" data-id="${v}">${label}</button>`).join('')}</div>
  ${!tabs.length?quietEmpty('Secciones ocultas','El administrador todavía no habilitó las secciones de novedades.'):posts.length?`<div class="news-list portal-news">${posts.map(post=>`<article class="news-item"><div class="news-icon">${I(isCalendar?'calendar':post.kind==='patch'?'settings':post.kind==='update'?'upload':'bell',21)}</div><div class="news-content"><small>${esc(isCalendar?post.date:(post.date||'Publicación'))}</small><h3>${esc(post.title)}</h3><p>${esc(isCalendar?post.description:post.body)}</p></div>${isAdmin()?`<div class="news-admin"><button class="icon-btn" data-action="edit-publication" data-kind="${isCalendar?'event':post.kind}" data-index="${post._index}" aria-label="Editar ${isCalendar?'evento':'publicación'}" title="Editar">${I('edit',16)}</button><button class="icon-btn danger" data-action="remove-publication" data-kind="${isCalendar?'event':post.kind}" data-index="${post._index}" aria-label="Eliminar ${isCalendar?'evento':'publicación'}" title="Eliminar">${I('trash',16)}</button></div>`:''}</article>`).join('')}</div>`:quietEmpty(isCalendar?'Todavía no hay eventos':'Todavía no hay publicaciones',isCalendar?'El calendario aparecerá cuando se publiquen eventos.':'Las novedades, parches y notas aparecerán acá cuando estén disponibles.')}</section>
  ${visibleSection(p,'notes')?`<aside class="project-details"><h3>${I('info',17)} Acerca de este proyecto</h3><div class="detail-line"><span>Estado</span><strong>${available?'Disponible':'Próximamente'}</strong></div><div class="detail-line"><span>Minecraft</span><strong>${esc(p.mc_version||'Sin configurar')} · ${esc(p.engine==='horizon'?'Rust / Horizon':(p.loader||'Vanilla'))}</strong></div><div class="detail-line"><span>Perfiles</span><strong>${p.versions?.length||0}</strong></div><div class="detail-line"><span>Mods del proyecto</span><strong>${(p.modrinth_mods||[]).length}</strong></div><div class="project-micro-info">Minecraft Java: instalación y ejecución local disponibles desde Instancias. Para servidores premium se requiere Microsoft.</div>${p.community_url?`<button class="outline-btn full" data-action="open-community" data-id="${attr(p.id)}">${I('external',17)} Comunidad</button>`:''}</aside>`:''}</div>
- </div>`;
+ ${projectCommunitySection(p)}</div>`;
 }
 function quietEmpty(title,desc){return `<div class="quiet-empty">${I('layers',25)}<h3>${esc(title)}</h3><p>${esc(desc)}</p></div>`;}
 async function loadPremiumCosmetics(){
@@ -1661,6 +1734,7 @@ function navigate(to,id='') {
    if(to==='project')activeFeed='news';
    contextMenu=null;render();
    if(to==='project'&&native&&db.user)void refreshAssets().catch(()=>{});
+   if(to==='project'&&social.connected())void loadProjectCommunity(id||selectedId);
    root.querySelector('#main-scroll')?.scrollTo(0,0);
  },{reducedMotion:prefs.reducedMotion});
 }
@@ -2236,6 +2310,66 @@ root.addEventListener('click',async event=>{
    const ramMb=Number(new FormData(form).get('ram_mb'));
    const ok=await apply('configure_shared_ram',{sourceOwner:dialog.sourceOwner,projectId:dialog.projectId,name:dialog.name,ramMb},'Memoria de este perfil actualizada');
    if(ok){dialog=null;render();}
+ }
+ else if(act==='project-community-refresh'){await loadProjectCommunity(selectedId);}
+ else if(act==='project-community-request'){
+   try{
+     const result=await social.requestProjectJoin(selectedId);
+     message(result.status==='member'?'Ya participás en el proyecto.':'Solicitud enviada al equipo del proyecto.');
+     await loadProjectCommunity(selectedId);
+   }catch(error){message('Solicitud: '+String(error),true);}
+ }
+ else if(act==='project-community-policy'){
+   if(!projectCommunity?.can_manage)return;
+   const admission=window.prompt('Solicitudes: open, request, invite_only',projectCommunity.admission);
+   if(admission===null)return;
+   const access=window.prompt('Permisos para jugar: public o members',projectCommunity.play_access);
+   if(access===null)return;
+   try{await social.setProjectPolicy(selectedId,admission,access);await loadProjectCommunity(selectedId);message('Política actualizada.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-member'||act==='project-community-remove-member'){
+   if(!projectCommunity?.can_manage)return;
+   const username=window.prompt('Usuario VIS Cloud al que asignar permisos:');
+   if(!username)return;
+   const remove=act==='project-community-remove-member';
+   const role=remove?'participant':window.prompt('Rol: creator, helper, content_creator, participant, guest, collaborator, mention','participant');
+   if(!role)return;
+   const canPlay=!remove&&window.confirm('¿Autorizar a este usuario para jugar en proyectos con acceso restringido?');
+   try{
+     await social.projectMember(selectedId,username,role,canPlay,remove?'revoke':'grant');
+     await loadProjectCommunity(selectedId);message(remove?'Miembro quitado':'Miembro y acceso actualizados.');
+   }catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-review'){
+   if(!projectCommunity?.can_manage)return;
+   const username=button.dataset.user,mode=button.dataset.mode;
+   try{await social.reviewProjectJoin(selectedId,username,mode);await loadProjectCommunity(selectedId);message('Solicitud revisada.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-add-media'){
+   const title=window.prompt('Título del directo o video:');if(!title)return;
+   const url=window.prompt('URL pública de YouTube o Twitch:');if(!url)return;
+   const kind=window.confirm('¿Es un stream/directo? (Cancelar = video)')?'stream':'video';
+   try{await social.projectMedia(selectedId,'add',{title,url,kind});await loadProjectCommunity(selectedId);message('Contenido vinculado al proyecto.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-delete-media'){
+   const item=projectCommunity?.media?.find(x=>x.id===id);if(!item)return;
+   if(!window.confirm('¿Quitar este contenido del proyecto?'))return;
+   try{await social.projectMedia(selectedId,'delete',{id});await loadProjectCommunity(selectedId);}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-open-media'){
+   const item=projectCommunity?.media?.find(x=>x.id===id);
+   if(!item)return;
+   try{
+     const url=new URL(item.url);
+     if(url.protocol!=='https:'||!['www.youtube.com','youtu.be','www.twitch.tv','twitch.tv','clips.twitch.tv'].includes(url.hostname))
+       throw Error('Origen de video no permitido');
+     if(native)await T.opener.openUrl(url.toString());
+     else window.open(url.toString(),'_blank','noopener,noreferrer');
+   }catch(error){message('No se pudo abrir el contenido: '+String(error),true);}
  }
  else if(act==='project-play'){await projectPlay(id);}
  else if(act==='confirm-project-install'){await projectInstallAndPlay();}
