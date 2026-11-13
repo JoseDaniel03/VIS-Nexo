@@ -49,3 +49,19 @@ jobs:
         run: cargo audit --file Cargo.lock
       - name: Check Nube source formatting and syntax
         run: rustfmt --edition 2021 --emit stdout src-tauri/src/world_cloud.rs > /dev/null
+
+  typecheck:
+    name: Native Rust typecheck (no distributable build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri Linux development headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev build-essential pkg-config libxdo-dev libasound2-dev libudev-dev
+      - name: Verify native commands without producing an executable
+        run: cargo check -p vslauncher-tauri --all-targets --locked
