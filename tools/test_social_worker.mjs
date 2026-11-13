@@ -366,6 +366,22 @@ assert.equal((await call('/v1/admin/accounts/global-admin',{
  username:'bob',enabled:false
 },alice.token)).status,200);
 assert.equal((await call('/v1/account',undefined,bob.token)).data.account.global_admin,false);
+// Regression: a delegated project manager must never revoke a creator by lying
+// about the creator's old role in the request body.
+const charlie=await account('charlie');
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'charlie',role:'creator',can_play:false,action:'grant'
+},alice.token)).status,200);
+assert.equal((await call('/v1/admin/projects/staff',{
+ project_id:'virgoland',username:'bob',staff_role:'manager'
+},alice.token)).status,200);
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'charlie',role:'participant',action:'revoke'
+},bob.token)).status,403,'manager cannot revoke creator by forging the role field');
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'charlie',role:'creator',action:'revoke'
+},alice.token)).status,200);
+
 
 assert.equal((await call('/v1/admin/accounts/role',{
   username:'bob',role:'super_admin'
