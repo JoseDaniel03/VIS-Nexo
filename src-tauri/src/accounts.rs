@@ -75,6 +75,8 @@ pub struct Instance {
     /// resource packs and first-run settings when switching VIS accounts.
     /// Historical profiles without this field default to shared data.
     #[serde(default="default_shared_game_data")] pub share_game_data: bool,
+    /// Explicit opt-in: create a bounded daily backup before a game launch.
+    #[serde(default)] pub auto_backup: bool,
     #[serde(default="default_engine")] pub engine: String,
     #[serde(default)] pub horizon_build_dir: String,
     #[serde(default)] pub horizon_minecraft_dir: String,
@@ -86,7 +88,7 @@ fn default_shared_game_data()->bool{true}
 impl Default for Instance {
     fn default() -> Self {
         Self { name: String::new(), project_id: String::new(), version: String::new(),
-            game_dir: String::new(), ram_mb: 4096, fullscreen: false, installed: false, loader: default_loader(), loader_version: String::new(), java_path: String::new(), player_name: String::new(), source_owner: String::new(), reuse_source: String::new(), share_offline: false, share_game_data: true, engine: default_engine(), horizon_build_dir: String::new(), horizon_minecraft_dir: String::new(), horizon_server_jar: String::new() }
+            game_dir: String::new(), ram_mb: 4096, fullscreen: false, installed: false, loader: default_loader(), loader_version: String::new(), java_path: String::new(), player_name: String::new(), source_owner: String::new(), reuse_source: String::new(), share_offline: false, share_game_data: true, auto_backup: false, engine: default_engine(), horizon_build_dir: String::new(), horizon_minecraft_dir: String::new(), horizon_server_jar: String::new() }
     }
 }
 
