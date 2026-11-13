@@ -1342,10 +1342,13 @@ function instanceDataDialog(){
  '<p>Servidores guardados: '+(health.servers_file?'Sí':'Sin lista')+
  ' · Resource packs: '+Number(health.resource_packs||0)+'</p>'+
  '<p class="muted">Problemas corregibles: '+Number(health.repairable||0)+'</p>'+
+ '<p>Reportes de caída: '+Number(health.crash_reports||0)+'</p>'+
+ (health.last_error_hint?'<p class="muted">'+esc(health.last_error_hint)+'</p>':'')+
  (issues?'<ul class="vis-data-issues">'+issues+'</ul>':'<p class="muted">No se detectaron problemas de estructura.</p>'):
  '<p class="muted">Sin analizar.</p>')+
  '<div class="vis-data-actions"><button class="outline-btn" data-action="instance-data-audit">'+I('search',15)+' Volver a analizar</button>'+
  (canRestore?'<button class="outline-btn" data-action="instance-data-repair">'+I('check',15)+' Crear carpetas faltantes</button>':'')+
+ '<button class="outline-btn" data-action="instance-data-open-logs">'+I('folder',15)+' Abrir logs</button>'+
  '</div></section>'+
  (foreign?'<section><h3>'+I('users',17)+' Servidores de perfiles anteriores</h3>'+
  '<p class="muted">Fusiona las entradas de servidores.dat por dirección sin sobrescribir tus servidores existentes.</p>'+
@@ -2083,6 +2086,15 @@ root.addEventListener('click',async event=>{
  else if(act==='instance-data-backup')await runInstanceDataAction('backup');
  else if(act==='instance-data-restore')await runInstanceDataAction('restore');
  else if(act==='instance-data-audit')await runInstanceDataAction('audit');
+ else if(act==='instance-data-open-logs'){
+   const current=dialog;
+   if(current?.type!=='instance-data')return;
+   try{await command('open_instance_location',{
+     projectId:current.projectId,name:current.name,
+     sourceOwner:current.sourceOwner||null,kind:'logs'
+   });}
+   catch(error){message('No se pudieron abrir los registros: '+String(error),true);}
+ }
  else if(act==='instance-data-repair')await runInstanceDataAction('repair');
  else if(act==='instance-data-servers-preview')await runInstanceDataAction('servers-preview');
  else if(act==='instance-data-servers-merge')await runInstanceDataAction('servers-merge');
