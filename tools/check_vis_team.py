@@ -68,6 +68,11 @@ checks={
         "pub fn upload_team_pack(" in cloud
         and 'format!("{:x}",digest.finalize())!=pack.sha256' in cloud
         and "cloud::publish(&root,&projects,&token)?" in native,
+    "The exact reviewed content is committed by digest before upload":
+        "review_sha256:String" in pack
+        and "review_sha256(project,options,&entries)?!=expected_review" in pack
+        and "reviewSha256:teamReview.report.review_sha256" in ui
+        and "Changes after review must require another preview" in pack,
     "UI requires explicit review before upload":
         'data-team-action="preview"' in ui and "teamReview.signature!==signature" in ui
         and "window.confirm('¿Publicar '" in ui,
