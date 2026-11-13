@@ -124,9 +124,9 @@ async function register(request, db) {
   ).bind(username).first();
   if(historicallyClaimed)bad(409,"Este usuario está reservado por una identidad VIS");
   const takenHandle=await db.prepare(
-    "SELECT id FROM social_users WHERE public_handle=?"
-  ).bind(username).first();
-  if(takenHandle)bad(409,"Este usuario público ya está ocupado");
+    "SELECT id FROM social_users WHERE public_handle=? OR public_id=?"
+  ).bind(username,username).first();
+  if(takenHandle)bad(409,"Este nombre o ID público ya está ocupado");
   const id = crypto.randomUUID();
   try {
     await db.prepare(
@@ -202,8 +202,8 @@ async function cloudRegister(request, db) {
   if (existing) bad(409,"Username already taken; sign in or migrate existing device account");
   const reserved=await db.prepare("SELECT user_id FROM public_handle_history WHERE handle=?")
     .bind(username).first();
-  const assigned=await db.prepare("SELECT id FROM social_users WHERE public_handle=?")
-    .bind(username).first();
+  const assigned=await db.prepare("SELECT id FROM social_users WHERE public_handle=? OR public_id=?")
+    .bind(username,username).first();
   if(reserved||assigned)bad(409,"Este nombre ya pertenece a una identidad VIS");
   const publicId=crypto.randomUUID().replaceAll("-","").slice(0,24);
   const id=crypto.randomUUID();
