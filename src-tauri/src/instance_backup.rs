@@ -297,7 +297,8 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
     let mut seen=std::collections::BTreeSet::new();
     for i in 0..archive.len(){
         let entry=archive.by_index(i).map_err(|e|e.to_string())?;
-        let rel=valid_member(entry.name())?;
+        let entry_name=entry.name().map_err(|e|e.to_string())?;
+        let rel=valid_member(entry_name.as_ref())?;
         total=total.checked_add(entry.size()).ok_or("Tamaño inválido")?;
         if total>MAX_BYTES{return Err("Copia ZIP excede 16 GiB descomprimida".into());}
         if let Some(mode)=entry.unix_mode(){
@@ -314,7 +315,8 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
     let result=(||{
         for i in 0..archive.len(){
             let mut entry=archive.by_index(i).map_err(|e|e.to_string())?;
-            let rel=valid_member(entry.name())?;
+            let entry_name=entry.name().map_err(|e|e.to_string())?;
+        let rel=valid_member(entry_name.as_ref())?;
             let path=stage.join(rel);
             if entry.is_dir(){
                 fs::create_dir_all(path).map_err(|e|e.to_string())?;
