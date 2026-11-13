@@ -312,12 +312,12 @@ async function consumeRealtimeTicket(request,db,env){
   return env.REALTIME.get(env.REALTIME.idFromName(row.user_id)).fetch(
     "https://vis-realtime.internal/_vis/subscribe",{method:"GET",headers:{Upgrade:"websocket"}});
 }
-async function revokeRealtime(env,ctx,userId){
+async function revokeRealtime(env,userId){
   if(!env.REALTIME||!userId)return;
-  const task=env.REALTIME.get(env.REALTIME.idFromName(userId))
+  // Unlike best-effort wakeups, revocation is a security boundary: wait for
+  // the Durable Object before reporting logout or disable as completed.
+  await env.REALTIME.get(env.REALTIME.idFromName(userId))
     .fetch("https://vis-realtime.internal/_vis/revoke",{method:"POST"}).catch(()=>{});
-  if(ctx?.waitUntil)ctx.waitUntil(task);
-  else await task;
 }
 async function notifyUser(env,ctx,userId){
   if(!env.REALTIME||!userId)return;
@@ -719,7 +719,7 @@ async function adminAccountDisable(request, db, user, env, ctx) {
     db.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(target.id),
     auditStatement(db,user.id,"account.disabled",username+":"+(disabled?"yes":"no"))
   ]);
-  if(disabled)await revokeRealtime(env,ctx,target.id);
+  if(disabled)await revokeRealtime(env,target.id);
   return reply({ok:true,username,disabled});
 }
 
@@ -900,7 +900,7 @@ export default {
         await db.prepare("DELETE FROM auth_sessions WHERE token_hash=?").bind(user.tokenHash).run();
         // A different signed-in device can transparently reconnect with a
         // fresh ticket. Revoke all old socket leases immediately on logout.
-        await revokeRealtime(env,ctx,user.id);
+        await revokeRealtime(env,user.id);
         return reply({ ok: true });
       }
       return reply({ error: "Not found" }, 404);
