@@ -282,6 +282,8 @@ const previewCacheOrder=[];
 let previewCacheBytes=0;
 function rememberPreview(path,source){
   if(typeof source!=='string'||!source)return;
+  // Oversized or damaged images must never monopolize the WebView heap.
+  if(source.length>PREVIEW_CACHE_BYTES){previewFailed.add(path);return;}
   if(assetCache[path]){
     previewCacheBytes-=assetCache[path].length;
     const index=previewCacheOrder.indexOf(path);
