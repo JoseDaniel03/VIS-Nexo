@@ -61,9 +61,9 @@ fn end(app:&AppHandle,id:u64,failed:bool){
     let Some(mut job)=state.active.take() else{return};
     if job.id!=id {state.active=Some(job);return;}
     let cancelled=job.cancel_requested;
-    job.status=if cancelled{"cancelled"}else if failed{"failed"}else{"completed"}.into();
+    job.status=if failed&&cancelled{"cancelled"}else if failed{"failed"}else{"completed"}.into();
     job.finished_at=Some(now());
-    job.detail=if cancelled{"Cancelada. Podés reintentar: los archivos verificados existentes se conservan."}
+    job.detail=if failed&&cancelled{"Cancelada. Podés reintentar: los archivos verificados existentes se conservan."}
                else if failed{"La instalación terminó con un error. Revisá el aviso del launcher."}
                else{"Instalación completada y archivos verificados."}.into();
     state.history.insert(0,job.clone());
