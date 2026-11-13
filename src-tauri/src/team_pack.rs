@@ -3,9 +3,9 @@
 //! Mods are pinned by public Modrinth IDs; third-party JARs are not republished.
 use serde::{Deserialize,Serialize};
 use sha2::{Digest,Sha256};
-use std::{fs::{self,File},io::{Read,Write},path::{Path,PathBuf},time::{SystemTime,UNIX_EPOCH}};
+use std::{collections::HashSet,fs::{self,File},io::{Read,Write},path::{Component,Path,PathBuf},time::{SystemTime,UNIX_EPOCH}};
 use vsui_core::GameProject;
-use zip::{ZipWriter,write::FileOptions,CompressionMethod};
+use zip::{ZipWriter,ZipArchive,write::FileOptions,CompressionMethod};
 
 const MAX_FILES:usize=1500;
 const MAX_FILE:u64=16*1024*1024;
@@ -35,8 +35,23 @@ pub struct TeamPack {
     pub size_bytes:u64,
     pub files:usize,
 }
-#[derive(Serialize)]
+#[derive(Clone,Serialize,Deserialize)]
 struct FileEntry { path:String,sha256:String,size_bytes:u64 }
+#[derive(Deserialize)]
+struct TeamManifest {
+    format_version:u32,project_id:String,engine:String,
+    minecraft_version:String,loader:String,loader_version:String,
+    modrinth_project_ids:Vec<String>,files:Vec<FileEntry>,
+    #[serde(default)]include_servers:bool,
+    #[serde(default)]include_waypoints:bool,
+}
+#[derive(Serialize)]
+pub struct TeamApplyReport {
+    pub project_id:String,
+    pub installed:usize,
+    pub preserved:usize,
+    pub modrinth_mods:usize,
+}
 fn version_now()->u64{SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()}
 fn safe_id(id:&str)->bool{
     !id.is_empty()&&id.len()<=100
@@ -234,6 +249,129 @@ fn fingerprint_archive(path:&Path)->Result<(String,u64),String>{
         digest.update(&buffer[..n]);
     }
     Ok((format!("{:x}",digest.finalize()),total))
+}
+// The first import is additive only. Existing user configs, options,
+// worlds, servers and modified mods are never replaced by team defaults.
+pub fn apply(game:&Path,archive:&Path,project:&GameProject,
+             allow_servers:bool,allow_waypoints:bool)->Result<TeamApplyReport,String>{
+    validate_game(game,project)?;
+    let metadata=fs::symlink_metadata(archive).map_err(|e|e.to_string())?;
+    if metadata.file_type().is_symlink()||!metadata.is_file()||metadata.len()>MAX_ZIP {
+        return Err("Archivo ZIP externo, simbólico o demasiado grande".into());
+    }
+    let mut zip=ZipArchive::new(File::open(archive).map_err(|e|e.to_string())?)
+        .map_err(|_|"Paquete VIS Team inválido")?;
+    if zip.len()==0||zip.len()>MAX_FILES+1{return Err("Cantidad de entradas ZIP inválida".into());}
+    let manifest:TeamManifest={
+        let mut file=zip.by_name(".bsconfig").map_err(|_|"El paquete no contiene .bsconfig")?;
+        if file.size()>256*1024{return Err("Manifiesto de proyecto demasiado grande".into());}
+        serde_json::from_reader(file.by_ref().take(256*1024+1))
+            .map_err(|_|".bsconfig tiene un formato inválido")?
+    };
+    if manifest.format_version!=1||manifest.project_id!=project.id
+        ||manifest.engine!=project.engine||manifest.loader!=project.loader
+        ||manifest.loader_version!=project.loader_version
+        ||manifest.minecraft_version!=project.mc_version
+        ||manifest.modrinth_project_ids!=project.modrinth_mods{
+        return Err("Este paquete no corresponde a la versión/loader/mods del proyecto actual".into());
+    }
+    if manifest.files.len()+1!=zip.len()||manifest.files.len()>MAX_FILES{
+        return Err("El manifiesto y el ZIP no coinciden".into());
+    }
+    let mut by_name=std::collections::HashMap::new();
+    let mut seen=HashSet::new();let mut total=0u64;
+    for file in &manifest.files{
+        let path=Path::new(&file.path);
+        let parts=path.components().collect::<Vec<_>>();
+        if parts.is_empty()||parts.iter().any(|p|!matches!(p,Component::Normal(_)))
+            ||file.path.contains('\\')||file.path.len()>360
+            ||file.sha256.len()!=64||!file.sha256.bytes().all(|b|b.is_ascii_hexdigit())
+            ||file.size_bytes>MAX_FILE{
+            return Err("Ruta o verificador ZIP inseguro".into());
+        }
+        let lower=file.path.to_ascii_lowercase();
+        if !seen.insert(lower){return Err("Archivos repetidos en el ZIP".into());}
+        let first=parts[0].as_os_str().to_str().ok_or("Carpeta inválida")?;
+        if file.path=="servers.dat"{
+            if !manifest.include_servers{return Err("Lista de servidores sin permiso en manifiesto".into());}
+        }else if !allow_root(first,TeamOptions{include_packs:true,
+            include_servers:manifest.include_servers,include_waypoints:manifest.include_waypoints}){
+            return Err("El ZIP contiene una carpeta fuera del catálogo permitido".into());
+        }
+        if parts.iter().any(|p|match p{Component::Normal(n)=>
+            n.to_str().is_none_or(|name|name.starts_with('.')||exclusions(name)),
+            _=>true}){
+            return Err("El ZIP contiene datos privados o rutas de sistema".into());
+        }
+        total=total.checked_add(file.size_bytes).ok_or("Paquete demasiado grande")?;
+        if total>MAX_UNCOMPRESSED{return Err("ZIP expandido demasiado grande".into());}
+        by_name.insert(file.path.clone(),file);
+    }
+    let stage=game.join(".vslauncher").join(format!("team-stage-{}-{}",std::process::id(),version_now()));
+    crate::instance_guard::private_paths(game,&[
+        ".vslauncher",
+        &format!(".vslauncher/team-stage-{}-{}",std::process::id(),version_now())
+    ])?;
+    fs::create_dir_all(&stage).map_err(|e|e.to_string())?;
+    let outcome=(||->Result<TeamApplyReport,String>{
+        let mut eligible=Vec::new();
+        let mut archive_paths=HashSet::new();
+        let mut preserved=0usize;
+        for index in 0..zip.len(){
+            let mut file=zip.by_index(index).map_err(|e|e.to_string())?;
+            let name=file.name().to_owned();
+            if name==".bsconfig"{continue;}
+            let expected=by_name.get(&name).ok_or("Entrada ZIP no declarada")?;
+            if !archive_paths.insert(name.clone())||file.is_dir()
+                ||file.size()!=expected.size_bytes||file.size()>MAX_FILE
+                ||file.unix_mode().is_some_and(|mode|mode&0o170000==0o120000){
+                return Err("Entrada ZIP no segura o distinta al manifiesto".into());
+            }
+            if name=="servers.dat"&&!allow_servers{preserved+=1;continue;}
+            if (name.starts_with("XaeroWaypoints/")||name.starts_with("journeymap/"))
+                &&!allow_waypoints{preserved+=1;continue;}
+            let target=game.join(&name);
+            crate::instance_guard::private_paths(game,&[&name])?;
+            if target.exists(){preserved+=1;continue;}
+            let extracted=stage.join(&name);
+            if let Some(parent)=extracted.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+            let mut out=fs::OpenOptions::new().write(true).create_new(true)
+                .open(&extracted).map_err(|e|e.to_string())?;
+            let mut hash=Sha256::new();let mut read=0u64;let mut buffer=[0u8;65536];
+            loop{
+                let n=file.read(&mut buffer).map_err(|e|e.to_string())?;
+                if n==0{break;}
+                read+=n as u64;
+                if read>expected.size_bytes||read>MAX_FILE{return Err("ZIP con contenido expandido inesperado".into());}
+                hash.update(&buffer[..n]);out.write_all(&buffer[..n]).map_err(|e|e.to_string())?;
+            }
+            out.sync_all().map_err(|e|e.to_string())?;
+            if read!=expected.size_bytes||format!("{:x}",hash.finalize())!=expected.sha256{
+                return Err("Un archivo del ZIP no coincide con su SHA-256".into());
+            }
+            eligible.push((name,extracted));
+        }
+        if archive_paths.len()!=by_name.len(){return Err("Faltan archivos declarados en el ZIP".into());}
+        let mut installed=0usize;
+        for (relative,staged) in eligible{
+            crate::instance_guard::private_paths(game,&[&relative])?;
+            let destination=game.join(&relative);
+            if destination.exists(){preserved+=1;continue;}
+            if let Some(parent)=destination.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+            // No overwrite: a race with user edits fails instead of replacing
+            // an existing configuration. Preserves worlds and player settings.
+            let mut source=File::open(&staged).map_err(|e|e.to_string())?;
+            let mut output=fs::OpenOptions::new().write(true).create_new(true)
+                .open(&destination).map_err(|e|e.to_string())?;
+            std::io::copy(&mut source,&mut output).map_err(|e|e.to_string())?;
+            output.sync_all().map_err(|e|e.to_string())?;
+            installed+=1;
+        }
+        Ok(TeamApplyReport{project_id:project.id.clone(),installed,preserved,
+            modrinth_mods:manifest.modrinth_project_ids.len()})
+    })();
+    let _=fs::remove_dir_all(stage);
+    outcome
 }
 #[cfg(test)]
 mod tests{
