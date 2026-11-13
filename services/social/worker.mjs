@@ -293,22 +293,27 @@ async function currentState(db, user) {
     current_game: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.current_game : "",
     public_key: f.encryption_public_key
   }));
-  const incoming = await db.prepare(
+  const incomingRequest = db.prepare(
     "SELECT u.username FROM friend_requests r JOIN social_users u ON u.id=r.sender_id " +
     "WHERE r.recipient_id=? AND r.status='pending' ORDER BY r.created_at DESC LIMIT 100"
   ).bind(user.id).all();
-  const outgoing = await db.prepare(
+  const outgoingRequest = db.prepare(
     "SELECT u.username FROM friend_requests r JOIN social_users u ON u.id=r.recipient_id " +
     "WHERE r.sender_id=? AND r.status='pending' ORDER BY r.created_at DESC LIMIT 100"
   ).bind(user.id).all();
-  const queue = await db.prepare(
+  const queueRequest = db.prepare(
     "SELECT m.id,u.username AS sender,m.payload,m.created_at,m.client_message_id " +
     "FROM pending_messages m JOIN social_users u ON u.id=m.sender_id " +
     "WHERE m.recipient_id=? AND m.expires_at>? AND m.acknowledged_at IS NULL " +
     "ORDER BY m.created_at ASC LIMIT 100"
   ).bind(user.id, now()).all();
-  const [projects, memberships] = await Promise.all([
-    getProjects(db,user),sharedProjectMemberships(db,user)
+  // Independent D1 reads run concurrently instead of serially waiting for
+  // contacts, invitations and the encrypted inbox. No access controls change.
+  const developerRequest=canDevelop(db,user);
+  const projectsRequest=developerRequest.then(allowed=>getProjects(db,user,allowed));
+  const [incoming,outgoing,queue,projects,memberships,developer] = await Promise.all([
+    incomingRequest,outgoingRequest,queueRequest,
+    projectsRequest,sharedProjectMemberships(db,user),developerRequest
   ]);
   const idsByFriend=new Map();
   const userIds=new Map((friends.results||[]).map(f=>[f.id,f.username]));
@@ -324,7 +329,7 @@ async function currentState(db, user) {
     username: user.username, display_name: user.display_name || user.username,
     public_id: user.public_id, avatar_version:user.avatar_version, skin_version:user.skin_version,
     cloud_login_enabled: !!user.cloud_login_enabled,
-    developer: await canDevelop(db,user), presence: user.presence, role: user.role,
+    developer, presence: user.presence, role: user.role,
     custom_status: user.custom_status, current_game: user.current_game,
     public_key: user.encryption_public_key,
     friends: visible,
@@ -495,7 +500,7 @@ async function updateDisplayName(request,db,user){
     .bind(name,user.id).run();
   return reply({ok:true,display_name:name});
 }
-async function getProjects(db, user) {
+async function getProjects(db, user, knownDeveloper=null) {
   const projects = await db.prepare(
     "SELECT p.id,p.title,p.summary,p.visibility,p.updated_at," +
     "CASE WHEN s.user_id IS NULL THEN 0 ELSE 1 END AS subscribed," +
@@ -506,7 +511,7 @@ async function getProjects(db, user) {
     "WHERE p.visibility='published' OR (?=1 AND p.visibility!='published') " +
     "OR st.user_id IS NOT NULL " +
     "ORDER BY p.updated_at DESC LIMIT 200"
-  ).bind(user.id,user.id,await canDevelop(db,user)?1:0).all();
+  ).bind(user.id,user.id,(knownDeveloper??await canDevelop(db,user))?1:0).all();
   return (projects.results || []).map(p=>({
     id:p.id,title:p.title,summary:p.summary,visibility:p.visibility,
     subscribed:!!p.subscribed,staff_role:p.staff_role,updated_at:p.updated_at
