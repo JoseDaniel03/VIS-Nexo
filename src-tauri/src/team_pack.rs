@@ -469,6 +469,10 @@ mod tests{
             ..Default::default()};
         let list=preview(&game,&project,TeamOptions::default()).unwrap();
         assert_eq!(list.files,vec!["config/test.json"]);
+        fs::write(game.join("config/test.json"),br#"{"enabled":false}"#).unwrap();
+        assert!(build(&game,&root,&project,TeamOptions::default(),&list.review_sha256).is_err(),
+            "Changes after review must require another preview");
+        fs::write(game.join("config/test.json"),br#"{"enabled":true}"#).unwrap();
         let package=build(&game,&root,&project,TeamOptions::default(),&list.review_sha256).unwrap();
         assert!(package.size_bytes>0);
         let imported=apply(&dest,Path::new(&package.archive),&project,false,false).unwrap();
