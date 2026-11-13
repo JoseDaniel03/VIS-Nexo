@@ -562,6 +562,40 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     });
     await sync();
   }
+  async function projectCommunity(projectId){
+    if(!connected())throw Error('Conectá tu cuenta VIS Cloud para ver los miembros');
+    return rpc('/v1/projects/community','POST',{project_id:projectId});
+  }
+  async function requestProjectJoin(projectId,note=''){
+    if(!connected())throw Error('Iniciá sesión VIS Cloud para pedir acceso');
+    const result=await rpc('/v1/projects/request-join','POST',{project_id:projectId,note});
+    await sync();return result;
+  }
+  async function projectMember(projectId,username,role,canPlay,action='grant'){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/community-members','POST',{
+      project_id:projectId,username,role,can_play:canPlay,action
+    });
+  }
+  async function reviewProjectJoin(projectId,username,action){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/review-join','POST',{project_id:projectId,username,action});
+  }
+  async function setProjectPolicy(projectId,admission,playAccess){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/community-policy','POST',{
+      project_id:projectId,admission,play_access:playAccess
+    });
+  }
+  async function projectMedia(projectId,action,item={}){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/community-media','POST',{project_id:projectId,action,...item});
+  }
+  async function globalAdmin(username,enabled){
+    if(!connected()||state?.role!=='super_admin')throw Error('Solo la supercuenta puede dar permisos globales');
+    return rpc('/v1/admin/accounts/global-admin','POST',{username,enabled});
+  }
+
   async function setAccountRole(username, role) {
     if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
     return rpc('/v1/admin/accounts/role','POST',{username,role});
@@ -572,5 +606,6 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   return { start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
-    setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
+    setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin,
+    projectCommunity,requestProjectJoin,projectMember,reviewProjectJoin,setProjectPolicy,projectMedia,globalAdmin,state: () => state };
 }
