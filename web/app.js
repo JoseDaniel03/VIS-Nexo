@@ -1527,6 +1527,7 @@ function instanceWorldCloudSection(d){
  '<small>'+esc(w.detail||'')+'</small></div><div class="vis-data-actions">'+
  '<button class="outline-btn" type="button" data-action="world-cloud-link" data-world="'+attr(w.world)+'">'+I('folder',14)+' Vincular</button>'+
  (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-save" data-world="'+attr(w.world)+'">'+I('cloud',14)+' Nube</button>':'')+
+ (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-unlink" data-world="'+attr(w.world)+'">Desvincular</button>':'')+
  (w.status==='green'||w.status==='orange'?'<button class="outline-btn" type="button" data-action="world-cloud-restore" data-world="'+attr(w.world)+'">Restaurar copia</button>':'')+
  '</div></div>').join(''):'<p class="muted">Todavía no se detectaron mundos con level.dat en esta instancia.</p>')+
  '</section>';
@@ -2484,7 +2485,7 @@ root.addEventListener('click',async event=>{
  else if(act==='instance-data-tools'){
    await openInstanceData(projectId,id,button.dataset.source||'');
  }
- else if(['world-cloud-link','world-cloud-save','world-cloud-restore'].includes(act)){
+ else if(['world-cloud-link','world-cloud-save','world-cloud-restore','world-cloud-unlink'].includes(act)){
    const d=dialog,world=button.dataset.world||'',generation=accountGeneration;
    if(!native||d?.type!=='instance-data'||d.sourceOwner||!world)return;
    await onceOperation('cloud-world:'+JSON.stringify([d.projectId,d.name,world]),async()=>{
@@ -2497,6 +2498,10 @@ root.addEventListener('click',async event=>{
          if(typeof folder!=='string'||!folder)return;
          await command('link_world_cloud',{...params,folder,provider});
          message('Carpeta vinculada; guardá la primera copia del mundo con Nube.');
+       }else if(act==='world-cloud-unlink'){
+         if(!window.confirm('Desvincular Nube para '+world+'? Las copias guardadas no se eliminan.'))return;
+         await command('unlink_world_cloud',params);
+         message('Nube desvinculada del mundo; se conservaron los respaldos externos.');
        }else if(act==='world-cloud-save'){
          const backup=await command('backup_world_cloud',params);
          message('Mundo copiado a carpeta sincronizada: '+fmtBytes(backup.bytes));
