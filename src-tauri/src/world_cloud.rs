@@ -137,7 +137,14 @@ fn location(game:&Path,world:&str,folder:&Path,namespace:&str)->Result<PathBuf,S
         match fs::symlink_metadata(&cursor) {
             Ok(meta) if meta.file_type().is_symlink()||!meta.is_dir()=>
                 return Err("La carpeta sincronizada contiene enlaces o archivos inesperados".into()),
-            Ok(_)=>(),
+            Ok(_)=>{
+                // Windows directory junctions and mount aliases may not be
+                // reported by is_symlink(). Verify the resolved directory too.
+                let actual=fs::canonicalize(&cursor).map_err(|e|e.to_string())?;
+                if !actual.starts_with(&chosen){
+                    return Err("La carpeta de nube redirige fuera del destino autorizado".into());
+                }
+            },
             Err(err) if err.kind()==io::ErrorKind::NotFound=>(),
             Err(err)=>return Err(err.to_string()),
         }
