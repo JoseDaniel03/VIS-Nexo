@@ -71,6 +71,10 @@ const MODRINTH: &str = "https://api.modrinth.com/v2";
 
 #[derive(Clone,Serialize)]
 pub struct Progress { pub stage:String,pub completed:usize,pub total:usize,pub detail:String }
+fn emit_progress(app:&AppHandle,progress:Progress){
+    crate::download_manager::progress(app,&progress.stage,progress.completed,progress.total,&progress.detail);
+    let _=app.emit("minecraft-progress",progress);
+}
 #[derive(Clone,Serialize)]
 pub struct VersionChoice { pub id:String,pub kind:String }
 #[derive(Clone,Serialize,Deserialize)]
@@ -498,10 +502,13 @@ fn download_tasks(c:&Client,app:&AppHandle,stage:&str,tasks:&[Task],destination_
  if total==0{return Ok(())}
  let cpus=std::thread::available_parallelism().map_or(2,|n|n.get());
  let pool=rayon::ThreadPoolBuilder::new().num_threads(download_parallelism(total,cpus)).build().map_err(|e|e.to_string())?;
+ crate::download_manager::checkpoint()?;
  pool.install(||tasks.par_iter().try_for_each(|task|{
+  crate::download_manager::checkpoint()?;
   let reused=obtain_or_reuse(c,task,destination_root,sources)?;
+  crate::download_manager::checkpoint()?;
   let count=completed.fetch_add(1,Ordering::Relaxed)+1;
-  if count==total||count%15==0 || (reused && count==1) {let _=app.emit("minecraft-progress",Progress{stage:stage.into(),completed:count,total,detail:format!("{} · {}",if reused {"Copia local verificada"}else{"Descargado"},task.path.file_name().unwrap_or_default().to_string_lossy())});}
+  if count==total||count%15==0 || (reused && count==1) {emit_progress(app,Progress{stage:stage.into(),completed:count,total,detail:format!("{} · {}",if reused {"Copia local verificada"}else{"Descargado"},task.path.file_name().unwrap_or_default().to_string_lossy())});}
   Ok::<_,String>(())
  }))
 }
@@ -628,7 +635,8 @@ fn safe_java_link(member:&Path,link:&Path)->bool{
     !resolved.is_empty()
 }
 fn install_java_runtime(c:&Client,app:&AppHandle,data_root:&Path,required:u64)->Result<PathBuf,String>{
-    let existing=data_root.join("java-runtimes").join(format!("temurin-{required}"));
+    crate::download_manager::checkpoint()?;
+ let existing=data_root.join("java-runtimes").join(format!("temurin-{required}"));
     if let Some(java)=look_for_java(&existing,4){
         if java_major(java.as_os_str())==Some(required){return Ok(java)}
     }
@@ -658,14 +666,15 @@ fn install_java_runtime(c:&Client,app:&AppHandle,data_root:&Path,required:u64)->
     let staging=target.with_extension("staging");
     let archive=data_root.join("java-runtimes").join(format!("temurin-{required}.{}",if cfg!(target_os="windows"){"zip"}else{"tar.gz"}));
     fs::create_dir_all(archive.parent().ok_or("Ruta Java inválida")?).map_err(|e|e.to_string())?;
-    let _=app.emit("minecraft-progress",Progress{stage:"java".into(),completed:0,total:1,detail:format!("Preparando Temurin Java {required}")});
+    emit_progress(app,Progress{stage:"java".into(),completed:0,total:1,detail:format!("Preparando Temurin Java {required}")});
     let mut response=c.get(uri).send().and_then(|r|r.error_for_status()).map_err(|e|format!("Descarga de Java: {e}"))?;
     if response.content_length().is_some_and(|n|n>350*1024*1024){return Err("Archivo Java mayor que 350 MB".into())}
     let partial=archive.with_extension("partial");
     let outcome=(||->Result<(),String>{
         let mut out=File::create(&partial).map_err(|e|e.to_string())?;
         let mut digest=Sha256::new();let mut total=0u64;let mut buf=[0u8;65536];
-        loop {let n=response.read(&mut buf).map_err(|e|e.to_string())?;if n==0{break}
+        loop {crate::download_manager::checkpoint()?;
+            let n=response.read(&mut buf).map_err(|e|e.to_string())?;if n==0{break}
             total+=n as u64;if total>350*1024*1024{return Err("Java excede 350 MB".into())}
             sha1::Digest::update(&mut digest,&buf[..n]);out.write_all(&buf[..n]).map_err(|e|e.to_string())?;
         }
@@ -716,7 +725,7 @@ fn install_java_runtime(c:&Client,app:&AppHandle,data_root:&Path,required:u64)->
     outcome?;
     let java=look_for_java(&target,4).ok_or("Temurin incompleto después de instalar")?;
     if java_major(java.as_os_str())!=Some(required){return Err("Java descargado no inicia; verificá permisos o librerías del sistema".into())}
-    let _=app.emit("minecraft-progress",Progress{stage:"java".into(),completed:1,total:1,detail:format!("Java {required} instalado")});
+    emit_progress(app,Progress{stage:"java".into(),completed:1,total:1,detail:format!("Java {required} instalado")});
     Ok(java)
 }
 /// One-click prerequisites for the GAME Horizon (not Horizon Launcher).
@@ -789,6 +798,7 @@ pub fn horizon_prerequisites(app:&AppHandle,data_root:&Path,username:&str,ins:&I
 
 pub fn install(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,known_instances:&[PathBuf])->Result<LocalInstallation,String>{
  let _installation_lock=INSTALL_GUARD.lock().map_err(|_|"Otra instalación dejó bloqueado el gestor".to_string())?;
+ crate::download_manager::checkpoint()?;
  if !clean_segment(&ins.version) || (ins.loader=="fabric" && !clean_segment(&ins.loader_version)) {
      return Err("Versión de Minecraft o Fabric con caracteres inválidos".into());
  }
@@ -834,13 +844,14 @@ pub fn install(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,known_
  }
  normalize_download_plan(&mut tasks)?;
  download_tasks(&c,app,"libraries",&tasks,&runtime,&library_and_version_sources)?;
+ crate::download_manager::checkpoint()?;
  let native_dir=dir.join(".vslauncher").join("natives");extract_natives(&natives,&native_dir)?;
  let asset_index=&profile["assetIndex"];
  let index_id=asset_index["id"].as_str().ok_or("Índice de recursos sin nombre")?;
  if !clean_segment(index_id){return Err("Índice de recursos inválido".into())}
  let index_task=Task{url:asset_index["url"].as_str().ok_or("Índice sin URL")?.into(),sha1:asset_index["sha1"].as_str().map(ToOwned::to_owned),path:runtime.join("assets/indexes").join(format!("{index_id}.json")),max:20*1024*1024};
  let reused_index=obtain_or_reuse(&c,&index_task,&runtime,&asset_sources)?;
- let _=app.emit("minecraft-progress",Progress{stage:"indexes".into(),completed:1,total:1,detail:if reused_index {"Índice reutilizado de una instalación existente".into()}else{"Índice descargado".into()}});
+ emit_progress(app,Progress{stage:"indexes".into(),completed:1,total:1,detail:if reused_index {"Índice reutilizado de una instalación existente".into()}else{"Índice descargado".into()}});
  let index:Value=serde_json::from_slice(&fs::read(index_task.path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
  let mut asset_tasks=vec![];
  if let Some(entries)=index["objects"].as_object(){
@@ -856,15 +867,17 @@ pub fn install(app:&AppHandle,data_root:&Path,username:&str,ins:&Instance,known_
   for hash in hashes{let prefix=&hash[..2];asset_tasks.push(Task{url:format!("https://resources.download.minecraft.net/{prefix}/{hash}"),sha1:Some(hash.clone()),path:runtime.join("assets/objects").join(prefix).join(hash),max:128*1024*1024});}
  }
  download_tasks(&c,app,"assets",&asset_tasks,&runtime,&asset_sources)?;
+ crate::download_manager::checkpoint()?;
  let meta_dir=dir.join(".vslauncher");fs::create_dir_all(&meta_dir).map_err(|e|e.to_string())?;
  crate::accounts::atomic_json(&meta_dir.join("version.json"),&profile)?;
  if ins.loader=="fabric" {crate::accounts::atomic_json(&meta_dir.join("fabric.json"),&fabric_profile)?;}
  let required=profile["javaVersion"]["majorVersion"].as_u64().unwrap_or(8);
  install_java_runtime(&c,app,&dir.join(".vis"),required)?;
+ crate::download_manager::checkpoint()?;
  let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
  let result=LocalInstallation{version:ins.version.clone(),loader:ins.loader.clone(),loader_version:ins.loader_version.clone(),installed_at:stamp,runtime_storage:"instance-v1".into()};
  crate::accounts::atomic_json(&installation_path(&dir),&result)?;
- let _=app.emit("minecraft-progress",Progress{stage:"done".into(),completed:1,total:1,detail:ins.name.clone()});
+ emit_progress(app,Progress{stage:"done".into(),completed:1,total:1,detail:ins.name.clone()});
  Ok(result)
 }
 fn argument_text(value:&Value,placeholders:&[(&str,String)])->Vec<String>{
