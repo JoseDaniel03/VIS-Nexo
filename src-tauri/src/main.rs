@@ -11,6 +11,7 @@ mod server_list;
 mod project_mods;
 mod maintenance;
 mod cloud;
+mod team_pack;
 mod updates;
 mod ombu;
 mod horizon;
@@ -1765,6 +1766,56 @@ async fn publish_universe(state:State<'_,Mutex<Backend>>,token:String)->Result<S
         .await.map_err(|e|e.to_string())??;
     Ok(locked(&state)?.snapshot())
 }
+fn project_team_sources(
+    s:&Backend,project_id:&str,name:&str
+)->Result<(PathBuf,PathBuf,GameProject),String>{
+    let username=s.admin()?;
+    let project=s.catalog.projects.iter().find(|p|p.id==project_id)
+        .ok_or("Solo se pueden publicar proyectos locales administrados por VIS")?.clone();
+    let instance=s.storage.prefs(username).instances.into_iter()
+        .find(|i|i.project_id==project_id&&i.name==name&&i.source_owner.is_empty())
+        .ok_or("Elegí una instancia propia de este proyecto para publicar sus archivos comunes")?;
+    if instance.version!=project.mc_version||instance.loader!=project.loader
+        ||instance.engine!=project.engine {
+        return Err("La instancia no coincide con el motor, loader o versión actual del proyecto".into());
+    }
+    let dir=minecraft::instance_dir(&s.data_root,username,&instance)?;
+    Ok((s.data_root.clone(),dir,project))
+}
+#[tauri::command]
+async fn preview_team_project(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    options:team_pack::TeamOptions
+)->Result<team_pack::TeamPreview,String>{
+    let (_root,game,project)={let s=locked(&state)?;project_team_sources(&s,&project_id,&name)?};
+    tauri::async_runtime::spawn_blocking(move||{
+        let _lock=crate::instance_lock::try_lock(&game)?;
+        team_pack::preview(&game,&project,options)
+    }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn publish_team_project(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    options:team_pack::TeamOptions,token:String
+)->Result<team_pack::TeamPack,String>{
+    let (root,game,project,projects)={
+        let s=locked(&state)?;
+        let (root,game,project)=project_team_sources(&s,&project_id,&name)?;
+        (root,game,project,s.catalog.projects.clone())
+    };
+    tauri::async_runtime::spawn_blocking(move||{
+        let pack={
+            // Never copy configurations while Java/Horizon or another
+            // VIS process may still be writing to this instance.
+            let _lock=crate::instance_lock::try_lock(&game)?;
+            team_pack::build(&game,&root,&project,options)?
+        };
+        cloud::upload_team_pack(&root,&pack,&token)?;
+        // Publishing after upload exposes the hash-verified archive in catalog.
+        cloud::publish(&root,&projects,&token)?;
+        Ok(pack)
+    }).await.map_err(|e|e.to_string())?
+}
 #[tauri::command]
 async fn fetch_cloud_catalog(state:State<'_,Mutex<Backend>>)->Result<cloud::CloudCatalog,String>{
     let root={locked(&state)?.data_root.clone()};
@@ -1816,7 +1867,7 @@ fn main() {
             set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
-            fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe
+            fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
