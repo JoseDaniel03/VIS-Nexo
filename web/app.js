@@ -1534,7 +1534,7 @@ function instanceWorldCloudSection(d){
  '<button class="outline-btn" type="button" data-action="world-cloud-link" data-world="'+attr(w.world)+'">'+I('folder',14)+' Vincular</button>'+
  (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-save" data-world="'+attr(w.world)+'">'+I('cloud',14)+' Nube</button>':'')+
  (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-unlink" data-world="'+attr(w.world)+'">Desvincular</button>':'')+
- (w.status==='green'||w.status==='orange'?'<button class="outline-btn" type="button" data-action="world-cloud-restore" data-world="'+attr(w.world)+'">Restaurar copia</button>':'')+
+ (w.bytes>0?'<button class="outline-btn" type="button" data-action="world-cloud-restore" data-world="'+attr(w.world)+'">Restaurar copia</button>':'')+
  '</div></div>').join(''):'<p class="muted">Todavía no se detectaron mundos con level.dat en esta instancia.</p>')+
  '</section>';
 }
