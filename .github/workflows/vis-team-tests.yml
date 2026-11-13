@@ -1,0 +1,49 @@
+name: VIS Team y Ceibo - pruebas sin build
+# Validate Universe R2, safe packs and superadmin SQL without building EXE/JAR,
+# publishing binaries, mutating production D1 or deploying Cloudflare Workers.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'services/universe/**'
+      - 'src-tauri/src/team_pack.rs'
+      - 'src-tauri/src/cloud.rs'
+      - 'tools/check_vis_team.py'
+      - 'tools/test_universe_worker.mjs'
+      - 'tools/prepare_social_superadmin.py'
+      - 'tools/test_social_superadmin_bootstrap.py'
+      - '.github/workflows/vis-team-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vis-team-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify Universe Worker and frontend syntax
+        run: |
+          node --check services/universe/worker.mjs
+          node --check web/app.js
+          node tools/test_universe_worker.mjs
+      - name: Verify cloud superadmin provision cannot bypass identity
+        run: python3 tools/test_social_superadmin_bootstrap.py
+      - name: Verify safe team distribution contracts
+        run: python3 tools/check_vis_team.py
+      - name: Rust syntax check only (no build)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustfmt --edition 2021 --emit stdout src-tauri/src/team_pack.rs > /dev/null
