@@ -141,10 +141,16 @@ pub fn download(data_root:&Path,id:&str)->Result<String,String>{
 /// R2-backed VIS Universe Worker. The publisher token stays in the Rust command,
 /// never in the ZIP, cloud manifest or a local config file.
 pub fn upload_team_pack(
-    root:&Path, pack:&crate::team_pack::TeamPack, token:&str
+    root:&Path, pack:&crate::team_pack::TeamPack,
+    project:&GameProject,token:&str
 )->Result<(),String>{
     if token.len()<32 || token.len()>256 || token.contains('\n') || token.contains('\r'){
         return Err("Credencial de publicación inválida".into());
+    }
+    if project.id!=pack.project_id || project.mc_version.len()>40
+        ||project.loader.len()>32||project.loader_version.len()>50
+        || !["java","horizon"].contains(&project.engine.as_str()){
+        return Err("El paquete no pertenece a la versión de proyecto elegida".into());
     }
     if !clean_id(&pack.project_id)||pack.sha256.len()!=64
         ||!pack.sha256.bytes().all(|b|b.is_ascii_hexdigit())
@@ -182,6 +188,10 @@ pub fn upload_team_pack(
         .redirect(reqwest::redirect::Policy::none())
         .build().map_err(|e|e.to_string())?
         .put(url).bearer_auth(token)
+        .header("X-VIS-Engine",project.engine.as_str())
+        .header("X-VIS-Minecraft-Version",project.mc_version.as_str())
+        .header("X-VIS-Loader",project.loader.as_str())
+        .header("X-VIS-Loader-Version",project.loader_version.as_str())
         .header("Content-Type","application/zip")
         .header("Content-Length",pack.size_bytes)
         .body(reqwest::blocking::Body::sized(file,pack.size_bytes))
