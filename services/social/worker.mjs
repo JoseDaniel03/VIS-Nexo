@@ -98,7 +98,7 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.display_name,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
+    "SELECT u.id,u.username,u.public_handle,u.public_handle_updated_at,u.display_name,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
     "CASE WHEN u.password_hash!=\'\' THEN 1 ELSE 0 END AS cloud_login_enabled " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
@@ -366,13 +366,14 @@ export class VisRealtimeRoom {
 }
 async function currentState(db, user) {
   const friends = await db.prepare(
-    "SELECT u.id,u.username,u.display_name,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.skin_version,u.last_seen_at," +
+    "SELECT u.id,u.username,u.public_handle,u.display_name,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.avatar_version,u.skin_version,u.last_seen_at," +
     "a.alias FROM social_users u LEFT JOIN friend_aliases a ON a.owner_id=? AND a.friend_id=u.id " +
     "WHERE u.id IN (SELECT user_b FROM friendships WHERE user_a=? UNION " +
     "SELECT user_a FROM friendships WHERE user_b=?) ORDER BY u.username LIMIT 500"
   ).bind(user.id, user.id, user.id).all();
   const visible = (friends.results || []).map(f => ({
-    username: f.username, display_name: f.display_name || f.username, alias: f.alias || "", avatar_version:f.avatar_version, skin_version:f.skin_version,
+    username: f.username, public_handle:f.public_handle||f.username,
+    display_name: f.display_name || f.username, alias: f.alias || "", avatar_version:f.avatar_version, skin_version:f.skin_version,
     presence: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.presence : "offline",
     custom_status: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.custom_status : "",
     current_game: f.presence !== "invisible" && f.last_seen_at >= now() - 150 ? f.current_game : "",
@@ -411,7 +412,9 @@ async function currentState(db, user) {
   for (const friend of visible) friend.shared_projects=idsByFriend.get(friend.username)||[];
   return reply({
     projects,
-    username: user.username, display_name: user.display_name || user.username,
+    username: user.username, public_handle:user.public_handle||user.username,
+    public_handle_updated_at:user.public_handle_updated_at||0,
+    display_name: user.display_name || user.username,
     public_id: user.public_id, avatar_version:user.avatar_version, skin_version:user.skin_version,
     cloud_login_enabled: !!user.cloud_login_enabled,
     developer, presence: user.presence, role: user.role,
@@ -428,7 +431,8 @@ async function currentState(db, user) {
   });
 }
 async function lookupUser(db, username) {
-  const user = await db.prepare("SELECT id,username FROM social_users WHERE username=?").bind(normalName(username)).first();
+  const user = await db.prepare("SELECT id,username FROM social_users WHERE " +
+    "(username=? OR public_id=? OR public_handle=?) AND disabled_at IS NULL ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1").bind(...Array(4).fill(normalName(username))).first();
   if (!user) bad(404, "Account not found");
   return user;
 }
@@ -562,11 +566,13 @@ function auditStatement(db, actorId, operation, target) {
 }
 async function accountInfo(db, user) {
   const row = await db.prepare(
-    "SELECT id,username,display_name,public_id,avatar_version,role,signing_public_key,disabled_at,created_at,password_hash FROM social_users WHERE id=?"
+    "SELECT id,username,public_handle,public_handle_updated_at,display_name,public_id,avatar_version,role,signing_public_key,disabled_at,created_at,password_hash FROM social_users WHERE id=?"
   ).bind(user.id).first();
   if (!row || row.disabled_at !== null) bad(403, "Account disabled");
   return reply({ account: {
-    username: row.username, display_name: row.display_name || row.username,
+    username: row.username, public_handle:row.public_handle||row.username,
+    public_handle_updated_at:row.public_handle_updated_at||0,
+    display_name: row.display_name || row.username,
     public_id: row.public_id, avatar_version:row.avatar_version, role: row.role,
     cloud_login_enabled: !!row.password_hash,
     cloud_credential_public_key: row.password_hash?.startsWith("ed25519:")
@@ -587,6 +593,59 @@ async function updateDisplayName(request,db,user){
   await db.prepare("UPDATE social_users SET display_name=?,updated_at=unixepoch() WHERE id=?")
     .bind(name,user.id).run();
   return reply({ok:true,display_name:name});
+}
+// @handle is a mutable public address, never an authentication principal.
+// All friendships, messages, encrypted AAD and moderator grants remain on the
+// immutable social_users.id / legacy username. Previously used handles stay
+// reserved to their original owner to prevent identity impersonation.
+const HANDLE_COOLDOWN=7*24*60*60;
+const RESERVED_HANDLES=new Set([
+  "admin","administrator","support","staff","system","official","moderator",
+  "minecraft","microsoft","mojang","visstudios","vis_studios","visnexo",
+  "vis_nexo","visceibo","visportals","visuniverse","virgoland"
+]);
+async function changePublicHandle(request,db,user){
+  await rateLimit(db,request,"public-handle:"+user.id,8);
+  const payload=await parseBody(request,512);
+  const handle=typeof payload.handle==="string"?payload.handle.trim().toLowerCase():"";
+  if(!/^[a-z0-9_]{3,24}$/.test(handle))bad(400,"Usá entre 3 y 24 letras, números o _");
+  if(RESERVED_HANDLES.has(handle))bad(409,"Este identificador está reservado");
+  const current=await db.prepare(
+    "SELECT username,public_handle,public_handle_updated_at FROM social_users WHERE id=? AND disabled_at IS NULL"
+  ).bind(user.id).first();
+  if(!current)bad(403,"Cuenta inhabilitada");
+  if(current.public_handle===handle)
+    return reply({ok:true,public_handle:handle,next_change_at:Math.max(0,current.public_handle_updated_at+HANDLE_COOLDOWN)});
+  if(current.public_handle_updated_at&&now()-current.public_handle_updated_at<HANDLE_COOLDOWN)
+    bad(429,"Podés cambiar tu @usuario una vez cada siete días");
+  const other=await db.prepare(
+    "SELECT id FROM social_users WHERE id<>? AND (username=? OR public_id=? OR public_handle=?)"
+  ).bind(user.id,handle,handle,handle).first();
+  if(other)bad(409,"Este identificador pertenece a otra cuenta");
+  const used=await db.prepare("SELECT user_id FROM public_handle_history WHERE handle=?")
+    .bind(handle).first();
+  if(used&&used.user_id!==user.id)bad(409,"Este identificador estuvo registrado por otra cuenta");
+  const history=await db.prepare(
+    "SELECT count(*) AS n FROM public_handle_history WHERE user_id=?"
+  ).bind(user.id).first();
+  if(!used&&history.n>=5)bad(429,"Alcanzaste el límite de cinco identificadores históricos");
+  // Both statements execute in one D1 transaction. The second statement can
+  // update only if the handle was reserved for this same immutable account.
+  const results=await db.batch([
+    db.prepare(
+      "INSERT OR IGNORE INTO public_handle_history(handle,user_id) VALUES (?,?)"
+    ).bind(handle,user.id),
+    db.prepare(
+      "UPDATE social_users SET public_handle=?,public_handle_updated_at=?,updated_at=? "+
+      "WHERE id=? AND disabled_at IS NULL "+
+      "AND (public_handle_updated_at=0 OR public_handle_updated_at<=?) "+
+      "AND EXISTS(SELECT 1 FROM public_handle_history WHERE handle=? AND user_id=?) "+
+      "AND NOT EXISTS(SELECT 1 FROM social_users WHERE id<>? AND (username=? OR public_id=? OR public_handle=?))"
+    ).bind(handle,now(),now(),user.id,now()-HANDLE_COOLDOWN,
+      handle,user.id,user.id,handle,handle,handle)
+  ]);
+  if(results[1]?.meta?.changes!==1)bad(409,"Identificador ocupado o modificación simultánea; volvé a intentar");
+  return reply({ok:true,public_handle:handle,next_change_at:now()+HANDLE_COOLDOWN});
 }
 async function getProjects(db, user, knownDeveloper=null) {
   const projects = await db.prepare(
@@ -877,6 +936,7 @@ export default {
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
       if (method === "GET" && path === "/v1/account") return await accountInfo(db,user);
       if (method === "POST" && path === "/v1/account/display") return await updateDisplayName(request,db,user);
+      if (method === "POST" && path === "/v1/account/handle") return await changePublicHandle(request,db,user);
       if (method === "GET" && path === "/v1/projects") return reply({projects:await getProjects(db,user)});
       if (method === "POST" && path === "/v1/projects/subscribe") return await projectSubscription(request,db,user,"subscribe");
       if (method === "POST" && path === "/v1/projects/unsubscribe") return await projectSubscription(request,db,user,"unsubscribe");
