@@ -127,16 +127,22 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
         .bind(input.toLowerCase(),input.toLowerCase(),input).first();
     }
     if(!row||!await cooldown(db,row.id,"forgot-"+kind,120))return generic();
-    if(kind==="username"){
-      await sendMail(env,row.email_lower,"VIS Ceibo — Recordatorio de usuario",
-        "Tu nombre técnico de cuenta VIS es: "+row.username+
-        "\n\nSi no solicitaste este recordatorio, ignorá el correo.");
-    }else{
-      const code=await issue(db,row.id,"reset","",15*60);
-      await sendMail(env,row.email_lower,"VIS Ceibo — Recuperar contraseña",
-        "Copiá este código en VIS Nexo:\n\n"+code+
-        "\n\nVence en 15 minutos. Es de un solo uso. Las cuentas administradoras "+
-        "también requieren un código de recuperación MFA.");
+    // Resend outages must not reveal the existence of a verified email:
+    // a known account and an unknown account always receive the same reply.
+    try{
+      if(kind==="username"){
+        await sendMail(env,row.email_lower,"VIS Ceibo — Recordatorio de usuario",
+          "Tu nombre técnico de cuenta VIS es: "+row.username+
+          "\n\nSi no solicitaste este recordatorio, ignorá el correo.");
+      }else{
+        const code=await issue(db,row.id,"reset","",15*60);
+        await sendMail(env,row.email_lower,"VIS Ceibo — Recuperar contraseña",
+          "Copiá este código en VIS Nexo:\n\n"+code+
+          "\n\nVence en 15 minutos. Es de un solo uso. Las cuentas administradoras "+
+          "también requieren un código de recuperación MFA.");
+      }
+    }catch{
+      // No error details, mailbox identity or token are logged or exposed.
     }
     return generic();
   }
