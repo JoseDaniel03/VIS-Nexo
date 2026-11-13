@@ -6,6 +6,7 @@ mod microsoft;
 mod instance_guard;
 mod instance_lock;
 mod instance_backup;
+mod world_cloud;
 mod instance_health;
 mod server_list;
 mod project_mods;
@@ -761,6 +762,46 @@ fn game_location_for_operation(
  }
  resolve_player_game_dir(s,project_id,name,source_owner)
 }
+
+#[tauri::command]
+async fn world_cloud_status(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String
+)->Result<Vec<world_cloud::WorldCloudStatus>,String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::status(&game))
+        .await.map_err(|_|"Consulta de mundos interrumpida".to_string())?
+}
+#[tauri::command]
+fn link_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    world:String,folder:String,provider:String
+)->Result<(),String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    world_cloud::link(&game,&world,&folder,&provider)
+}
+#[tauri::command]
+async fn backup_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,world:String
+)->Result<world_cloud::CloudBackup,String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::backup(&game,&world))
+        .await.map_err(|_|"Copia del mundo interrumpida".to_string())?
+}
+#[tauri::command]
+async fn restore_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    world:String,confirmation:String
+)->Result<String,String>{
+    if confirmation!="RESTAURAR"{return Err("Confirmación de restauración inválida".into());}
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::restore_as_copy(&game,&world))
+        .await.map_err(|_|"Restauración de mundo interrumpida".to_string())?
+}
+
 #[tauri::command]
 async fn instance_backups(
  state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
@@ -1876,7 +1917,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, world_cloud_status, link_world_cloud, backup_world_cloud, restore_world_cloud, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_realtime_ticket, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
