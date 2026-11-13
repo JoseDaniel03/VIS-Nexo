@@ -137,6 +137,65 @@ pub fn download(data_root:&Path,id:&str)->Result<String,String>{
     if outcome.is_err(){let _=fs::remove_file(&partial);}
     outcome?;Ok(destination.to_string_lossy().into_owned())
 }
+/// Upload only a locally generated, SHA-verified team ZIP to the configured
+/// R2-backed VIS Universe Worker. The publisher token stays in the Rust command,
+/// never in the ZIP, cloud manifest or a local config file.
+pub fn upload_team_pack(
+    root:&Path, pack:&crate::team_pack::TeamPack, token:&str
+)->Result<(),String>{
+    if token.len()<32 || token.len()>256 || token.contains('\n') || token.contains('\r'){
+        return Err("Credencial de publicación inválida".into());
+    }
+    if !clean_id(&pack.project_id)||pack.sha256.len()!=64
+        ||!pack.sha256.bytes().all(|b|b.is_ascii_hexdigit())
+        ||pack.size_bytes==0||pack.size_bytes>32*1024*1024{
+        return Err("Paquete de equipo inválido".into());
+    }
+    let catalog=catalog_url(root).ok_or("Configurá un catálogo VIS Universe antes de subir paquetes")?;
+    let mut url=Url::parse(&catalog).map_err(|e|e.to_string())?;
+    if !url.host_str().is_some_and(|host|host.ends_with(".workers.dev"))
+        ||url.path()!="/catalog.json"{
+        return Err("Subir paquetes requiere el Worker VIS Universe, no un catálogo GitHub externo".into());
+    }
+    url.set_path(&format!("/packs/{}/{}.zip",pack.project_id,pack.sha256));
+    let archive=Path::new(&pack.archive);
+    let expected_root=root.join("project-packages").join("teams").join(&pack.project_id);
+    let real_parent=fs::canonicalize(&expected_root).map_err(|e|e.to_string())?;
+    let real_archive=fs::canonicalize(archive).map_err(|e|e.to_string())?;
+    if real_archive.parent()!=Some(real_parent.as_path()) || !real_archive.is_file(){
+        return Err("El archivo no pertenece al directorio controlado de VIS".into());
+    }
+    let meta=fs::metadata(&real_archive).map_err(|e|e.to_string())?;
+    if meta.len()!=pack.size_bytes{return Err("El tamaño del paquete cambió".into())}
+    let mut digest=Sha256::new();
+    let mut file=File::open(&real_archive).map_err(|e|e.to_string())?;
+    let mut buf=[0u8;65536];
+    loop{
+        let n=file.read(&mut buf).map_err(|e|e.to_string())?;if n==0{break;}
+        digest.update(&buf[..n]);
+    }
+    if format!("{:x}",digest.finalize())!=pack.sha256{
+        return Err("El paquete local cambió; se canceló la publicación".into());
+    }
+    let file=File::open(&real_archive).map_err(|e|e.to_string())?;
+    let response=Client::builder().timeout(Duration::from_secs(150))
+        .redirect(reqwest::redirect::Policy::none())
+        .build().map_err(|e|e.to_string())?
+        .put(url).bearer_auth(token)
+        .header("Content-Type","application/zip")
+        .header("Content-Length",pack.size_bytes)
+        .body(reqwest::blocking::Body::sized(file,pack.size_bytes))
+        .send().map_err(|e|format!("No se pudo subir el paquete: {e}"))?;
+    if !response.status().is_success(){
+        return Err(format!("VIS Universe rechazó el ZIP de equipo (HTTP {})",response.status()));
+    }
+    let result:serde_json::Value=response.json().map_err(|_|"Respuesta de subida inválida")?;
+    if result["ok"]!=true || result["sha256"].as_str()!=Some(pack.sha256.as_str())
+        ||result["size_bytes"].as_u64()!=Some(pack.size_bytes){
+        return Err("R2 no confirmó el hash y tamaño del paquete".into());
+    }
+    Ok(())
+}
 /// Serialize only images under VIS's local asset directory. Never leak arbitrary files.
 fn encode_artwork(root:&Path, value:&mut String)->Result<(),String>{
     if value.is_empty() || approved_url(value) {return Ok(())}
