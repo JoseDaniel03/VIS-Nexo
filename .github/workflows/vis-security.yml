@@ -1,0 +1,51 @@
+name: VIS Nexo - Security checks (no release)
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vis-security-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned JS dependencies
+        run: npm ci --ignore-scripts
+      - name: Audit JavaScript dependencies
+        run: npm audit --audit-level=high
+      - name: Check JS and security policy syntax
+        run: |
+          node --check web/app.js
+          node --check web/social-remote.js
+          node --check services/social/worker.mjs
+          node --check services/universe/worker.mjs
+      - name: Test existing Social and Universe permissions
+        run: |
+          node tools/test_social_worker.mjs
+          node tools/test_universe_worker.mjs
+          python3 tools/test_social_superadmin_bootstrap.py
+  rustsec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install RustSec advisory scanner (does not build Nexo)
+        run: cargo install cargo-audit --locked
+      - name: Audit Rust dependency lockfiles
+        run: cargo audit --file Cargo.lock
+      - name: Check Nube source formatting and syntax
+        run: rustfmt --edition 2021 --check src-tauri/src/world_cloud.rs
