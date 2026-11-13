@@ -31,11 +31,26 @@ function store(db, name, type, value, key) {
     req.onerror = () => reject(req.error || Error('Error de almacenamiento'));
   });
 }
-function allMessages(db) {
+// The primary key already starts with "account:". Read only the current
+// account's small bounded history instead of loading every stored profile.
+function allMessages(db, username) {
   return new Promise((resolve, reject) => {
-    const req = db.transaction('messages', 'readonly').objectStore('messages').getAll();
+    const prefix = username + ':';
+    const bounds = IDBKeyRange.bound(prefix, prefix + '\uffff');
+    const req = db.transaction('messages', 'readonly').objectStore('messages').getAll(bounds);
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error || Error('Error leyendo mensajes'));
+  });
+}
+function removeMessages(db, keys) {
+  if (!keys.length) return Promise.resolve();
+  return new Promise((resolve,reject) => {
+    const tx = db.transaction('messages','readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || Error('No se pudo depurar el historial'));
+    tx.onabort = () => reject(tx.error || Error('Depuración interrumpida'));
+    const table = tx.objectStore('messages');
+    for (const key of keys) table.delete(key);
   });
 }
 async function ecdhKeys(db, username) {
@@ -104,7 +119,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   async function localHistory() {
     if (!privateDb || !currentUser) return [];
-    const all = await allMessages(privateDb);
+    const all = await allMessages(privateDb, currentUser);
     const fresh = [], expired = [];
     for (const item of all) {
       if (item.account !== currentUser) continue;
@@ -128,14 +143,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         usedByPeer.set(peer, used + size);
       } else expired.push(item.key);
     }
-    for (const key of expired) {
-      await new Promise((resolve, reject) => {
-        const req = privateDb.transaction('messages', 'readwrite')
-          .objectStore('messages').delete(key);
-        req.onsuccess = resolve;
-        req.onerror = () => reject(req.error);
-      });
-    }
+    // One transaction for all expired records: no N sequential disk commits.
+    await removeMessages(privateDb, expired);
     kept.reverse();
     return kept.map(({ from, to, body, created, id }) =>
       ({ from, to, body, created, id }));
