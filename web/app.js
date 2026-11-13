@@ -1326,7 +1326,11 @@ function instanceDataDialog(){
  '<section><h3>'+I('database',17)+' Copias de seguridad</h3>'+
  '<p class="muted">Resguarda mundos, servidores, packs, mods y ajustes. No guarda tokens VIS/Microsoft, pero algunos mods podrían tener credenciales en config; mantené privadas las copias.</p>'+
  '<button class="outline-btn" data-action="instance-data-backup">'+I('save',15)+' Crear copia</button>'+
- '<p class="muted">Copias disponibles: '+backups.length+'</p>'+
+ '<p class="muted">Copias disponibles: '+backups.length+' (automáticas: '+backups.filter(b=>b.name?.startsWith('vis-data-auto-')).length+')</p>'+
+ (canRestore?'<div class="profile-quick-actions"><span>Protección antes de jugar: <b>'+(d.autoBackup?'Activa':'Desactivada')+'</b></span>'+
+    '<button class="outline-btn" data-action="instance-data-toggle-auto-backup">'+
+      (d.autoBackup?'Desactivar copias diarias':'Activar copias diarias')+'</button></div>':
+    '<p class="muted">La política de copias automáticas la administra el propietario.</p>')+
  (backups.length?
   '<label>Elegir copia<select id="instance-data-backup-select">'+backupChoices+'</select></label>':
   '<p class="muted">Todavía no hay copias de esta instancia.</p>')+
@@ -1370,7 +1374,8 @@ async function openInstanceData(projectId,name,sourceOwner){
        command('instance_backups',params),command('inspect_instance_data',params)
     ]);
     if(generation!==accountGeneration)return;
-    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,merge:null};
+    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,merge:null,
+      autoBackup:!sourceOwner&&!!db.instances.find(i=>!i.source_owner&&i.project_id===projectId&&i.name===name)?.auto_backup};
     render();
   }catch(error){if(generation===accountGeneration)message('No se pudieron consultar los datos: '+String(error),true);}
  });
@@ -2084,6 +2089,23 @@ root.addEventListener('click',async event=>{
    await openInstanceData(projectId,id,button.dataset.source||'');
  }
  else if(act==='instance-data-backup')await runInstanceDataAction('backup');
+ else if(act==='instance-data-toggle-auto-backup'){
+   const current=dialog,generation=accountGeneration;
+   if(current?.type!=='instance-data'||current.sourceOwner)return;
+   await onceOperation('instance-auto-backup:'+JSON.stringify([current.projectId,current.name]),async()=>{
+     try{
+       const enabled=!current.autoBackup;
+       const next=await command('set_instance_auto_backup',{
+         projectId:current.projectId,name:current.name,enabled
+       });
+       if(generation!==accountGeneration||dialog!==current)return;
+       db=next;current.autoBackup=enabled;render();
+       message(enabled?'Copias automáticas activadas. VIS guardará hasta tres respaldos diarios antes de jugar.':
+         'Copias automáticas desactivadas. Las copias existentes se conservarán.');
+     }catch(error){if(generation===accountGeneration)
+       message('No se pudo cambiar la protección de la instancia: '+String(error),true);}
+   });
+ }
  else if(act==='instance-data-restore')await runInstanceDataAction('restore');
  else if(act==='instance-data-audit')await runInstanceDataAction('audit');
  else if(act==='instance-data-open-logs'){
@@ -2291,6 +2313,8 @@ async function performLaunch(projectId,name,sourceOwner=''){
  try{
   const instance=db.instances.find(i=>i.project_id===projectId&&i.name===name);
   let result;
+  if(instance?.auto_backup&&!sourceOwner)
+    message('Verificando el respaldo preventivo de la instancia antes de jugar…');
   if(instance?.engine==='horizon'){
     const sessionFile=''; // Supported local game mode; Microsoft integration remains separate.
     result=await command('launch_horizon',{projectId,name,sessionFile,sourceOwner:sourceOwner||null});
