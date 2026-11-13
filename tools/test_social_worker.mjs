@@ -733,6 +733,9 @@ const emailReminder=await call('/v1/recovery/start',{
 assert.equal(emailReminder.status,200);
 assert(recoveryDeliveries.at(-1).text.includes('recover_me'));
 const oldCount=recoveryDeliveries.length;
+// Simulate the enforced 90-second cooldown before requesting another email change.
+DB.sqlite.prepare("UPDATE account_recovery_notice_limits SET sent_at=sent_at-120 "+
+  "WHERE purpose='email' AND user_id=(SELECT id FROM social_users WHERE username='recover_me')").run();
 assert.equal((await call('/v1/account/email/request',{
   email:'new-recovery@example.org'
 },newLogin.data.token)).status,200);
