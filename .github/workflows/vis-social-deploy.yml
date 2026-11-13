@@ -1,15 +1,9 @@
 name: VIS Social - Cloudflare D1
 
+# This workflow changes production D1 + Durable Objects; deploying MUST be
+# explicitly initiated by the maintainer, never by a repository push.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'services/social/**'
-      - 'tools/test_social_worker.mjs'
-      - 'tools/test_social_live.mjs'
-      - 'tools/test_social_peer_key.mjs'
-      - '.github/workflows/vis-social-deploy.yml'
 
 permissions:
   contents: read
