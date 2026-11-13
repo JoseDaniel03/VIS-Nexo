@@ -289,9 +289,9 @@ pub fn restore_as_copy(game:&Path,world:&str)->Result<String,String>{
             let mut item=zip.by_index(i).map_err(|e|e.to_string())?;
             if item.is_dir() {continue;}
             if item.unix_mode().is_some_and(|m|m&0o170000==0o120000){return Err("Copia contiene enlaces simbólicos".into());}
-            let name=item.name();
+            let name=item.name().map_err(|e|e.to_string())?;
             if name.contains('\\')||name.starts_with('/')||name.len()>2048{return Err("Ruta de copia insegura".into());}
-            let rel=Path::new(name);
+            let rel=Path::new(name.as_ref());
             if rel.components().count()>MAX_DEPTH||rel.components().any(|c|!matches!(c,Component::Normal(_))){
                 return Err("Ruta de copia insegura".into());
             }
