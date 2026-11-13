@@ -22,11 +22,13 @@ jobs:
       - name: Refresh zip crate and required transitive dependencies
         run: |
           cargo metadata --no-deps --format-version 1 >/dev/null
-          echo "=== LEGACY ZIP DEPENDENTS ==="
-          cargo tree -i zip@0.6.6 || true
-          echo "=== NEW ZIP DEPENDENTS ==="
-          cargo tree -i zip@9.5.0 || true
-          cargo update -p zip@0.6.6
+          echo "=== CHECK PATCHED ZIP DEPENDENTS ==="
+          cargo tree -i zip@9.4.2
+          echo "=== ENSURE VULNERABLE ZIP IS ABSENT ==="
+          if cargo tree -i zip@0.6.6 2>/dev/null; then
+            echo "Vulnerable legacy ZIP still present" >&2
+            exit 1
+          fi
           cargo metadata --locked --no-deps --format-version 1 >/dev/null
       - name: Print proposed Cargo.lock in recoverable chunks
         shell: bash
