@@ -1802,7 +1802,7 @@ fn main() {
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
             save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
-            social::social_connect, social::social_request, social::social_disconnect,
+            social::social_connect, social::social_request, social::social_realtime_ticket, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
             microsoft::microsoft_cancel, microsoft::microsoft_open_verification,
             microsoft::microsoft_cosmetics,
