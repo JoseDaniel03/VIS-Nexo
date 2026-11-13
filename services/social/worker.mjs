@@ -569,7 +569,7 @@ function projectId(value) {
 }
 function isSuper(user) { return user.role === "super_admin"; }
 async function canDevelop(db, user) {
-  if (isSuper(user)) return true;
+  if (await isGlobalAdmin(db,user)) return true;
   const grant=await db.prepare("SELECT user_id FROM developer_grants WHERE user_id=?")
     .bind(user.id).first();
   return !!grant;
@@ -599,6 +599,7 @@ async function accountInfo(db, user) {
     cloud_credential_public_key: row.password_hash?.startsWith("ed25519:")
       ? row.password_hash.slice(8) : null,
     developer: await canDevelop(db,user),
+    global_admin: await isGlobalAdmin(db,user),
     signing_public_key: row.signing_public_key, created_at: row.created_at
   } });
 }
@@ -922,6 +923,262 @@ async function cleanup(db) {
     db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t)
   ]);
 }
+
+// VIS Universe community: all writes are authorized against D1 immutable user IDs.
+// Local VIS launcher flags and display names never grant server permissions.
+const COMMUNITY_ROLES=new Set(["creator","helper","content_creator","participant","guest","collaborator","mention"]);
+async function isGlobalAdmin(db,user) {
+  if(isSuper(user))return true;
+  return !!(await db.prepare("SELECT user_id FROM global_admin_grants WHERE user_id=?")
+    .bind(user.id).first());
+}
+async function canManageCommunity(db,user,id) {
+  if(await isGlobalAdmin(db,user))return true;
+  const own=await db.prepare("SELECT id FROM social_projects WHERE id=? AND created_by=?")
+    .bind(id,user.id).first();
+  if(own)return true;
+  const staff=await db.prepare(
+    "SELECT user_id FROM project_staff WHERE project_id=? AND user_id=? AND staff_role='manager'"
+  ).bind(id,user.id).first();
+  if(staff)return true;
+  return !!(await db.prepare(
+    "SELECT user_id FROM project_members WHERE project_id=? AND user_id=? AND member_role='creator'"
+  ).bind(id,user.id).first());
+}
+async function communityOverview(request,db,user) {
+  await rateLimit(db,request,"community-read:"+user.id,100);
+  const data=await parseBody(request,600);
+  const id=projectId(data.project_id);
+  const project=await db.prepare(
+    "SELECT id,title,visibility FROM social_projects WHERE id=?"
+  ).bind(id).first();
+  if(!project)bad(404,"Project not found");
+  const manager=await canManageCommunity(db,user,id);
+  const myself=await db.prepare(
+    "SELECT member_role,can_play FROM project_members WHERE project_id=? AND user_id=?"
+  ).bind(id,user.id).first();
+  if(project.visibility!=="published"&&!manager&&!myself)bad(404,"Project not found");
+  const [settings,members,media,requestRow,pending]=await Promise.all([
+    db.prepare("SELECT admission,play_access FROM project_settings WHERE project_id=?").bind(id).first(),
+    db.prepare(
+      "SELECT u.username,u.public_handle,u.display_name,m.member_role,m.can_play,m.joined_at "+
+      "FROM project_members m JOIN social_users u ON u.id=m.user_id "+
+      "WHERE m.project_id=? AND u.disabled_at IS NULL ORDER BY m.joined_at ASC LIMIT 250"
+    ).bind(id).all(),
+    db.prepare(
+      "SELECT m.id,m.title,m.url,m.provider,m.kind,m.created_at,u.username AS author "+
+      "FROM project_media m JOIN social_users u ON u.id=m.author_id "+
+      "WHERE m.project_id=? ORDER BY m.created_at DESC LIMIT 30"
+    ).bind(id).all(),
+    db.prepare("SELECT status FROM project_join_requests WHERE project_id=? AND user_id=?")
+      .bind(id,user.id).first(),
+    manager?db.prepare(
+      "SELECT u.username,r.note,r.created_at FROM project_join_requests r "+
+      "JOIN social_users u ON u.id=r.user_id WHERE r.project_id=? AND r.status='pending' "+
+      "ORDER BY r.created_at ASC LIMIT 100"
+    ).bind(id).all():Promise.resolve({results:[]})
+  ]);
+  const access=settings?.play_access||"public";
+  return reply({project_id:id,can_manage:manager,role:myself?.member_role||"",
+    can_play:project.visibility==="published"&&(access==="public"||myself?.can_play===1),
+    admission:settings?.admission||"request",play_access:access,
+    request_status:requestRow?.status||"",
+    members:members.results||[],media:media.results||[],pending:pending.results||[]});
+}
+async function requestJoinCommunity(request,db,user) {
+  await rateLimit(db,request,"project-join:"+user.id,10);
+  const data=await parseBody(request,700),id=projectId(data.project_id);
+  const note=typeof data.note==="string"?data.note.trim():"";
+  if(note.length>300)bad(400,"Message too long");
+  const project=await db.prepare(
+    "SELECT p.visibility,COALESCE(s.admission,'request') AS admission "+
+    "FROM social_projects p LEFT JOIN project_settings s ON s.project_id=p.id WHERE p.id=?"
+  ).bind(id).first();
+  if(project?.visibility!=="published")bad(404,"Project not found");
+  if(project.admission==="invite_only")bad(403,"Project requires an invitation");
+  const existing=await db.prepare("SELECT user_id FROM project_members WHERE project_id=? AND user_id=?")
+    .bind(id,user.id).first();
+  if(existing)return reply({ok:true,status:"member"});
+  if(project.admission==="open"){
+    await db.batch([
+      db.prepare("INSERT OR IGNORE INTO project_members(project_id,user_id,member_role,can_play,added_by) VALUES (?,?,'participant',1,?)")
+        .bind(id,user.id,user.id),
+      db.prepare(
+        "INSERT INTO project_join_requests(project_id,user_id,status,note,reviewed_at,reviewed_by) "+
+        "VALUES (?,?,'approved',?,unixepoch(),?) ON CONFLICT(project_id,user_id) "+
+        "DO UPDATE SET status='approved',reviewed_at=unixepoch(),reviewed_by=excluded.reviewed_by"
+      ).bind(id,user.id,note,user.id)
+    ]);
+    return reply({ok:true,status:"member"});
+  }
+  const existingRequest=await db.prepare(
+    "SELECT status,created_at FROM project_join_requests WHERE project_id=? AND user_id=?"
+  ).bind(id,user.id).first();
+  if(existingRequest?.status==="pending")return reply({ok:true,status:"pending"});
+  if(existingRequest&&now()-existingRequest.created_at<7*24*3600)
+    bad(429,"Wait before requesting to join again");
+  await db.prepare(
+    "INSERT INTO project_join_requests(project_id,user_id,status,note,created_at,reviewed_at,reviewed_by) "+
+    "VALUES (?,?,'pending',?,unixepoch(),NULL,NULL) ON CONFLICT(project_id,user_id) "+
+    "DO UPDATE SET status='pending',note=excluded.note,created_at=unixepoch(),reviewed_at=NULL,reviewed_by=NULL"
+  ).bind(id,user.id,note).run();
+  return reply({ok:true,status:"pending"});
+}
+async function manageCommunityMembers(request,db,user) {
+  await rateLimit(db,request,"project-members:"+user.id,20);
+  const data=await parseBody(request,900),id=projectId(data.project_id);
+  if(!await canManageCommunity(db,user,id))bad(403,"Project manager required");
+  const username=normalName(data.username),role=data.role,action=data.action;
+  if(!["grant","revoke"].includes(action)|| (action==="grant"&&!COMMUNITY_ROLES.has(role)))
+    bad(400,"Invalid membership update");
+  if(role==="creator"&&!await isGlobalAdmin(db,user))
+    bad(403,"Only a global administrator can grant creator roles");
+  const target=await db.prepare("SELECT id,role FROM social_users WHERE username=? AND disabled_at IS NULL")
+    .bind(username).first();
+  if(!target)bad(404,"Account not found");
+  const project=await db.prepare("SELECT id FROM social_projects WHERE id=?").bind(id).first();
+  if(!project)bad(404,"Project not found");
+  if(action==="revoke"){
+    await db.batch([
+      db.prepare("DELETE FROM project_members WHERE project_id=? AND user_id=?").bind(id,target.id),
+      auditStatement(db,user.id,"project.member.revoke",id+":"+username)
+    ]);
+  }else{
+    const play=role!=="mention"&&data.can_play===true?1:0;
+    await db.batch([
+      db.prepare(
+        "INSERT INTO project_members(project_id,user_id,member_role,can_play,added_by) VALUES (?,?,?,?,?) "+
+        "ON CONFLICT(project_id,user_id) DO UPDATE SET member_role=excluded.member_role,"+
+        "can_play=excluded.can_play,added_by=excluded.added_by"
+      ).bind(id,target.id,role,play,user.id),
+      auditStatement(db,user.id,"project.member.grant",id+":"+username+":"+role)
+    ]);
+  }
+  return reply({ok:true,project_id:id,username,role:action==="revoke"?"":role});
+}
+async function reviewCommunityJoin(request,db,user) {
+  await rateLimit(db,request,"project-review:"+user.id,25);
+  const data=await parseBody(request,700),id=projectId(data.project_id);
+  if(!await canManageCommunity(db,user,id))bad(403,"Project manager required");
+  const username=normalName(data.username);
+  if(!["approve","reject"].includes(data.action))bad(400,"Invalid review action");
+  const target=await db.prepare("SELECT id FROM social_users WHERE username=? AND disabled_at IS NULL")
+    .bind(username).first();
+  if(!target)bad(404,"Account not found");
+  const requested=await db.prepare(
+    "SELECT status FROM project_join_requests WHERE project_id=? AND user_id=?"
+  ).bind(id,target.id).first();
+  if(requested?.status!=="pending")bad(409,"No pending request");
+  const status=data.action==="approve"?"approved":"rejected";
+  const changed=await db.prepare(
+    "UPDATE project_join_requests SET status=?,reviewed_at=unixepoch(),reviewed_by=? "+
+    "WHERE project_id=? AND user_id=? AND status='pending'"
+  ).bind(status,user.id,id,target.id).run();
+  if(changed.meta?.changes!==1)bad(409,"Already reviewed");
+  if(status==="approved"){
+    await db.prepare(
+      "INSERT INTO project_members(project_id,user_id,member_role,can_play,added_by) "+
+      "VALUES (?,?,'participant',1,?) ON CONFLICT(project_id,user_id) "+
+      "DO UPDATE SET can_play=1,member_role='participant',added_by=excluded.added_by"
+    ).bind(id,target.id,user.id).run();
+  }
+  await auditStatement(db,user.id,"project.join."+status,id+":"+username).run();
+  return reply({ok:true,project_id:id,username,status});
+}
+async function setCommunityPolicy(request,db,user) {
+  await rateLimit(db,request,"project-policy:"+user.id,12);
+  const data=await parseBody(request,600),id=projectId(data.project_id);
+  if(!await canManageCommunity(db,user,id))bad(403,"Project manager required");
+  if(!["open","request","invite_only"].includes(data.admission)||
+     !["public","members"].includes(data.play_access))bad(400,"Invalid admission policy");
+  const project=await db.prepare("SELECT id FROM social_projects WHERE id=?").bind(id).first();
+  if(!project)bad(404,"Project not found");
+  await db.batch([
+    db.prepare(
+      "INSERT INTO project_settings(project_id,admission,play_access) VALUES (?,?,?) "+
+      "ON CONFLICT(project_id) DO UPDATE SET admission=excluded.admission,"+
+      "play_access=excluded.play_access,updated_at=unixepoch()"
+    ).bind(id,data.admission,data.play_access),
+    auditStatement(db,user.id,"project.policy",id+":"+data.admission+":"+data.play_access)
+  ]);
+  return reply({ok:true});
+}
+async function grantGlobalAdmin(request,db,user) {
+  requireSuper(user); // A global admin is never allowed to promote other admins.
+  await rateLimit(db,request,"global-admin:"+user.id,5);
+  const data=await parseBody(request,500),username=normalName(data.username);
+  if(typeof data.enabled!=="boolean")bad(400,"Invalid grant value");
+  const target=await db.prepare(
+    "SELECT id,role FROM social_users WHERE username=? AND disabled_at IS NULL"
+  ).bind(username).first();
+  if(!target||target.role==="super_admin"||target.id===user.id)
+    bad(403,"Target cannot be changed");
+  if(data.enabled){
+    await db.batch([
+      db.prepare("INSERT OR IGNORE INTO global_admin_grants(user_id,granted_by) VALUES (?,?)")
+        .bind(target.id,user.id),
+      auditStatement(db,user.id,"account.global_admin.grant",username)
+    ]);
+  }else{
+    await db.batch([
+      db.prepare("DELETE FROM global_admin_grants WHERE user_id=?").bind(target.id),
+      auditStatement(db,user.id,"account.global_admin.revoke",username)
+    ]);
+  }
+  return reply({ok:true,username,enabled:data.enabled});
+}
+function communityMediaProvider(input) {
+  if(typeof input!=="string"||input.length>500)bad(400,"Invalid media URL");
+  let url;
+  try{url=new URL(input);}catch{bad(400,"Invalid media URL");}
+  if(url.protocol!=="https:"||url.username||url.password||url.port||
+    url.hash||!["www.youtube.com","youtube.com","youtu.be","www.twitch.tv","twitch.tv","clips.twitch.tv"].includes(url.hostname))
+    bad(400,"Only official YouTube or Twitch URLs are allowed");
+  let provider="";
+  if(url.hostname==="youtu.be"||url.hostname.endsWith("youtube.com")){
+    provider="youtube";
+    const video=url.hostname==="youtu.be"?url.pathname.slice(1):url.pathname==="/watch"?url.searchParams.get("v"):null;
+    if(!/^[A-Za-z0-9_-]{11}$/.test(video||""))bad(400,"Invalid YouTube video");
+    return {provider,url:"https://www.youtube.com/watch?v="+video,video_id:video};
+  }
+  provider="twitch";
+  if(!/^\/[a-zA-Z0-9_]{3,25}\/?$/.test(url.pathname) &&
+     !(url.hostname==="clips.twitch.tv"&&/^\/[A-Za-z0-9_-]{4,100}\/?$/.test(url.pathname)))
+    bad(400,"Invalid Twitch channel or clip URL");
+  if(url.search)bad(400,"Twitch tracking or custom parameters are not allowed");
+  return {provider,url:"https://"+url.hostname+url.pathname};
+}
+async function manageCommunityMedia(request,db,user) {
+  await rateLimit(db,request,"project-media:"+user.id,12);
+  const data=await parseBody(request,1400),id=projectId(data.project_id);
+  const manager=await canManageCommunity(db,user,id);
+  const member=await db.prepare(
+    "SELECT member_role FROM project_members WHERE project_id=? AND user_id=?"
+  ).bind(id,user.id).first();
+  if(!manager&&member?.member_role!=="content_creator")bad(403,"Media posting not allowed");
+  if(data.action==="delete"){
+    const media=await db.prepare("SELECT author_id FROM project_media WHERE id=? AND project_id=?")
+      .bind(data.id,id).first();
+    if(!media)bad(404,"Media not found");
+    if(!manager&&media.author_id!==user.id)bad(403,"Cannot delete another creator's media");
+    await db.prepare("DELETE FROM project_media WHERE id=? AND project_id=?").bind(data.id,id).run();
+    return reply({ok:true});
+  }
+  if(data.action!=="add")bad(400,"Invalid media action");
+  const title=typeof data.title==="string"?data.title.trim():"";
+  if(title.length<2||title.length>120||!["stream","video"].includes(data.kind))
+    bad(400,"Invalid media item");
+  const parsed=communityMediaProvider(data.url);
+  const count=await db.prepare("SELECT count(*) AS n FROM project_media WHERE project_id=?")
+    .bind(id).first();
+  if(count.n>=150)bad(429,"Project media limit reached");
+  const mediaId=crypto.randomUUID();
+  await db.prepare(
+    "INSERT INTO project_media(id,project_id,author_id,kind,provider,url,title) VALUES (?,?,?,?,?,?,?)"
+  ).bind(mediaId,id,user.id,data.kind,parsed.provider,parsed.url,title).run();
+  return reply({ok:true,id:mediaId});
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -965,6 +1222,14 @@ export default {
       if (method === "POST" && path === "/v1/account/display") return await updateDisplayName(request,db,user);
       if (method === "POST" && path === "/v1/account/handle") return await changePublicHandle(request,db,user);
       if (method === "GET" && path === "/v1/projects") return reply({projects:await getProjects(db,user)});
+      if (method === "POST" && path === "/v1/projects/community")return await communityOverview(request,db,user);
+      if (method === "POST" && path === "/v1/projects/request-join")return await requestJoinCommunity(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/community-members")return await manageCommunityMembers(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/review-join")return await reviewCommunityJoin(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/community-policy")return await setCommunityPolicy(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/community-media")return await manageCommunityMedia(request,db,user);
+      if (method === "POST" && path === "/v1/admin/accounts/global-admin")return await grantGlobalAdmin(request,db,user);
+
       if (method === "POST" && path === "/v1/projects/subscribe") return await projectSubscription(request,db,user,"subscribe");
       if (method === "POST" && path === "/v1/projects/unsubscribe") return await projectSubscription(request,db,user,"unsubscribe");
       if (method === "POST" && path === "/v1/admin/projects/upsert") return await adminProjectUpsert(request,db,user);
