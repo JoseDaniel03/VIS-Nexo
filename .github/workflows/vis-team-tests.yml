@@ -47,3 +47,18 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustfmt --edition 2021 --emit stdout src-tauri/src/team_pack.rs > /dev/null
+
+  native-typecheck:
+    name: Rust type check (no executable or artifact)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev build-essential pkg-config libxdo-dev libasound2-dev libudev-dev
+      - name: Check Rust backend types including VIS Team
+        run: cargo check -p vslauncher-tauri --all-targets --locked
+      # No cargo build, no package, no ZIP and no upload-artifact step.
