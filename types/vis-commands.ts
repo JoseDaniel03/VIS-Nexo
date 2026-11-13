@@ -69,6 +69,7 @@ export type NativeCommandMap = {
   configure_shared_ram: {args:{sourceOwner:string;projectId:string;name:string;ramMb:number};result:Snapshot};
   set_instance_auto_backup: {args:{projectId:string;name:string;enabled:boolean};result:Snapshot};
   install_minecraft: {args: {projectId: string;name: string}; result: Snapshot};
+  social_realtime_ticket: {args:Record<string,never>;result:{ws_url:string;expires_in:number}};
   download_jobs: {args:Record<string,never>; result:DownloadJob[]};
   cancel_download: {args:{id:number}; result:DownloadJob};
   launch_minecraft: {args: {projectId: string;name: string;sourceOwner: string|null}; result: LaunchResult};
