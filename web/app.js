@@ -163,6 +163,8 @@ const iconPaths = {
   grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   folder:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   upload:'<path d="M12 16V4m-4 4 4-4 4 4M4 16v4h16v-4"/>',
+  download:'<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',
+  refresh:'<path d="M20 7v5h-5M4 17v-5h5M6 9a7 7 0 0 1 12-2l2 5M4 12l2 5a7 7 0 0 0 12-2"/>',
   chevron:'<path d="m9 18 6-6-6-6"/>',
   chevrondown:'<path d="m6 9 6 6 6-6"/>',
   arrow:'<path d="M5 12h14m-6-6 6 6-6 6"/>',
