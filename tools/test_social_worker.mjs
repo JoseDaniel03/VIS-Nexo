@@ -663,6 +663,7 @@ assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get
 }
 // VIS Ceibo Recovery — end-to-end account ownership and old-device revocation.
 const recoverAccount=await account('recover_me');
+const sessionOutsider=await account('session_outsider');
 const oldPasswordKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
 const oldSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
 const oldPub=to64(await crypto.subtle.exportKey('raw',oldPasswordKey.publicKey));
@@ -685,7 +686,7 @@ assert.equal(activeSessions.status,200);
 assert(activeSessions.data.sessions.some(s=>s.current===true),'sessions should be visible');
 assert.equal((await call('/v1/account/sessions/revoke',{
   session_id:activeSessions.data.sessions[0].session_id
-},bob.token)).status,404,'a user must not revoke another account session');
+},sessionOutsider.token)).status,404,'a user must not revoke another account session');
 const unknown=await call('/v1/recovery/start',{kind:'password',identity:'unknown@example.org'});
 const known=await call('/v1/recovery/start',{kind:'password',identity:'recover_me'});
 assert.equal(unknown.status,200);
