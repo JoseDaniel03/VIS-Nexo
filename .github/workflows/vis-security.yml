@@ -30,6 +30,8 @@ jobs:
           node --check web/social-remote.js
           node --check services/social/worker.mjs
           node --check services/universe/worker.mjs
+      - name: Verify safe ZIP extraction policy
+        run: python3 tools/check_zip_extraction_policy.py
       - name: Test existing Social and Universe permissions
         run: |
           node tools/test_social_worker.mjs
