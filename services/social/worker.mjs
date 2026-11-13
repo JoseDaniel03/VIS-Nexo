@@ -830,11 +830,12 @@ async function uploadAvatar(request, db, user) {
 async function getAvatar(request, db, user) {
   await rateLimit(db,request,"avatar-get:"+user.id,120);
   const body=await parseBody(request);
-  const username=normalName(body.username);
+  const resolved=await lookupUser(db,body.username);
   const peer=await db.prepare(
-    "SELECT id,avatar_version FROM social_users WHERE username=? AND disabled_at IS NULL"
-  ).bind(username).first();
+    "SELECT id,username,avatar_version FROM social_users WHERE id=? AND disabled_at IS NULL"
+  ).bind(resolved.id).first();
   if (!peer) bad(404,"Account not found");
+  const username=peer.username;
   if (peer.id!==user.id && !await areFriends(db,user.id,peer.id)) {
     bad(403,"Profile picture visible to friends only");
   }
@@ -882,10 +883,12 @@ async function uploadSkin(request,db,user){
 async function getSkin(request,db,user){
   await rateLimit(db,request,"skin-get:"+user.id,120);
   const body=await parseBody(request);
-  const username=normalName(body.username);
-  const owner=await db.prepare("SELECT id,skin_version FROM social_users WHERE username=? AND disabled_at IS NULL")
-    .bind(username).first();
+  const resolved=await lookupUser(db,body.username);
+  const owner=await db.prepare(
+    "SELECT id,username,skin_version FROM social_users WHERE id=? AND disabled_at IS NULL"
+  ).bind(resolved.id).first();
   if(!owner)bad(404,"VIS user not found");
+  const username=owner.username;
   const skin=await db.prepare("SELECT data_base64 FROM social_skins WHERE user_id=?")
     .bind(owner.id).first();
   return reply({username,skin_version:owner.skin_version,
