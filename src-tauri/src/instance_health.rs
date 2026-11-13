@@ -47,6 +47,28 @@ pub fn inspect(game:&Path)->Result<HealthReport,String>{
         Err(e)=>issue(&mut result,&format!("unreadable:{part}"),&e.to_string(),"danger",false),
     }
  }
+ // Preserve evidence of a crashed restore. Inspection never modifies data.
+ let backups=game.join(".vis/backups");
+ match fs::symlink_metadata(&backups){
+   Ok(meta) if meta.file_type().is_symlink()||!meta.is_dir()=>{
+     issue(&mut result,"unsafe-backup-directory",
+         "La carpeta de respaldos no es un directorio seguro","danger",false);
+   },
+   Ok(_)=>{
+     for entry in fs::read_dir(&backups).map_err(|e|e.to_string())?.take(5_000){
+       let entry=entry.map_err(|e|e.to_string())?;
+       let name=entry.file_name().to_string_lossy().into_owned();
+       if name.starts_with(".restore-"){
+         issue(&mut result,"interrupted-restore",
+             "Existe una restauración pendiente o interrumpida. Revisá .vis/backups y los archivos .rollback-* antes de jugar; VIS no eliminará la evidencia.",
+             "danger",false);
+         break;
+       }
+     }
+   },
+   Err(e) if e.kind()==std::io::ErrorKind::NotFound=>{},
+   Err(e)=>issue(&mut result,"unreadable-backups",&e.to_string(),"danger",false),
+ }
  let worlds=game.join("saves");
  if fs::symlink_metadata(&worlds).is_ok_and(|m|m.is_dir()&&!m.file_type().is_symlink()){
    for item in fs::read_dir(&worlds).map_err(|e|e.to_string())?.take(2000){
@@ -95,6 +117,15 @@ pub fn repair_missing(game:&Path)->Result<HealthReport,String>{
 #[cfg(test)]
 mod tests{
  use super::*;
+ #[test]fn detects_incomplete_restore_and_refuses_repair(){
+     let dir=std::env::temp_dir().join(format!("vis-health-staged-{}",std::process::id()));
+     let _=fs::remove_dir_all(&dir);
+     fs::create_dir_all(dir.join(".vis/backups/.restore-crash")).unwrap();
+     let report=inspect(&dir).unwrap();
+     assert!(report.issues.iter().any(|i|i.code=="interrupted-restore"&&i.level=="danger"));
+     assert!(repair_missing(&dir).is_err());
+     let _=fs::remove_dir_all(dir);
+ }
  #[test]fn audit_and_repair_create_only_missing_default_folders(){
     let dir=std::env::temp_dir().join(format!("vis-health-{}",std::process::id()));
     let _=fs::remove_dir_all(&dir);
