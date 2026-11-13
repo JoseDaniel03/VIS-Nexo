@@ -119,6 +119,14 @@ async function register(request, db) {
     return reply({ ok: true, username, existing: true });
   }
   await rateLimit(db, request, "register", 8);
+  const historicallyClaimed=await db.prepare(
+    "SELECT user_id FROM public_handle_history WHERE handle=?"
+  ).bind(username).first();
+  if(historicallyClaimed)bad(409,"Este usuario está reservado por una identidad VIS");
+  const takenHandle=await db.prepare(
+    "SELECT id FROM social_users WHERE public_handle=?"
+  ).bind(username).first();
+  if(takenHandle)bad(409,"Este usuario público ya está ocupado");
   const id = crypto.randomUUID();
   try {
     await db.prepare(
@@ -192,6 +200,11 @@ async function cloudRegister(request, db) {
   const existing=await db.prepare("SELECT id FROM social_users WHERE username=?")
     .bind(username).first();
   if (existing) bad(409,"Username already taken; sign in or migrate existing device account");
+  const reserved=await db.prepare("SELECT user_id FROM public_handle_history WHERE handle=?")
+    .bind(username).first();
+  const assigned=await db.prepare("SELECT id FROM social_users WHERE public_handle=?")
+    .bind(username).first();
+  if(reserved||assigned)bad(409,"Este nombre ya pertenece a una identidad VIS");
   const publicId=crypto.randomUUID().replaceAll("-","").slice(0,24);
   const id=crypto.randomUUID();
   try {
@@ -211,8 +224,8 @@ async function cloudChallenge(request, db) {
   await rateLimit(db,request,"cloud-identifier:"+identifier,9);
   const user=await db.prepare(
     "SELECT id,username,public_id,password_hash,password_salt,password_iterations "+
-    "FROM social_users WHERE (username=? OR public_id=?) AND disabled_at IS NULL"
-  ).bind(identifier,identifier).first();
+    "FROM social_users WHERE (username=? OR public_id=? OR public_handle=?) AND disabled_at IS NULL"
+  ).bind(identifier,identifier,identifier).first();
   if(!user || !user.password_hash?.startsWith("ed25519:") ||
      user.password_iterations!==PASSWORD_ARGON2_PASSES)
     bad(401,"Invalid username/ID or password");
@@ -233,9 +246,9 @@ async function cloudVerify(request, db) {
   const row=await db.prepare(
     "SELECT c.id,c.nonce,u.id AS user_id,u.username,u.public_id,u.password_hash "+
     "FROM auth_challenges c JOIN social_users u ON u.id=c.user_id "+
-    "WHERE c.id=? AND (u.username=? OR u.public_id=?) "+
+    "WHERE c.id=? AND (u.username=? OR u.public_id=? OR u.public_handle=?) "+
     "AND u.disabled_at IS NULL AND c.expires_at>?"
-  ).bind(body.challenge_id,identifier,identifier,now()).first();
+  ).bind(body.challenge_id,identifier,identifier,identifier,now()).first();
   if(!row || !row.password_hash?.startsWith("ed25519:"))
     bad(401,"Invalid username/ID or password");
   const proof="VIS-CLOUD-AUTH-V2\n"+row.username+"\n"+row.id+"\n"+row.nonce;
@@ -432,7 +445,9 @@ async function currentState(db, user) {
 }
 async function lookupUser(db, username) {
   const user = await db.prepare("SELECT id,username FROM social_users WHERE " +
-    "(username=? OR public_id=? OR public_handle=?) AND disabled_at IS NULL ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1").bind(...Array(4).fill(normalName(username))).first();
+    "(username=? OR public_id=? OR public_handle=? OR " +
+    "id=(SELECT user_id FROM public_handle_history WHERE handle=?)) " +
+    "AND disabled_at IS NULL ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1").bind(...Array(5).fill(normalName(username))).first();
   if (!user) bad(404, "Account not found");
   return user;
 }
