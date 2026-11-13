@@ -318,17 +318,114 @@ pub(crate) async fn social_connect(
     Ok(snapshot)
 }
 
+
+#[tauri::command]
+pub(crate) async fn social_recovery_start(
+    kind:String,identity:String
+)->Result<Value,String>{
+    if !["password","username"].contains(&kind.as_str()) ||identity.len()>254{
+        return Err("Tipo o identificador de recuperación inválido".into());
+    }
+    tauri::async_runtime::spawn_blocking(move||{
+        request(&client()?,&base_url()?,"/v1/recovery/start","POST",
+            Some(&json!({"kind":kind,"identity":identity})),None)
+    }).await.map_err(|_|"La solicitud de recuperación se interrumpió".to_string())?
+}
+#[tauri::command]
+pub(crate) async fn social_recovery_verify_email(code:String)->Result<Value,String>{
+    if code.len()!=43{return Err("Código de correo inválido".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        request(&client()?,&base_url()?,"/v1/recovery/email/verify","POST",
+            Some(&json!({"code":code})),None)
+    }).await.map_err(|_|"Verificación de correo interrumpida".to_string())?
+}
+#[tauri::command]
+pub(crate) async fn social_recovery_reset(
+    code:String,password:String,confirm:String,recovery_code:Option<String>
+)->Result<Value,String>{
+    if password!=confirm||!(10..=128).contains(&password.len()){
+        return Err("Las contraseñas deben coincidir y tener entre 10 y 128 caracteres".into());
+    }
+    if code.len()!=43{return Err("Código de recuperación inválido".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        let http=client()?;let base=base_url()?;
+        let user=request(&http,&base,"/v1/recovery/introspect","POST",
+            Some(&json!({"code":code})),None)?;
+        let username=user.get("username").and_then(Value::as_str)
+            .ok_or("Identidad de recuperación incorrecta")?;
+        let mut payload=cloud_registration_payload(username,&password)?;
+        let data=payload.as_object_mut().ok_or("Credencial de recuperación inválida")?;
+        data.insert("code".to_owned(),json!(code));
+        data.insert("recovery_code".to_owned(),json!(recovery_code.unwrap_or_default()));
+        request(&http,&base,"/v1/recovery/reset","POST",Some(&payload),None)
+    }).await.map_err(|_|"Restablecimiento de contraseña interrumpido".to_string())?
+}
+#[tauri::command]
+pub(crate) async fn social_change_cloud_password(
+    backend:State<'_,Mutex<Backend>>,social:State<'_,Mutex<SocialSession>>,
+    password:String,confirm:String
+)->Result<Value,String>{
+    if password!=confirm||!(10..=128).contains(&password.len()){
+        return Err("Las contraseñas deben coincidir y tener entre 10 y 128 caracteres".into());
+    }
+    let username=backend.lock().map_err(|_|"Cuenta local bloqueada")?
+        .active_user.clone().ok_or("Iniciá sesión en VIS Ceibo")?;
+    let token={
+        let session=social.lock().map_err(|_|"Sesión Social bloqueada")?;
+        if session.username.as_deref()!=Some(username.as_str()){
+            return Err("La sesión no pertenece a esta cuenta".into());
+        }
+        session.bearer.clone().ok_or("Necesitás iniciar sesión VIS Cloud")?
+    };
+    let result=tauri::async_runtime::spawn_blocking(move||{
+        let payload=cloud_registration_payload(&username,&password)?;
+        request(&client()?,&base_url()?,"/v1/account/password/change","POST",
+            Some(&payload),Some(&token))
+    }).await.map_err(|_|"Cambio de contraseña interrumpido".to_string())??;
+    let mut active=social.lock().map_err(|_|"Sesión Social bloqueada")?;
+    active.bearer=None;
+    Ok(result)
+}
+#[tauri::command]
+pub(crate) async fn social_rebind_device(
+    backend:State<'_,Mutex<Backend>>,social:State<'_,Mutex<SocialSession>>
+)->Result<Value,String>{
+    let (username,root)={
+        let s=backend.lock().map_err(|_|"Cuenta local bloqueada")?;
+        (s.active_user.clone().ok_or("No hay cuenta activa")?,s.data_root.clone())
+    };
+    let token={
+        let s=social.lock().map_err(|_|"Sesión Social bloqueada")?;
+        if s.username.as_deref()!=Some(username.as_str()){
+            return Err("La sesión no pertenece a la cuenta actual".into());
+        }
+        s.bearer.clone().ok_or("Iniciá sesión con la contraseña VIS")?
+    };
+    tauri::async_runtime::spawn_blocking(move||{
+        let key=identity(&username,&root)?;
+        let public=STANDARD.encode(key.verifying_key().to_bytes());
+        let message=format!("VIS-CEIBO-DEVICE-REBIND-V1\n{username}\n{public}");
+        let signature=STANDARD.encode(key.sign(message.as_bytes()).to_bytes());
+        request(&client()?,&base_url()?,"/v1/account/devices/rebind","POST",
+            Some(&json!({"public_key":public,"signature":signature})),Some(&token))
+    }).await.map_err(|_|"Vinculación de dispositivo interrumpida".to_string())?
+}
+
 #[tauri::command]
 pub(crate) async fn social_request(
     backend: State<'_, Mutex<Backend>>,
     social: State<'_, Mutex<SocialSession>>,
     path: String, method: String, body: Option<Value>
 ) -> Result<Value, String> {
-    const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects"];
+    const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects",
+        "/v1/account/mfa/status", "/v1/account/sessions"];
     const POST: &[&str] = &[
         "/v1/keys", "/v1/presence", "/v1/avatar/upload", "/v1/avatar/get",
         "/v1/skins/upload", "/v1/skins/get", "/v1/skins/delete", "/v1/account/display", "/v1/account/handle",
-        "/v1/accounts/upgrade", "/v1/projects/subscribe",
+        "/v1/accounts/upgrade", "/v1/account/email/request",
+        "/v1/account/mfa/setup", "/v1/account/mfa/confirm",
+        "/v1/account/mfa/verify", "/v1/account/mfa/rotate-codes",
+        "/v1/account/sessions/revoke", "/v1/projects/subscribe",
         "/v1/projects/unsubscribe", "/v1/projects/community", "/v1/projects/request-join",
         "/v1/admin/projects/community-members", "/v1/admin/projects/review-join",
         "/v1/admin/projects/community-policy", "/v1/admin/projects/community-media",
