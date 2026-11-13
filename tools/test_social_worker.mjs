@@ -44,7 +44,19 @@ class D1Database {
   }
 }
 const DB = new D1Database();
-const env = { DB, DEBUG_ERRORS:true };
+const notifications=[];
+const env={
+  DB,DEBUG_ERRORS:true,
+  REALTIME:{
+    idFromName:id=>id,
+    get:id=>({fetch:async(url,opts)=>{
+      if(String(url).endsWith('/_vis/notify'))notifications.push(id);
+      // Only the Cloudflare runtime can return HTTP 101; the mock verifies
+      // authorization and one-time consumption independently of upgrade I/O.
+      return new Response(null,{status:204});
+    }})
+  }
+};
 const origin = 'https://vis-social.example';
 const to64 = bytes => Buffer.from(bytes).toString('base64');
 async function call(path, body, token) {
@@ -95,6 +107,27 @@ assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
 const bob = await account('bob');
+// A bearer is required only when issuing the short-lived read-only ticket.
+// The WebView gets NO social authentication token and cannot call other APIs.
+assert.equal((await call('/v1/realtime/ticket',{})).status,401);
+const issued=await call('/v1/realtime/ticket',{},alice.token);
+assert.equal(issued.status,200);
+assert.match(issued.data.ticket,/^[A-Za-z0-9_-]{43}$/);
+assert.equal(issued.data.expires_in,20);
+assert.equal((await call('/v1/realtime/ticket',{},bob.token)).status,200);
+const wsTicket=issued.data.ticket;
+async function wsRequest(ticket,originHeader='tauri://localhost'){
+  return worker.fetch(new Request(origin+'/v1/realtime/connect?ticket='+ticket,{
+    method:'GET',
+    headers:{Upgrade:'websocket',Origin:originHeader}
+  }),env);
+}
+assert.equal((await wsRequest(wsTicket,'https://evil.example')).status,403);
+assert.equal((await wsRequest(wsTicket)).status,204,'valid ticket forwards to account DO');
+assert.equal((await wsRequest(wsTicket)).status,401,'ticket must never be replayed');
+assert.equal((await wsRequest('A'.repeat(43))).status,401,'forged ticket rejected');
+assert.equal((await call('/v1/realtime/connect?ticket='+wsTicket)).status,400,
+  'no websocket protocol downgrade');
 assert.equal((await call('/v1/account/display',{display_name:'Mi Cuenta Premium'},alice.token)).status,200);
 assert.equal((await call('/v1/account/display',{display_name:'  '},alice.token)).status,400);
 assert.equal((await call('/v1/state',undefined,alice.token)).data.display_name,'Mi Cuenta Premium');
@@ -361,4 +394,8 @@ DB.sqlite.exec("UPDATE auth_challenges SET expires_at=1");
 DB.sqlite.exec("UPDATE auth_rate_limits SET expires_at=1");
 await worker.scheduled({},env);
 assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM auth_sessions').get().n,0);
+assert(notifications.length>=1,'Encrypted message delivery should signal recipient DO');
+DB.sqlite.exec("UPDATE realtime_tickets SET expires_at=1");
+await worker.scheduled({},env);
+assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get().n,0);
 console.log('VIS Social authentication, encrypted delivery and D1 migrations passed');
