@@ -1810,7 +1810,7 @@ async fn publish_team_project(
             let _lock=crate::instance_lock::try_lock(&game)?;
             team_pack::build(&game,&root,&project,options,&review_sha256)?
         };
-        cloud::upload_team_pack(&root,&pack,&token)?;
+        cloud::upload_team_pack(&root,&pack,&project,&token)?;
         // Publishing after upload exposes the hash-verified archive in catalog.
         cloud::publish(&root,&projects,&token)?;
         Ok(pack)
