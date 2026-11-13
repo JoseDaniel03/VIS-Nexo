@@ -9,6 +9,16 @@ database_name = "vis-social-db"
 database_id = "3f1a6ccf-2d84-4233-bde3-d3887d1ea60a"
 migrations_dir = "migrations"
 
+# Notification-only, per-account WebSockets. No message plaintext or bearer.
+# SQLite backing is mandatory for new Durable Object namespaces in 2026.
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "VisRealtimeRoom"
+
+[[migrations]]
+tag = "vis-realtime-sqlite-v1"
+new_sqlite_classes = ["VisRealtimeRoom"]
+
 # Purge expired authentication challenges, sessions and queued messages hourly.
 [triggers]
 crons = ["0 * * * *"]
