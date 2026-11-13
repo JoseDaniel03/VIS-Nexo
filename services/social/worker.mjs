@@ -1,6 +1,14 @@
 // VIS Social, authenticated Cloudflare Worker. The launcher PIN never leaves the PC.
 // Ed25519 proof-of-possession authenticates a local device. D1 stores only hashes of
 // temporary bearer sessions and opaque ECDH/AES-GCM encrypted message envelopes.
+import {createCeiboRecovery} from "./ceibo_recovery.mjs";
+import {createCeiboMfa} from "./ceibo_mfa.mjs";
+const ceiboMfa=createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit});
+const ceibo=createCeiboRecovery({
+  reply,bad,now,hash,randomToken,parseBody,rateLimit,cloudVerifier,
+  verifySignature,revokeRealtime,requireStepup:ceiboMfa.requireStepup,
+  consumeRecoveryCode:ceiboMfa.consumeRecoveryCode
+});
 const te = new TextEncoder();
 const USERNAME = /^[a-z0-9_]{3,24}$/;
 const MAX_BODY = 8192;
@@ -98,7 +106,7 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.public_handle,u.public_handle_updated_at,u.display_name,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
+    "SELECT u.id,u.username,u.public_handle,u.public_handle_updated_at,u.display_name,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at,s.auth_method,s.mfa_verified_at, " +
     "CASE WHEN u.password_hash!=\'\' THEN 1 ELSE 0 END AS cloud_login_enabled " +
     "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
@@ -112,10 +120,12 @@ async function register(request, db) {
   const username = normalName(body.username);
   if (!await verifySignature(body.public_key, body.signature,
     "VIS-SOCIAL-REGISTER-V1\n" + username)) bad(401, "Invalid device signature");
-  const current = await db.prepare("SELECT username,signing_public_key,disabled_at FROM social_users WHERE username=?").bind(username).first();
+  const current = await db.prepare("SELECT username,signing_public_key,disabled_at,device_credential_epoch,legacy_device_key_epoch FROM social_users WHERE username=?").bind(username).first();
   if (current) {
     if (current.disabled_at !== null && current.disabled_at !== undefined) bad(403, "Account disabled");
-    if (current.signing_public_key !== body.public_key) bad(409, "Username already registered on another device");
+    if (current.signing_public_key !== body.public_key ||
+        current.device_credential_epoch!==current.legacy_device_key_epoch)
+      bad(409, "Esta cuenta requiere vincular el dispositivo desde una sesión VIS Cloud");
     return reply({ ok: true, username, existing: true });
   }
   await rateLimit(db, request, "register", 8);
@@ -155,11 +165,13 @@ async function session(request, db) {
   const username = normalName(body.username);
   if (typeof body.challenge_id !== "string" || body.challenge_id.length > 80) bad(400, "Invalid challenge ID");
   const row = await db.prepare(
-    "SELECT c.id,c.nonce,c.expires_at,u.id AS user_id,u.signing_public_key " +
+    "SELECT c.id,c.nonce,c.expires_at,u.id AS user_id,u.signing_public_key,"+
+    "u.device_credential_epoch,u.legacy_device_key_epoch " +
     "FROM auth_challenges c JOIN social_users u ON u.id=c.user_id " +
     "WHERE c.id=? AND u.username=? AND u.disabled_at IS NULL AND c.expires_at>?"
   ).bind(body.challenge_id, username, now()).first();
-  if (!row) bad(401, "Invalid or expired challenge");
+  if (!row||row.device_credential_epoch!==row.legacy_device_key_epoch)
+    bad(401, "La clave del dispositivo fue revocada; usá la contraseña VIS Cloud");
   const message = "VIS-SOCIAL-AUTH-V1\n" + username + "\n" + row.id + "\n" + row.nonce;
   if (!await verifySignature(row.signing_public_key, body.signature, message)) bad(401, "Invalid device signature");
   const claim = await db.prepare("DELETE FROM auth_challenges WHERE id=? AND user_id=? AND expires_at>?")
@@ -167,8 +179,8 @@ async function session(request, db) {
   if (!claim.meta || claim.meta.changes !== 1) bad(401, "Challenge already used");
   const token = randomToken();
   const expiresAt = now() + 12 * HOUR;
-  await db.prepare("INSERT INTO auth_sessions (token_hash,user_id,expires_at) VALUES (?,?,?)")
-    .bind(await hash(token), row.user_id, expiresAt).run();
+  await db.prepare("INSERT INTO auth_sessions (token_hash,user_id,expires_at,session_id,auth_method) VALUES (?,?,?,?,?)")
+    .bind(await hash(token), row.user_id, expiresAt,crypto.randomUUID(),"device").run();
   return reply({ token, expires_at: expiresAt, username });
 }
 // The Rust client derives an Ed25519 credential from the account password
@@ -183,8 +195,8 @@ function cloudVerifier(body, username) {
 async function startCloudSession(db, user) {
   const token = randomToken();
   const expiresAt = now() + 12 * HOUR;
-  await db.prepare("INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES (?,?,?)")
-    .bind(await hash(token), user.id, expiresAt).run();
+  await db.prepare("INSERT INTO auth_sessions(token_hash,user_id,expires_at,session_id,auth_method) VALUES (?,?,?,?,?)")
+    .bind(await hash(token), user.id, expiresAt,crypto.randomUUID(),"password").run();
   return reply({ok:true,token,expires_at:expiresAt,username:user.username,
     public_id:user.public_id});
 }
@@ -600,6 +612,7 @@ async function accountInfo(db, user) {
       ? row.password_hash.slice(8) : null,
     developer: await canDevelop(db,user),
     global_admin: await isGlobalAdmin(db,user),
+    verified_email: (await ceibo.mailbox(db,user.id))?.email_lower||null,
     signing_public_key: row.signing_public_key, created_at: row.created_at
   } });
 }
@@ -920,7 +933,10 @@ async function cleanup(db) {
     db.prepare("DELETE FROM auth_sessions WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM auth_rate_limits WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM pending_messages WHERE expires_at<? OR acknowledged_at IS NOT NULL").bind(t),
-    db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t)
+    db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM account_recovery_tokens WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM account_email_pending WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM account_totp_pending WHERE expires_at<?").bind(t)
   ]);
 }
 
@@ -1203,15 +1219,22 @@ export default {
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
           "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets','public_handle_history'," +
-          "'global_admin_grants','project_members','project_settings','project_join_requests','project_media')"
+          "'global_admin_grants','project_members','project_settings','project_join_requests','project_media'," +
+          "'account_emails','account_email_pending','account_recovery_tokens'," +
+          "'account_recovery_notice_limits','account_totp','account_totp_pending','account_recovery_codes')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
-          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version','public_handle','public_handle_updated_at')"
+          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version','public_handle','public_handle_updated_at','device_credential_epoch','legacy_device_key_epoch')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 20 &&
-          new Set((columns.results || []).map(x=>x.name)).size === 8;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 11 : 0 },
+        const sessionFields=await db.prepare(
+          "SELECT name FROM pragma_table_info('auth_sessions') "+
+          "WHERE name IN ('session_id','auth_method','mfa_verified_at')"
+        ).all();
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 27 &&
+          new Set((columns.results || []).map(x=>x.name)).size === 10 &&
+          new Set((sessionFields.results||[]).map(x=>x.name)).size === 3;
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 12 : 0 },
           ready ? 200 : 503);
       }
       if (method === "GET" && path === "/v1/realtime/connect")return await consumeRealtimeTicket(request,db,env);
@@ -1221,8 +1244,15 @@ export default {
       if (method === "POST" && path === "/v1/auth/register") return await register(request, db);
       if (method === "POST" && path === "/v1/auth/challenge") return await challenge(request, db);
       if (method === "POST" && path === "/v1/auth/session") return await session(request, db);
+      if (method === "POST" && path.startsWith("/v1/recovery/"))
+        return await ceibo.publicRoute(path,request,db,env) || reply({error:"Not found"},404);
       if (!path.startsWith("/v1/")) return reply({ error: "Not found" }, 404);
       const user = await getSession(request, db);
+      const mfaResult=await ceiboMfa.privateRoute(path,method,request,db,user,env);
+      if(mfaResult)return mfaResult;
+      const ceiboResult=await ceibo.privateRoute(path,method,request,db,user,env);
+      if(ceiboResult)return ceiboResult;
+      if(path.startsWith("/v1/admin/"))await ceiboMfa.requireStepup(db,user,true);
       if (method === "POST" && path === "/v1/realtime/ticket")return await createRealtimeTicket(request,db,user,env);
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
