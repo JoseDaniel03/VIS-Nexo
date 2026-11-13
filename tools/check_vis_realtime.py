@@ -54,10 +54,27 @@ checks={
         "schema: ready ? 9 : 0" in worker
         and "realtime_tickets" in worker
         and "reqwest::blocking::Client" in host,
-    "Test suite covers ticket replay and Origin":
+    "One active native ticket request per session":
+        "realtimeConnecting=true" in ui
+        and "realtimeAttempt++" in ui
+        and "attempt!==realtimeAttempt" in ui,
+    "Socket leases expire and reauthenticate":
+        "REALTIME_SOCKET_LIFETIME_MS=15*60*1000" in worker
+        and "server.serializeAttachment({expiresAt:Date.now()+REALTIME_SOCKET_LIFETIME_MS})" in worker
+        and "ws.deserializeAttachment()" in worker
+        and "Refreshing notification ticket" in ui,
+    "Logout and disabling revoke persistent sockets":
+        "await revokeRealtime(env,user.id)" in worker
+        and "await revokeRealtime(env,target.id)" in worker
+        and "/_vis/revoke" in worker,
+    "Test suite covers replay, Origin and correct recipient":
         "ticket must never be replayed" in unit
         and "https://evil.example" in unit
-        and "notifications.length>=1" in unit,
+        and "notifications.includes(bobUserId)" in unit,
+    "Test suite checks real DO logic under controlled mock":
+        "new VisRealtimeRoom(state)" in unit
+        and "per-user socket cap" in unit
+        and "Expired authorization must close the WebSocket" in unit,
 }
 for title,ok in checks.items():print(("OK  " if ok else "FAIL"),title)
 if not all(checks.values()):raise SystemExit("VIS Portals realtime contracts failed")
