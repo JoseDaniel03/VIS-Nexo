@@ -37,6 +37,14 @@ checks={
     "ZIP has manifest and per-file SHA checksums":
         'writer.start_file(".bsconfig"' in pack
         and "format_version" in pack and "Sha256::new()" in pack,
+    "Common passwords and tokens inside configs are scanned before publication":
+        "inspect_config_secrets(&path,&name)?" in pack
+        and 'labels=["token","password","secret"' in pack
+        and "fn detects_common_secrets_in_configuration" in pack,
+    "ZIP round-trip test preserves saves and existing settings":
+        "fn round_trip_installs_only_missing_defaults" in pack
+        and 'assert!(!dest.join("saves").exists())' in pack
+        and 'assert_eq!(again.installed,0)' in pack,
     "Size, path and symlink defenses":
         "MAX_UNCOMPRESSED:u64=96*1024*1024" in pack
         and "MAX_ZIP:u64=32*1024*1024" in pack
