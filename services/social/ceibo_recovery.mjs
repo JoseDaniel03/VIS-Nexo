@@ -145,6 +145,18 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
     return !!(await db.prepare("SELECT 1 AS yes FROM global_admin_grants WHERE user_id=?")
       .bind(row.user_id).first());
   }
+  async function introspect(request,db){
+    await rateLimit(db,request,"ceibo-reset-introspect",8);
+    const data=await parseBody(request,180),code=data.code;
+    if(!tokenRegex.test(code||""))bad(400,"Código inválido o vencido");
+    const row=await db.prepare(
+      "SELECT u.username FROM account_recovery_tokens t "+
+      "JOIN social_users u ON u.id=t.user_id WHERE t.token_hash=? "+
+      "AND t.purpose='reset' AND t.expires_at>? AND u.disabled_at IS NULL"
+    ).bind(await hash(code),now()).first();
+    if(!row)bad(400,"Código inválido o vencido");
+    return reply({username:row.username});
+  }
   async function reset(request,db,env){
     await rateLimit(db,request,"ceibo-reset-ip",8);
     const data=await parseBody(request,1400),code=data.code;
@@ -238,6 +250,7 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
   }
   async function publicRoute(path,request,db,env){
     if(path==="/v1/recovery/start")return start(request,db,env);
+    if(path==="/v1/recovery/introspect")return introspect(request,db);
     if(path==="/v1/recovery/reset")return reset(request,db,env);
     if(path==="/v1/recovery/email/verify")return verifyEmail(request,db);
     return null;
