@@ -21,6 +21,30 @@ fn root_dir(game:&Path)->Result<PathBuf,String>{
     fs::create_dir_all(&folder).map_err(|e|e.to_string())?;
     Ok(folder)
 }
+/// A crash can leave a staging directory while some restored world files
+/// have already been moved into place. Do not launch or start another restore
+/// until the owner inspects the original rollback and the live world.
+pub fn require_clean_restore_state(game:&Path)->Result<(),String>{
+    let dir=game.join(".vis/backups");
+    let metadata=match fs::symlink_metadata(&dir){
+        Ok(meta)=>meta,
+        Err(err) if err.kind()==io::ErrorKind::NotFound=>return Ok(()),
+        Err(err)=>return Err(err.to_string())
+    };
+    if metadata.file_type().is_symlink()||!metadata.is_dir(){
+        return Err("La carpeta de copias no es un directorio seguro".into());
+    }
+    for item in fs::read_dir(dir).map_err(|e|e.to_string())?.take(5_000){
+        let item=item.map_err(|e|e.to_string())?;
+        let name=item.file_name().to_string_lossy().into_owned();
+        if name.starts_with(".restore-"){
+            // A missing or suspicious stage is *not* cleaned automatically:
+            // deleting the stage can destroy the only remaining original.
+            return Err("Se detectó una restauración interrumpida en .vis/backups. Revisá los datos y la carpeta .rollback-* antes de abrir Minecraft. VIS no eliminará ni sobrescribirá estos archivos automáticamente.".into());
+        }
+    }
+    Ok(())
+}
 fn validate_id(id:&str)->Result<(),String>{
     if !id.starts_with("vis-data-")||!id.ends_with(".zip")||id.len()>85||
         !id.bytes().all(|v|v.is_ascii_alphanumeric()||v==b'-'||v==b'.'){
@@ -102,6 +126,7 @@ fn create_internal(game:&Path,automatic:bool)->Result<Option<BackupInfo>,String>
     crate::minecraft::prepare_player_directory(game)?;
     let _locked=crate::minecraft::acquire_game_run(game)?;
     let backups=root_dir(game)?;
+    require_clean_restore_state(game)?;
     let stamp=secs();
     if automatic{
         // Do not make a meaningless ZIP before the very first game launch.
@@ -258,6 +283,7 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
     crate::minecraft::prepare_player_directory(game)?;
     let _locked=crate::minecraft::acquire_game_run(game)?;
     let backups=root_dir(game)?;
+    require_clean_restore_state(game)?;
     let archive_path=backups.join(id);
     let meta=fs::symlink_metadata(&archive_path).map_err(|_|"No existe esta copia".to_string())?;
     if meta.file_type().is_symlink()||!meta.is_file()||meta.len()>MAX_BYTES{
@@ -377,6 +403,16 @@ mod tests{
         assert!(manual.name.starts_with("vis-data-"));
         assert!(!manual.name.starts_with("vis-data-auto-"));
         assert_eq!(list(&root).unwrap().len(),2);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test] fn refuses_to_launch_with_interrupted_restore_staging(){
+        let root=std::env::temp_dir().join(format!("vis-restore-stage-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".vis/backups/.restore-crashed")).unwrap();
+        assert!(require_clean_restore_state(&root).is_err());
+        assert!(create_if_due(&root).is_err());
+        fs::remove_dir_all(root.join(".vis/backups/.restore-crashed")).unwrap();
+        assert!(require_clean_restore_state(&root).is_ok());
         fs::remove_dir_all(root).unwrap();
     }
     #[test] fn rejects_zip_slip_and_unsafe_categories(){
