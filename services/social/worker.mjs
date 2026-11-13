@@ -1036,6 +1036,13 @@ async function manageCommunityMembers(request,db,user) {
   const target=await db.prepare("SELECT id,role FROM social_users WHERE username=? AND disabled_at IS NULL")
     .bind(username).first();
   if(!target)bad(404,"Account not found");
+  // 'role' is caller-controlled. On revoke, read the actual role from D1,
+  // otherwise a manager could remove a creator by sending role='participant'.
+  const existingRole=await db.prepare(
+    "SELECT member_role FROM project_members WHERE project_id=? AND user_id=?"
+  ).bind(id,target.id).first();
+  if(action==="revoke"&&existingRole?.member_role==="creator"&&!await isGlobalAdmin(db,user))
+    bad(403,"Only global administrators can revoke a project creator");
   const project=await db.prepare("SELECT id FROM social_projects WHERE id=?").bind(id).first();
   if(!project)bad(404,"Project not found");
   if(action==="revoke"){
