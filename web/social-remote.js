@@ -110,7 +110,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
   let historyRequest=0;
   let realtimeSocket=null,realtimeRetry=null,realtimeFailures=0;
-  let realtimeConnecting=false,realtimeAttempt=0;
+  let realtimeConnecting=false,realtimeAttempt=0,realtimeOpenedAt=0;
   let wakeupQueued=false;
   // Cache only non-extractable derived AES CryptoKeys for this live identity.
   // A peer key change is still checked against its persisted TOFU pin.
@@ -124,7 +124,8 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     // Closing a WebSocket alone does not cancel a pending native HTTP request.
     realtimeAttempt++;realtimeConnecting=false;
     if(realtimeRetry){clearTimeout(realtimeRetry);realtimeRetry=null;}
-    const ws=realtimeSocket;realtimeSocket=null;realtimeFailures=0;wakeupQueued=false;
+    const ws=realtimeSocket;realtimeSocket=null;realtimeOpenedAt=0;
+    realtimeFailures=0;wakeupQueued=false;
     if(ws){
       ws.onopen=ws.onmessage=ws.onerror=ws.onclose=null;
       try{ws.close(1000,'VIS Nexo session changed');}catch{}
@@ -157,6 +158,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       ws.onopen=()=>{
         if(epoch!==sessionEpoch||realtimeSocket!==ws){ws.close();return;}
         realtimeFailures=0;
+        realtimeOpenedAt=Date.now();
         // A notification may have arrived between the initial state fetch
         // and upgrading the socket: fetch state once on successful connect.
         void sync();
@@ -174,6 +176,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       ws.onclose=()=>{
         if(epoch!==sessionEpoch||realtimeSocket!==ws)return;
         realtimeSocket=null;
+        realtimeOpenedAt=0;
         scheduleNext(epoch); // Immediate safe fallback to polling.
         scheduleRealtime(epoch);
       };
@@ -349,6 +352,12 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     } finally {
       if(epoch===sessionEpoch){
         busy = false;
+        // Revalidate socket authorization at least every 14 minutes. The
+        // server refuses notifications on leases older than 15 minutes.
+        if(realtimeSocket?.readyState===WebSocket.OPEN&&realtimeOpenedAt
+            &&Date.now()-realtimeOpenedAt>=14*60*1000){
+          try{realtimeSocket.close(1000,'Refreshing notification ticket');}catch{}
+        }
         if(wakeupQueued&&consecutiveErrors===0){
           wakeupQueued=false;
           if(interval){clearTimeout(interval);interval=null;}
