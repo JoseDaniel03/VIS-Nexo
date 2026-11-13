@@ -194,8 +194,17 @@ pub fn status(game:&Path)->Result<Vec<WorldCloudStatus>,String>{
             if !meta.is_file()||meta.file_type().is_symlink()||meta.len()!=link.bytes{
                 return Err("La copia fue movida o alterada".into());
             }
+            if link.sha256.len()!=64||!link.sha256.bytes().all(|b|b.is_ascii_hexdigit()) {
+                return Err("Falta el comprobante SHA-256 del respaldo".into());
+            }
             if fingerprint!=link.fingerprint {return Ok(("orange","El mundo cambió: necesita una copia nueva".into()));}
-            Ok(("green","Copia local creada; comprobá la sincronización en tu proveedor".into()))
+            // Small archives receive an immediate integrity check. Large ones
+            // are verified on restore to avoid blocking the launcher by hashing
+            // multi-gigabyte worlds every time the user opens the Nube panel.
+            if link.bytes<=64*1024*1024&&digest_file(archive)?!=link.sha256{
+                return Err("La copia local no coincide con su SHA-256".into());
+            }
+            Ok(("green","Copia local presente; revisá que el proveedor haya terminado de sincronizar".into()))
         })();
         let (status,detail)=match state {Ok((s,d))=>(s.to_owned(),d),Err(error)=>("red".into(),error)};
         out.push(WorldCloudStatus{world,status,detail,provider:link.provider.clone(),
@@ -298,6 +307,34 @@ pub fn restore_as_copy(game:&Path,world:&str)->Result<String,String>{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn stable_backup_folder_survives_instance_moves(){
+        let nonce=format!("{}-{}",std::process::id(),now());
+        let base=std::env::temp_dir().join(format!("vis-world-cloud-test-{nonce}"));
+        let sync=base.join("sync");
+        let a=base.join("a");let b=base.join("b");
+        fs::create_dir_all(&sync).unwrap();
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let namespace="0123456789abcdef0123456789abcdef";
+        let first=location(&a,"Mundo",&sync,namespace).unwrap();
+        let second=location(&b,"Mundo",&sync,namespace).unwrap();
+        assert_eq!(first,second,"Cloud backup location must follow the portable instance");
+        fs::remove_dir_all(base).unwrap();
+    }
+    #[cfg(unix)]
+    #[test] fn rejects_symlinked_destination(){
+        use std::os::unix::fs::symlink;
+        let nonce=format!("{}-{}",std::process::id(),now());
+        let base=std::env::temp_dir().join(format!("vis-cloud-links-test-{nonce}"));
+        let game=base.join("game");let sync=base.join("sync");
+        let other=base.join("outside");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&sync).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        symlink(&other,sync.join("VIS-Nexo-Worlds")).unwrap();
+        assert!(location(&game,"Mundo",&sync,"0123456789abcdef0123456789abcdef").is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
     #[test] fn rejects_world_path_traversal(){
         assert!(!valid_name("../secrets"));
         assert!(!valid_name("folder\\..\\data"));
