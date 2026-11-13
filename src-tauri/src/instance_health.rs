@@ -1,5 +1,5 @@
 //! Read-only instance integrity checks and explicit, non-destructive repairs.
-use std::{fs,path::Path};
+use std::{fs,io::{Read,Seek,SeekFrom},path::Path};
 use serde::Serialize;
 #[derive(Serialize)]
 pub struct HealthIssue{pub code:String,pub detail:String,pub level:String,pub repairable:bool}
@@ -7,6 +7,7 @@ pub struct HealthIssue{pub code:String,pub detail:String,pub level:String,pub re
 pub struct HealthReport{
     pub exists:bool,pub worlds:usize,pub valid_worlds:usize,
     pub servers_file:bool,pub resource_packs:usize,pub repairable:usize,
+    pub crash_reports:usize,pub last_error_hint:String,
     pub issues:Vec<HealthIssue>,
 }
 const REQUIRED:&[&str]=&["saves","resourcepacks","shaderpacks","mods","config",
@@ -18,10 +19,38 @@ fn issue(report:&mut HealthReport,code:&str,detail:&str,level:&str,repairable:bo
         level:level.to_owned(),repairable
     });
 }
+// Report only safe classifications: never surface raw logs, session tokens,
+// remote player data, private paths or lines copied from untrusted mods.
+fn classify_log_tail(contents:&str)->&'static str{
+    let text=contents.to_ascii_lowercase();
+    if text.contains("java.lang.outofmemoryerror")||text.contains("out of memory error"){
+        "Posible falta de memoria. Revisá RAM asignada a la instancia y la cantidad de mods."
+    }else if text.contains("modresolutionexception")||text.contains("incompatible mod set")
+        ||text.contains("mixinapplyerror")||text.contains("failed to load mods"){
+        "Posible incompatibilidad de mods. Revisá versión de Minecraft, Fabric y dependencias."
+    }else if text.contains("failed to verify username")||text.contains("invalid session"){
+        "Posible sesión oficial expirada. Volvé a iniciar sesión con Microsoft."
+    }else if text.contains("glfw error")||text.contains("opengl error"){
+        "Posible problema gráfico. Revisá controladores GPU y compatibilidad de shaders."
+    }else{""}
+}
+fn latest_log_hint(game:&Path)->String{
+    let path=game.join("logs/latest.log");
+    let Ok(meta)=fs::symlink_metadata(&path) else{return String::new()};
+    if meta.file_type().is_symlink()||!meta.is_file(){return String::new();}
+    let Ok(mut file)=fs::File::open(&path) else{return String::new()};
+    // 128 KiB tail limit, no full-log upload or exposure to the frontend.
+    if file.seek(SeekFrom::Start(meta.len().saturating_sub(128*1024))).is_err(){
+        return String::new();
+    }
+    let mut bytes=Vec::new();
+    if file.take(128*1024).read_to_end(&mut bytes).is_err(){return String::new();}
+    classify_log_tail(&String::from_utf8_lossy(&bytes)).to_owned()
+}
 pub fn inspect(game:&Path)->Result<HealthReport,String>{
  let mut result=HealthReport{
     exists:game.exists(),worlds:0,valid_worlds:0,servers_file:false,
-    resource_packs:0,repairable:0,issues:Vec::new()
+    resource_packs:0,repairable:0,crash_reports:0,last_error_hint:String::new(),issues:Vec::new()
  };
  if !result.exists{
     issue(&mut result,"game-missing","No existe la carpeta de datos de la instancia","warning",true);
@@ -97,6 +126,26 @@ pub fn inspect(game:&Path)->Result<HealthReport,String>{
        if ty.is_file()||ty.is_dir(){result.resource_packs+=1;}
     }
  }
+ // Count only metadata of readable, regular crash report files.
+ let crash_dir=game.join("crash-reports");
+ match fs::symlink_metadata(&crash_dir){
+   Ok(meta) if meta.file_type().is_symlink()||!meta.is_dir()=>
+      issue(&mut result,"unsafe-crash-directory",
+          "crash-reports contiene una ruta insegura","danger",false),
+   Ok(_)=>{
+      for entry in fs::read_dir(&crash_dir).map_err(|e|e.to_string())?.take(500){
+          let entry=entry.map_err(|e|e.to_string())?;
+          let meta=fs::symlink_metadata(entry.path()).map_err(|e|e.to_string())?;
+          if meta.is_file()&&!meta.file_type().is_symlink()
+             &&entry.path().extension().is_some_and(|ext|ext=="txt"){
+             result.crash_reports+=1;
+          }
+      }
+   },
+   Err(e) if e.kind()==std::io::ErrorKind::NotFound=>{},
+   Err(e)=>issue(&mut result,"unreadable-crash-directory",&e.to_string(),"warning",false),
+ }
+ result.last_error_hint=latest_log_hint(game);
  Ok(result)
 }
 pub fn repair_missing(game:&Path)->Result<HealthReport,String>{
@@ -117,6 +166,11 @@ pub fn repair_missing(game:&Path)->Result<HealthReport,String>{
 #[cfg(test)]
 mod tests{
  use super::*;
+ #[test]fn classifies_logs_without_exposing_content(){
+     assert!(classify_log_tail("MixinApplyError: secret-123").contains("mods"));
+     assert!(classify_log_tail("java.lang.OutOfMemoryError: token-xyz").contains("memoria"));
+     assert_eq!(classify_log_tail("Minecraft opened normally"),"");
+ }
  #[test]fn detects_incomplete_restore_and_refuses_repair(){
      let dir=std::env::temp_dir().join(format!("vis-health-staged-{}",std::process::id()));
      let _=fs::remove_dir_all(&dir);
