@@ -27,6 +27,8 @@ function resetAccountView(){
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();publicSkinLookup=null;
  for(const path of Object.keys(assetCache))delete assetCache[path];
  previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
+ previewLoading.clear();
+ chatWith='';chatWindowSize=100;friendFilter='';
 }
 async function onceOperation(key,operation){
  if(pendingOperations.has(key))return false;
@@ -295,7 +297,6 @@ function rememberPreview(path,source){
     delete assetCache[oldest];
   }
 }
-let previewBackgroundBusy=false;
 async function compactPreview(path,source){
   if(typeof source!=='string'||!source.startsWith('data:image/')||source.length<512*1024)return source;
   if([db.user?.skin,db.user?.cape,db.user?.avatar_layer].includes(path))return source;
