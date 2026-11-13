@@ -961,7 +961,7 @@ async function communityOverview(request,db,user) {
   const [settings,members,media,requestRow,pending]=await Promise.all([
     db.prepare("SELECT admission,play_access FROM project_settings WHERE project_id=?").bind(id).first(),
     db.prepare(
-      "SELECT u.username,u.public_handle,u.display_name,m.member_role,m.can_play,m.joined_at "+
+      "SELECT u.username,u.public_handle,u.display_name,u.presence,u.current_game,m.member_role,m.can_play,m.joined_at "+
       "FROM project_members m JOIN social_users u ON u.id=m.user_id "+
       "WHERE m.project_id=? AND u.disabled_at IS NULL ORDER BY m.joined_at ASC LIMIT 250"
     ).bind(id).all(),
