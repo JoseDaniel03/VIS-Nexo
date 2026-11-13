@@ -232,8 +232,13 @@ pub(crate) async fn social_cloud_login(
     backend: State<'_,Mutex<Backend>>, social: State<'_,Mutex<SocialSession>>,
     identifier: String, password: String
 ) -> Result<crate::Snapshot,String> {
-    if identifier.trim().is_empty() || password.is_empty() {
-        return Err("Ingresá tu usuario o ID y contraseña".into());
+    // @handle is a friendly login address. The server still authenticates
+    // against the original immutable username bound to the Ed25519 proof.
+    let identifier=identifier.trim().trim_start_matches('@').to_ascii_lowercase();
+    if !(3..=24).contains(&identifier.len()) ||
+        !identifier.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_') ||
+        password.is_empty() {
+        return Err("Ingresá tu @usuario o ID pública y contraseña".into());
     }
     let data = tauri::async_runtime::spawn_blocking(move || {
         let http=client()?;
