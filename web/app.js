@@ -76,7 +76,7 @@ async function beginMicrosoftLogin(){
        db=result.snapshot;
        microsoftGamertag=result.minecraft_name;
        premiumCosmetics=null;
-       page='home';await refreshAssets();render();
+       page='home';render();void refreshAssets().catch(()=>{});
        message('Microsoft conectado · Minecraft '+result.minecraft_name);
        // Minecraft authentication and VIS Social are separate identities.
        // Connect the user's VIS Portals session too (never send a Minecraft token).
@@ -570,9 +570,8 @@ async function apply(name,args={},success=''){
     if(generation!==accountGeneration)return false;
     db=updated;
     mergeSocialView();
-    await refreshAssets();
-    if(generation!==accountGeneration)return false;
     render();
+    void refreshAssets().catch(()=>{});
     if(success)message(success);
     return true;
   }catch(e){if(generation===accountGeneration)message(String(e),true);return false;}
@@ -1545,10 +1544,6 @@ function render(){
 }
 function navigate(to,id='') {
  if(to==='profile'&&microsoftGamertag&&!premiumCosmetics)void loadPremiumCosmetics();
- if(to==='project'&&native&&db.user){
-   // Current project images are prioritized; lazy prefetch runs asynchronously.
-   void Promise.resolve().then(()=>refreshAssets()).then(scheduleSocialRender).catch(()=>{});
- }
  const nextId=id||selectedId;
  if(db.user && page===to && (to!=='project'||nextId===selectedId)){
    root.querySelector('#main-scroll')?.scrollTo({top:0,behavior:prefs.reducedMotion?'instant':'smooth'});
@@ -1559,6 +1554,7 @@ function navigate(to,id='') {
    page=to;
    if(to==='project')activeFeed='news';
    contextMenu=null;render();
+   if(to==='project'&&native&&db.user)void refreshAssets().catch(()=>{});
    root.querySelector('#main-scroll')?.scrollTo(0,0);
  },{reducedMotion:prefs.reducedMotion});
 }
@@ -1718,7 +1714,7 @@ root.addEventListener('submit',async event=>{
        await command(authMode==='register'?'register':'login',
          authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
    }
-   resetAccountView();page='home';await refreshAssets();render();message(`Sesión iniciada · ${db.user?.username}`);
+   resetAccountView();page='home';render();void refreshAssets().catch(()=>{});message(`Sesión iniciada · ${db.user?.username}`);
    if(native&&db.mode!=='offline')void connectSocial(cloud);
   }catch(e){message(String(e),true)}finally{authBusy=false;}
   return;
@@ -2441,9 +2437,13 @@ async function boot(){
     if(page==='minecraft'||page==='instances')render();
   }).catch(()=>{});
 }
- try {db=await command('get_state');await refreshAssets();await refreshDownloadJobs();}
+ try {db=await command('get_state');}
  catch(e){message(`No se pudo inicializar el cliente: ${String(e)}`,true);}
  render();
+ if(db.user){
+   void refreshAssets().catch(()=>{});
+   void refreshDownloadJobs().then(()=>{if(page==='settings')scheduleSocialRender();}).catch(()=>{});
+ }
  if(native){void checkAppUpdate(true);void refreshCloudCatalog(true);}
 }
 boot();
