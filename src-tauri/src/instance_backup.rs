@@ -337,12 +337,14 @@ pub fn restore(game:&Path,id:&str,replace:bool)->Result<RestoreInfo,String>{
     })();
     if let Err(ref cause)=result {
         let recovery=revert_applied(&applied);
-        let _=fs::remove_dir_all(&stage);
         return match recovery {
-            Ok(())=>Err(format!("Restauración interrumpida: {cause}. Los archivos modificados se revirtieron.")),
+            Ok(())=>{
+                let _=fs::remove_dir_all(&stage);
+                Err(format!("Restauración interrumpida: {cause}. Los archivos modificados se revirtieron."))
+            },
             Err(err)=>Err(format!(
-                "Restauración interrumpida: {cause}. Recuperación incompleta: {err}. Originales en {}",
-                rollback.display()
+                "Restauración interrumpida: {cause}. Recuperación incompleta: {err}. Originales en {}. Staging conservado en {} para bloquear nuevos inicios hasta revisión manual.",
+                rollback.display(),stage.display()
             ))
         };
     }
