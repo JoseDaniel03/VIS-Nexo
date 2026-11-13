@@ -10,7 +10,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path, sync::Mutex, time::Duration};
+use std::{fs, path::Path, sync::{Mutex,OnceLock}, time::Duration};
 use tauri::State;
 
 const DEFAULT_URL: &str = "https://vis-social.defreitascarranza-845.workers.dev";
@@ -36,13 +36,21 @@ fn base_url() -> Result<String, String> {
     Ok(raw.to_owned())
 }
 
+// reqwest::blocking::Client is internally Arc-backed: cheap cloning preserves
+// TLS sessions, idle HTTP connections and DNS pooling across 2-9 s polls.
+static SOCIAL_HTTP: OnceLock<Client> = OnceLock::new();
 fn client() -> Result<Client, String> {
-    Client::builder()
+    if let Some(http)=SOCIAL_HTTP.get(){return Ok(http.clone())}
+    let built=Client::builder()
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(7))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(4)
+        .tcp_keepalive(Duration::from_secs(45))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|_| "No se pudo crear el cliente de VIS Social".to_owned())
+        .map_err(|_| "No se pudo crear el cliente de VIS Social".to_owned())?;
+    Ok(SOCIAL_HTTP.get_or_init(||built).clone())
 }
 
 fn request(
