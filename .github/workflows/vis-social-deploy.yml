@@ -19,6 +19,9 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      VIS_CEIBO_RESEND_API_KEY: ${{ secrets.VIS_CEIBO_RESEND_API_KEY }}
+      VIS_CEIBO_MFA_ENCRYPTION_KEY: ${{ secrets.VIS_CEIBO_MFA_ENCRYPTION_KEY }}
+      VIS_CEIBO_FROM_EMAIL: ${{ vars.VIS_CEIBO_FROM_EMAIL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,12 +36,27 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing CLOUDFLARE_API_TOKEN in GitHub Actions secrets'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID in GitHub Actions secrets/variables'; exit 1; }
+      - name: Validate VIS Ceibo Recovery configuration (without logging secrets)
+        shell: bash
+        run: |
+          test -n "$VIS_CEIBO_RESEND_API_KEY" || { echo 'Missing VIS_CEIBO_RESEND_API_KEY'; exit 1; }
+          test -n "$VIS_CEIBO_MFA_ENCRYPTION_KEY" || { echo 'Missing VIS_CEIBO_MFA_ENCRYPTION_KEY'; exit 1; }
+          test -n "$VIS_CEIBO_FROM_EMAIL" || { echo 'Missing VIS_CEIBO_FROM_EMAIL'; exit 1; }
+          node -e "const c=process.env.VIS_CEIBO_MFA_ENCRYPTION_KEY;if(!/^[A-Za-z0-9+/]*={0,2}$/.test(c)||Buffer.from(c,'base64').length!==32)process.exit(1)"
       - name: Apply VIS Social schema to existing D1 database
         working-directory: services/social
         run: npx --yes wrangler@4 d1 migrations apply DB --remote
       - name: Deploy isolated VIS Social Worker
         working-directory: services/social
         run: npx --yes wrangler@4 deploy
+      - name: Configure VIS Ceibo Recovery secrets in Cloudflare Worker
+        shell: bash
+        working-directory: services/social
+        run: |
+          set -euo pipefail
+          printf '%s' "$VIS_CEIBO_RESEND_API_KEY" | npx --yes wrangler@4 secret put RESEND_API_KEY
+          printf '%s' "$VIS_CEIBO_MFA_ENCRYPTION_KEY" | npx --yes wrangler@4 secret put CEIBO_MFA_ENCRYPTION_KEY
+          printf '%s' "$VIS_CEIBO_FROM_EMAIL" | npx --yes wrangler@4 secret put CEIBO_FROM_EMAIL
       - name: Verify VIS Social production health
         shell: bash
         env:
