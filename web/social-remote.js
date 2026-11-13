@@ -108,6 +108,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   let state = null, keys = null, privateDb = null, currentUser = '';
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
   let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
+  let historyRequest=0;
   // Cache only non-extractable derived AES CryptoKeys for this live identity.
   // A peer key change is still checked against its persisted TOFU pin.
   const pinnedPeers=new Map(), derivedKeys=new Map();
@@ -175,6 +176,13 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     await store(privateDb, 'messages', 'readwrite',
       { ...item, account: currentUser, key: currentUser + ':' + item.id });
   }
+  async function refreshLocalMessages(){
+    const request=++historyRequest;
+    const fresh=await localHistory();
+    // Sending and receiving can overlap; an older IndexedDB read must not
+    // overwrite a newer one that already contains the new message.
+    if(request===historyRequest)messages=fresh;
+  }
   function notify(force = false) {
     if (!state) return;
     const fingerprint = JSON.stringify({
@@ -241,7 +249,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       // trip must not delay chat rendering; an ACK error leaves the pending
       // envelope on the server so it can be re-delivered safely.
       state = fresh;
-      if(newMessages)messages = await localHistory();
+      if(newMessages)await refreshLocalMessages();
       if(!valid())return;
       consecutiveErrors=0;
       status(securityError?'security_warning':'connected',securityError);
@@ -260,7 +268,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         if(interval){clearTimeout(interval);interval=null;}
         sessionEpoch++;
         state=null;keys=null;messages=[];lastFingerprint='';currentUser='';
-        pinnedPeers.clear();derivedKeys.clear();
+        historyRequest++;pinnedPeers.clear();derivedKeys.clear();
         if(privateDb){privateDb.close();privateDb=null;}
         status('disconnected','La sesión VIS Social expiró. Volvé a conectar la cuenta.');
       }else status('degraded',detail);
@@ -288,7 +296,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       await rpc('/v1/keys', 'POST', { public_key: keys.publicKey });
       if(epoch!==sessionEpoch)return false;
       state = remote;
-      messages = await localHistory();
+      await refreshLocalMessages();
       if(epoch!==sessionEpoch)return false;
       lastHeartbeat = 0; consecutiveErrors=0;
       notify(true);
@@ -324,7 +332,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     window.removeEventListener('online', onOnline);
     const wasConnected=!!state;
     state=null;keys=null;currentUser='';messages=[];lastFingerprint='';
-    pinnedPeers.clear();derivedKeys.clear();
+    historyRequest++;pinnedPeers.clear();derivedKeys.clear();
     lastHeartbeat=0;consecutiveErrors=0;busy=false;
     if(privateDb){privateDb.close();privateDb=null;}
     if(wasConnected)await command('social_disconnect').catch(()=>{});
@@ -376,7 +384,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       id, from, to, body: body.trim(), created: new Date().toISOString()
     });
     if(!valid())return;
-    messages = await localHistory();
+    await refreshLocalMessages();
     if(valid())notify(true);
   }
   async function getAvatar(username) {
