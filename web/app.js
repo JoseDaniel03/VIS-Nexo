@@ -825,7 +825,8 @@ function projectCommunitySection(p){
    const members=(c.members||[]).filter(x=>x.member_role===key);
    return '<div class="vis-community-role"><h3>'+esc(label)+' <small>'+members.length+'</small></h3>'+
      (members.length?members.map(m=>'<div class="vis-community-member"><span><b>'+esc(m.display_name||m.username)+'</b> <small>@'+esc(m.public_handle||m.username)+'</small></span>'+
-        (m.can_play?'<span class="vis-access-yes">Puede jugar</span>':'')+'</div>').join(''):'<p class="muted">Sin integrantes todavía</p>')+'</div>';
+        (m.can_play?'<span class="vis-access-yes">Puede jugar</span>':'')+
+        (m.presence==='online'&&m.current_game?'<small title="Estado declarado por el jugador, no verificado por el servidor">'+I('game',12)+' '+esc(m.current_game)+'</small>':'')+'</div>').join(''):'<p class="muted">Sin integrantes todavía</p>')+'</div>';
  }).join('');
  const join=c.role?'':'<div class="vis-community-join">'+
    '<p>'+esc(c.admission==='open'?'Podés unirte libremente.':c.admission==='request'?'Podés solicitar una invitación para participar.':'Se requiere invitación de los responsables.')+'</p>'+
