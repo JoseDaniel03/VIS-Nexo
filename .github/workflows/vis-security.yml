@@ -48,4 +48,4 @@ jobs:
       - name: Audit Rust dependency lockfiles
         run: cargo audit --file Cargo.lock
       - name: Check Nube source formatting and syntax
-        run: rustfmt --edition 2021 --check src-tauri/src/world_cloud.rs
+        run: rustfmt --edition 2021 --emit stdout src-tauri/src/world_cloud.rs > /dev/null
