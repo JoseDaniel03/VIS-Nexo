@@ -66,7 +66,7 @@ jobs:
           python3 tools/check_android_companion.py
       - name: Initialize Android project non-interactively
         working-directory: mobile
-        run: ../node_modules/.bin/tauri android init --ci
+        run: npm run tauri -- android init --ci
       - name: Verify Android INTERNET permission and package isolation
         shell: bash
         run: |
@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ../node_modules/.bin/tauri android build --debug --apk --target aarch64 --ci
+          npm run tauri -- android build --debug --apk --target aarch64 --ci
       - name: Inspect APK and generate SHA-256
         shell: bash
         run: |
