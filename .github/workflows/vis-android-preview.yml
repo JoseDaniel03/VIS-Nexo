@@ -68,6 +68,8 @@ jobs:
         run: |
           node --check mobile/web/app.js
           node --check mobile/web/features.js
+          node --check mobile/web/error-dialog.js
+          node tools/test_vis_error_dialog.mjs
           node tools/test_vis_android_features.mjs
           python3 tools/check_android_companion.py
           node tools/test_social_worker.mjs
