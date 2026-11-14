@@ -63,8 +63,8 @@ export function createWorldsPortals(command,social,account,choose,onError){
     if(identity!==owner())throw Error('Cambió la cuenta activa');
     await command('portals_command',{pid:selected.pid,action:'join',code});
   }
-  async function stop(){
-    const selected=await game();if(!selected)return;
+  async function stop(preferredPid){
+    const selected=await game(preferredPid);if(!selected)return;
     await command('portals_command',{pid:selected.pid,action:'stop',code:null});
     const room=rooms.get(selected.pid);if(room)await close(selected.pid,room);
   }
