@@ -363,29 +363,66 @@ pub(crate) async fn social_recovery_reset(
 #[tauri::command]
 pub(crate) async fn social_change_cloud_password(
     backend:State<'_,Mutex<Backend>>,social:State<'_,Mutex<SocialSession>>,
-    password:String,confirm:String
+    current_password:String,password:String,confirm:String,mfa_code:Option<String>
 )->Result<Value,String>{
-    if password!=confirm||!(10..=128).contains(&password.len()){
-        return Err("Las contraseñas deben coincidir y tener entre 10 y 128 caracteres".into());
+    if password!=confirm||!(10..=128).contains(&password.len())||
+       !(10..=128).contains(&current_password.len()){
+        return Err("Las contraseñas deben tener entre 10 y 128 caracteres y coincidir".into());
     }
     let username=backend.lock().map_err(|_|"Cuenta local bloqueada")?
         .active_user.clone().ok_or("Iniciá sesión en VIS Ceibo")?;
-    let token={
+    {
         let session=social.lock().map_err(|_|"Sesión Social bloqueada")?;
-        if session.username.as_deref()!=Some(username.as_str()){
-            return Err("La sesión no pertenece a esta cuenta".into());
+        if session.username.as_deref()!=Some(username.as_str())||session.bearer.is_none(){
+            return Err("La cuenta VIS Cloud no está autenticada".into());
         }
-        session.bearer.clone().ok_or("Necesitás iniciar sesión VIS Cloud")?
-    };
+    }
     let result=tauri::async_runtime::spawn_blocking(move||{
+        let http=client()?;let base=base_url()?;
+        // Reauthenticate with the CURRENT password using the same device-free
+        // Argon2id/Ed25519 challenge protocol as login. Never transmit it.
+        let challenge=request(&http,&base,"/v1/accounts/login/challenge","POST",
+            Some(&json!({"identifier":username})),None)?;
+        let salt=challenge.get("salt").and_then(Value::as_str)
+            .ok_or("Desafío de contraseña inválido")?;
+        let signed_user=challenge.get("username").and_then(Value::as_str)
+            .ok_or("Identidad de autenticación inválida")?;
+        if signed_user!=username{return Err("La identidad VIS no coincide".into());}
+        if challenge.get("kdf").and_then(Value::as_str)!=Some("argon2id-19m-t2"){
+            return Err("Método criptográfico no compatible".into());
+        }
+        let challenge_id=challenge.get("challenge_id").and_then(Value::as_str)
+            .ok_or("Identificador de desafío inválido")?;
+        let nonce=challenge.get("nonce").and_then(Value::as_str)
+            .ok_or("Desafío inválido")?;
+        let salt_bytes=STANDARD.decode(salt).map_err(|_|"Salt inválido")?;
+        let signer=cloud_signing_key(&current_password,&salt_bytes)?;
+        let proof=format!("VIS-CLOUD-AUTH-V2\n{username}\n{challenge_id}\n{nonce}");
+        let signature=STANDARD.encode(signer.sign(proof.as_bytes()).to_bytes());
+        let fresh=request(&http,&base,"/v1/accounts/login/verify","POST",
+            Some(&json!({"identifier":username,"challenge_id":challenge_id,
+                "signature":signature})),None)?;
+        if fresh.get("username").and_then(Value::as_str)!=Some(username.as_str()){
+            return Err("Autenticación VIS inconsistente".into());
+        }
+        let token=fresh.get("token").and_then(Value::as_str)
+            .ok_or("No se obtuvo una sesión reciente")?;
+        if let Some(code)=mfa_code.filter(|v|!v.trim().is_empty()){
+            let payload=if code.chars().all(|c|c.is_ascii_digit())&&code.len()==6 {
+                json!({"code":code})
+            }else{json!({"recovery_code":code.trim()})};
+            request(&http,&base,"/v1/account/mfa/verify","POST",
+                Some(&payload),Some(token))?;
+        }
         let payload=cloud_registration_payload(&username,&password)?;
-        request(&client()?,&base_url()?,"/v1/account/password/change","POST",
-            Some(&payload),Some(&token))
+        request(&http,&base,"/v1/account/password/change","POST",
+            Some(&payload),Some(token))
     }).await.map_err(|_|"Cambio de contraseña interrumpido".to_string())??;
     let mut active=social.lock().map_err(|_|"Sesión Social bloqueada")?;
     active.bearer=None;
     Ok(result)
 }
+
 #[tauri::command]
 pub(crate) async fn social_rebind_device(
     backend:State<'_,Mutex<Backend>>,social:State<'_,Mutex<SocialSession>>
