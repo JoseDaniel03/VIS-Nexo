@@ -368,7 +368,9 @@ async fn mobile_action(
     let reply=tauri::async_runtime::spawn_blocking(move||{
         request(path,method,body.as_ref(),Some(&token))
     }).await.map_err(|_|"Se interrumpió la operación VIS")??;
-    nonce_guard(&state.lock().map_err(|_|"Sesión VIS ocupada")?,generation)?;
+    let guard=state.lock().map_err(|_|"Sesión VIS ocupada")?;
+    nonce_guard(&guard,generation)?;
+    drop(guard);
     Ok(reply)
 }
 #[tauri::command]
