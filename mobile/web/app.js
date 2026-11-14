@@ -250,7 +250,11 @@ document.addEventListener('click',async e=>{
   const act=button.dataset.action;
   if(act==='tab'){
     state.view=button.dataset.tab||'home';state.community=null;screen();
-    if(state.view==='account')void features.refreshSecurity();
+    if(state.view==='account'){
+      void features.refreshSecurity();
+      void features.refreshCosmetics();
+      void features.refreshMicrosoft();
+    }
     if(state.view==='instances')void features.refreshInstances();
     return;
   }
