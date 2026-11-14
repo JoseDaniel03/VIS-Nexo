@@ -662,7 +662,7 @@ function ceiboRecoveryView(){
     '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-new" name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
     '<label class="field-label" for="ceibo-reset-confirm">Confirmarla</label>'+
     '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-confirm" name="confirm" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
-    '<label class="field-label" for="ceibo-reset-backup">Código MFA de emergencia (solo cuentas administradoras)</label>'+
+    '<label class="field-label" for="ceibo-reset-backup">Código MFA de emergencia (cuentas con MFA o administradoras)</label>'+
     '<div class="auth-input">'+I('shield',17)+'<input id="ceibo-reset-backup" name="recovery_code" autocomplete="off" placeholder="Código de respaldo, si corresponde"/></div>'+
     '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Cambiar contraseña</button></form>':
     '<form id="ceibo-recovery-start-form" class="auth-form">'+
