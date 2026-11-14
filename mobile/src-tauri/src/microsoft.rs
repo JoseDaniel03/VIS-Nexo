@@ -1,7 +1,7 @@
 //! Microsoft account linking for VIS Nexo Android. Device-code public OAuth;
 //! tokens stay exclusively in Rust memory and NEVER enter the WebView, VIS Ceibo,
 //! intent extras, crash reports, or local profiles. Optional to VIS login.
-use super::{Session,nonce_guard,validate_username};
+use super::{Session,validate_username};
 use reqwest::{blocking::Client,blocking::Response,Url};
 use serde::Serialize;
 use serde_json::{json,Value};
@@ -157,10 +157,10 @@ fn owner(s:&Session)->Result<(String,u64),String>{
 pub(crate) async fn mobile_ms_begin(
     session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>
 )->Result<DeviceDisplay,String>{
-    let (name,epoch)=owner(&session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
+    let (name,epoch)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
     let (display,code,ttl)=tauri::async_runtime::spawn_blocking(begin_device)
       .await.map_err(|_|"Autorización Microsoft interrumpida")??;
-    let (current,generation)=owner(&session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
+    let (current,generation)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
     if current!=name||generation!=epoch{return Err("La cuenta VIS cambió durante la vinculación".into());}
     let mut m=ms.lock().map_err(|_|"Microsoft ocupado")?;
     m.clear();
@@ -172,7 +172,7 @@ pub(crate) async fn mobile_ms_begin(
 pub(crate) fn mobile_ms_status(
     session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>
 )->Result<Value,String>{
-    let (name,epoch)=owner(&session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
+    let (name,epoch)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
     let m=ms.lock().map_err(|_|"Microsoft ocupado")?;
     if let Some(v)=m.verified.as_ref().filter(|v|v.owner==name&&v.epoch==epoch&&Instant::now()<v.expires){
         return Ok(json!({"status":"connected","name":v.name,"uuid":v.uuid}));
@@ -191,7 +191,7 @@ pub(crate) fn mobile_ms_disconnect(ms:State<'_,Mutex<MicrosoftState>>)->Result<V
 pub(crate) async fn mobile_ms_poll(
     session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>
 )->Result<Value,String>{
-    let (name,epoch)=owner(&session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
+    let (name,epoch)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
     let pending={
         let mut m=ms.lock().map_err(|_|"Microsoft ocupado")?;
         let Some(p)=m.pending.as_mut() else {return Ok(json!({"status":"idle"}));};
@@ -210,7 +210,7 @@ pub(crate) async fn mobile_ms_poll(
           other=>Ok((other,None))
        }
     }).await.map_err(|_|"Consulta Microsoft interrumpida")?;
-    let (cur,cur_epoch)=owner(&session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
+    let (cur,cur_epoch)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
     let mut m=ms.lock().map_err(|_|"Microsoft ocupado")?;
     if cur!=name||cur_epoch!=epoch||
       m.pending.as_ref().map(|p|p.code.as_str())!=Some(key.as_str()){
