@@ -1029,15 +1029,8 @@ fn delete_instance(
         // Destructive deletion is only possible for directories created by
         // VIS's new Instancias/<name> layout. Legacy arbitrary paths are
         // deliberately restricted to unlinking the library entry.
-        let dir=minecraft::instance_dir(&s.data_root,&username,&current)?;
-        let parent=dir.parent().ok_or("La instancia no tiene carpeta padre")?;
-        if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
-            return Err("Por seguridad, los archivos de las instalaciones antiguas solo pueden eliminarse manualmente. Podés quitar la instancia de VIS conservando los mundos.".into());
-        }
-        let library=parent.parent().ok_or("Biblioteca de instancia inválida")?;
-        if instance_guard::managed_child(library,&name)?!=dir{
-            return Err("La carpeta no coincide con la instancia administrada por VIS".into());
-        }
+        let folder=minecraft::instance_dir(&s.data_root,&username,&current)?;
+        let dir=instance_guard::deletion_target(&folder,&current.name,&current.project_id,&s.data_root)?;
         for account in &s.storage.data.accounts{
             for other in s.storage.prefs(&account.username).instances{
                 if account.username==username && other.project_id==project_id && other.name==name {continue;}
@@ -1047,16 +1040,6 @@ fn delete_instance(
             }
         }
         if dir.exists(){
-            let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
-            if meta.file_type().is_symlink()||!meta.is_dir(){
-                return Err("La carpeta de la instancia no es un directorio seguro".into());
-            }
-            let has_marker=dir.join(".vis/instance.json").is_file()
-                ||dir.join(".vslauncher/install.json").is_file()
-                ||dir.join(".vis/horizon.json").is_file();
-            if !has_marker && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
-                return Err("La carpeta contiene datos sin marca de instalación VIS. Solo puede quitarse de la biblioteca; no se borrarán archivos desconocidos.".into());
-            }
             // Use the same per-game guard as Java/Horizon and backup/restore.
             // Never delete a directory that another VIS process is writing to.
             let _deletion_guard=minecraft::acquire_game_run(&dir)?;
@@ -1068,8 +1051,8 @@ fn delete_instance(
     Ok(s.snapshot())
 }
 /// Explicit two-step bulk removal. Unlinking never touches Minecraft files.
-/// Physical removal is separately opted-in and allowed only for safely
-/// recognized VIS-managed Instancias/<name> directories after full preflight.
+/// Physical removal accepts only verified VIS installations, including older
+/// paths, after checking every selected folder and all other profiles.
 #[derive(Deserialize)]
 struct InstanceDeleteKey { project_id:String, name:String, #[serde(default)] source_owner:String }
 #[tauri::command]
@@ -1119,15 +1102,8 @@ fn delete_instances_batch(
     let mut folders=Vec::new();
     if erase_files {
         for instance in &chosen {
-            let dir=minecraft::instance_dir(&s.data_root,&owner,instance)?;
-            let parent=dir.parent().ok_or("Carpeta de instancia inválida")?;
-            if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
-                return Err("La eliminación física solo permite instancias nuevas de VIS bajo Instancias/<nombre>. Desmarcá borrar archivos para conservar las instalaciones antiguas.".into());
-            }
-            let library=parent.parent().ok_or("Biblioteca inválida")?;
-            if instance_guard::managed_child(library,&instance.name)?!=dir {
-                return Err("La carpeta seleccionada no corresponde con una instancia VIS administrada".into());
-            }
+            let source=minecraft::instance_dir(&s.data_root,&owner,instance)?;
+            let dir=instance_guard::deletion_target(&source,&instance.name,&instance.project_id,&s.data_root)?;
             // A saved game may be owned/referenced by another local account.
             for account in &s.storage.data.accounts {
                 for other in s.storage.prefs(&account.username).instances {
@@ -1135,18 +1111,6 @@ fn delete_instances_batch(
                         && other.name==instance.name {continue;}
                     let other_dir=minecraft::instance_dir(&s.data_root,&account.username,&other)?;
                     instance_guard::independent(&dir,&other_dir)?;
-                }
-            }
-            if dir.exists() {
-                let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
-                if meta.file_type().is_symlink()||!meta.is_dir(){
-                    return Err("La carpeta no es un directorio seguro".into());
-                }
-                let marked=dir.join(".vis/instance.json").is_file()
-                    ||dir.join(".vslauncher/install.json").is_file()
-                    ||dir.join(".vis/horizon.json").is_file();
-                if !marked && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
-                    return Err("Una carpeta contiene archivos sin marca VIS. No se eliminarán; usá quitar de la biblioteca.".into());
                 }
             }
             folders.push(dir);
