@@ -118,6 +118,9 @@ const badLink=features.communityPanel();
 assert(!badLink.includes('href="javascript:'),
  'Untrusted media URL must not become a clickable javascript: link');
 
+await features.handleAction({dataset:{action:'play-mcrust',id:'a'.repeat(32)}});
+assert(calls.some(x=>x.name==='mobile_mcrust_launch'&&x.args.id==='a'.repeat(32)), 'game handoff uses only an owned instance id');
+
 features.clear();
 assert(refreshed>0,'mutations must refresh Social/Universe');
 assert(drawn>0,'security response must re-render the profile');

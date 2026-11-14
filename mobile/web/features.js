@@ -209,7 +209,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
   function instancePanel(){
     const list=Array.isArray(state.instances)?state.instances:[];
     return '<section class="mobile-panel"><div class="section-title">Nueva instancia local</div>'+
-      '<p class="muted">Prepará los datos y carpetas para Java o Rust Horizon. Instalar y ejecutar el motor Android no está implementado todavía.</p>'+
+      '<p class="muted">Prepará tus instancias. La prueba de Horizon 26.3 usa el APK VIS McRust Preview ARM64 instalado por separado. Java todavía no puede ejecutarse.</p>'+
       '<form data-feature="instance-create" class="inline-form">'+
       formInput('name','Nombre de instancia','text',64)+
       '<label>Motor de juego</label>'+
@@ -228,7 +228,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         (i.project_id?' · '+E(i.project_id):'')+'</div>'+
         '<div class="small-row"><span class="tiny-note">Carpetas de mundos, mods, configuraciones y backups preparadas en el teléfono.</span>'+
         button('remove-instance','Quitar de lista','data-id="'+safeAttr(i.id)+'"')+'</div>'+
-        '<p class="muted">Motor Android pendiente: no puede iniciarse todavía.</p></article>'
+        (i.engine==='horizon'&&i.version==='26.3'?button('play-mcrust','Jugar McRust · prueba','data-id="'+safeAttr(i.id)+'"'):'<p class="muted">Motor no disponible en esta prueba Android.</p>')+'</article>'
       ).join(''):'<p class="muted">No creaste ninguna instancia Android.</p>')+
       '</section>';
   }
@@ -401,14 +401,17 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const act=button.dataset.action;
     const supported=new Set([
       'friend-accept','friend-alias','project-sub','request-review','setup-mfa','rotate-codes',
-      'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics','remove-instance'
+      'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics','remove-instance','play-mcrust'
     ]);
     if(!supported.has(act))return false;
     if(uiBusy)return true;
     uiBusy=true;
     try{
       const name=button.dataset.name;
-      if(act==='friend-accept'){
+      if(act==='play-mcrust'){
+        await command('mobile_mcrust_launch',{id:button.dataset.id});
+        toast('McRust está abriendo la instancia. La primera vez descarga los recursos del juego.');
+      }else if(act==='friend-accept'){
         await nativeAction('friends.accept',{username:name});
         await afterMutation('Amistad aceptada');
       }else if(act==='friend-alias'){

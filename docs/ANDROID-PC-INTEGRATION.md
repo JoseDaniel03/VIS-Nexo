@@ -19,3 +19,8 @@ The former fixed 16-person voice admission cap is removed. Tests cover 32 additi
 ## Verification
 
 Passed locally: merged Ceibo/Social migrations and authentication tests, Android feature and bridge contracts, realtime contracts, native command registration, world invitations/UI flow and voice media controls/capacity tests. Full Rust desktop compilation, Android APK build and two-device audio/network validation require their respective build environments and hardware.
+
+
+## Android v0.3.0 game preview handoff
+
+A separate experimental VIS McRust ARM64 APK is built from a pinned native Android port in horizon-VISNEXO. Nexo's owned Horizon 26.3 Vanilla entries now request that exact package/activity through the native WebView JNI handle. The handoff includes only schema, offline name, owner and instance ID; the game maps it to a sandboxed per-account/per-instance folder. No credentials or arbitrary paths are transferred. Java, PC feature parity, Android voice and two-device validation remain pending. The two APKs must be installed explicitly for this preview; Nexo reports a missing game APK instead of claiming installation succeeded.

@@ -1,6 +1,6 @@
 /* VIS Nexo Mobile Preview — native Rust bridge only.
    No credential, session token, MFA ticket or encrypted message is stored in JS.
-   The Android preview does NOT launch Java/Horizon. */
+   Android uses an explicit handoff to the separate McRust preview APK; Java is unavailable. */
 import { createMobileFeatures } from './features.js';
 'use strict';
 const mount=document.getElementById('root');
@@ -89,7 +89,7 @@ function authPanel(){
     '<h1>'+title+'</h1><p class="hint">'+sub+'</p>'+
     '<div class="form-card"><form id="auth-form" data-step="'+step+'">'+body+'</form></div>'+
     '<div class="security-note">◈ Identidad y tokens protegidos por Rust · HTTPS hacia Cloudflare</div>'+
-    '<div class="preview-note">Versión móvil de conexión. Minecraft Java y Rust Edition todavía no se ejecutan en Android.</div>'+
+    '<div class="preview-note">Versión móvil de conexión. Java no está disponible. Horizon 26.3 requiere el APK VIS McRust Preview ARM64.</div>'+
   '</section>';
 }
 function statusArea(){
@@ -117,7 +117,7 @@ function home(){
    '<button data-action="tab" data-tab="projects"><b>▦</b><strong>VIS Universe</strong><small>Proyectos vinculados</small></button>'+
    '<button data-action="tab" data-tab="instances"><b>▣</b><strong>VIS Worlds</strong><small>Instancias para Android</small></button></div>'+
    '<div class="locked-feature"><div class="lock-icon">▣</div><div><strong>Minecraft Rust / Java</strong>'+
-   '<p>Preparado para el futuro port Android. La ejecución e instalación están deshabilitadas en esta preview.</p></div><span class="tag">PRÓXIMAMENTE</span></div>'+
+   '<p>Horizon 26.3 se abre desde Mundos con el APK VIS McRust Preview instalado. Java continúa pendiente.</p></div><span class="tag">PRUEBA ANDROID</span></div>'+
    '<button class="outline full" data-action="refresh">Comprobar conexión con VIS</button>';
 }
 function friends(){

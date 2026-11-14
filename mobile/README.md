@@ -1,9 +1,12 @@
-# VIS Nexo Android — preview de conexión (Tauri 2)
+# VIS Nexo Android v0.3.0 — prueba de McRust
 
-Este proyecto es un **compañero móvil** deliberadamente separado del
-launcher Tauri de Windows/Linux. No compila ni modifica el fork
-`JoseDaniel03/horizon-VISNEXO`. Comparte el protocolo VIS Ceibo,
-Portals y Universe, **no el subsistema de Minecraft**.
+Incluye las funciones sociales y de cuenta de v0.2.0 y un inicio nativo del APK separado **VIS McRust Preview ARM64**. Instalá ambos APKs de la tanda. Creá una instancia Horizon 26.3 Vanilla en Mundos y tocá **Jugar McRust · prueba**. El juego descarga sus recursos la primera vez. Los mundos quedan separados por cuenta VIS e ID de instancia dentro del almacenamiento privado del APK del juego; las carpetas de metadatos de Nexo no son la ubicación de esas partidas.
+
+El inicio transporta solo nombre offline, usuario técnico e ID de instancia. No transporta tokens Ceibo/Microsoft, contraseñas, rutas ni argumentos de shell. No habilita Minecraft Java. El sistema pide instalar el APK del juego si no está disponible; no instala código silenciosamente.
+
+El port Android experimental reutiliza Starling a un commit fijo; no equivale a la versión de PC. Chat E2EE multidispositivo, overlay VIS nativo y voicechat Android siguen pendientes. Compilar el APK no sustituye probarlo en un teléfono. Las firmas de preview pueden cambiar entre tandas: conservá copias de tus partidas antes de reinstalar.
+
+## Funciones sociales heredadas
 
 ## Qué funciona (Android companion v0.2.0)
 - Conexión HTTPS con el Worker de VIS Ceibo (endpoint `/health`).

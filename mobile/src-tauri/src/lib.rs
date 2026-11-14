@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 use std::{sync::{Mutex, OnceLock}, time::Duration, path::{Path,PathBuf}, fs};
 use tauri::{State, Manager, AppHandle};
 
+mod mcrust;
+
 const SERVER: &str = "https://vis-social.defreitascarranza-845.workers.dev";
 
 #[derive(Default)]
@@ -600,7 +602,8 @@ pub fn run(){
             mobile_mfa,mobile_cancel_mfa,mobile_read,mobile_community,
             mobile_recovery_start,mobile_recovery_reset,mobile_logout,
             mobile_action,mobile_email_verify,mobile_password_change,
-            mobile_instances,mobile_instance_create,mobile_instance_remove
+            mobile_instances,mobile_instance_create,mobile_instance_remove,
+            mcrust::mobile_mcrust_launch
         ])
         .run(tauri::generate_context!())
         .expect("VIS Nexo Android no pudo iniciar");

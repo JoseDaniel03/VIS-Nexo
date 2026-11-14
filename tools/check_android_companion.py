@@ -69,9 +69,10 @@ checks={
     and 'No se pudieron preparar las carpetas Android' in native
     and 'launch_minecraft' not in native
     and 'launch_horizon' not in native,
-  "No game start UI while Android port does not exist":
+  "Java remains unavailable; McRust uses an explicit external preview handoff":
     'Minecraft Rust / Java' in ui
-    and 'deshabilitadas en esta preview' in ui,
+    and 'mobile_mcrust_launch' in features
+    and 'mcrust::mobile_mcrust_launch' in native,
   "Android package has a distinct ID and content security policy":
     config["identifier"]=="com.visstudios.nexo.mobile"
     and config["app"]["withGlobalTauri"] is True
