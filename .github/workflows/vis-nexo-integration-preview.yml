@@ -2,7 +2,8 @@ name: VIS Nexo 2.22 integration preview (Windows + Linux)
 concurrency:
   group: vis-integration-preview-${{ github.ref }}
   cancel-in-progress: true
-# One opt-in preview build on this branch. Never publishes a release or deploys Cloudflare.
+# Requested integration preview: source, workspace version and lockfiles are aligned at 2.22.0.
+# Never publishes a release or deploys Cloudflare.
 on:
   workflow_dispatch:
   push:
