@@ -8,8 +8,9 @@ export async function serverVoice(path,request,db,user,api){
  const capacity=Number(env?.VOICE_MAX_PARTICIPANTS||0);
  if(!Number.isSafeInteger(capacity)||capacity<0)bad(503,'Invalid voice capacity configuration');
  const radius=Math.max(4,Math.min(128,Number(env?.VOICE_RADIUS)||48));
+ const accessSql=(project,uid)=>`(EXISTS (SELECT 1 FROM project_staff m WHERE m.project_id=${project} AND m.user_id=${uid}) OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id=${project} AND m.user_id=${uid} AND m.can_play=1) OR (COALESCE((SELECT play_access FROM project_settings WHERE project_id=${project}),'public')='public' AND EXISTS (SELECT 1 FROM project_subscriptions m WHERE m.project_id=${project} AND m.user_id=${uid})))`;
  const authorized=async project=>{
-  const row=await db.prepare("SELECT p.id FROM social_projects p WHERE p.id=? AND p.visibility='published' AND (EXISTS (SELECT 1 FROM project_subscriptions s WHERE s.project_id=p.id AND s.user_id=?) OR EXISTS (SELECT 1 FROM project_staff s WHERE s.project_id=p.id AND s.user_id=?))").bind(project,user.id,user.id).first();
+  const row=await db.prepare(`SELECT p.id FROM social_projects p WHERE p.id=? AND p.visibility='published' AND ${accessSql('p.id','?')}`).bind(project,user.id,user.id,user.id).first();
   if(!row)bad(403,'Subscribe to this published project to use its voice channel');
  };
  if(path==='/v1/voice/room'){
@@ -26,7 +27,7 @@ export async function serverVoice(path,request,db,user,api){
   const id=same?own.id:crypto.randomUUID().replace(/-/g,'');
   if(own&&!same)await db.prepare('DELETE FROM voice_sessions WHERE user_id=?').bind(user.id).run();
   await db.prepare('INSERT INTO voice_sessions(id,user_id,project_id,client_id,expires_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET expires_at=excluded.expires_at').bind(id,user.id,body.project_id,body.client_id,now()+45).run();
-  const peers=await db.prepare('SELECT s.id,s.user_id,u.username FROM voice_sessions s JOIN social_users u ON u.id=s.user_id WHERE s.project_id=? AND s.expires_at>? AND s.id<>? AND u.disabled_at IS NULL AND (EXISTS (SELECT 1 FROM project_subscriptions m WHERE m.project_id=s.project_id AND m.user_id=s.user_id) OR EXISTS (SELECT 1 FROM project_staff m WHERE m.project_id=s.project_id AND m.user_id=s.user_id))').bind(body.project_id,now(),id).all();
+  const peers=await db.prepare(`SELECT s.id,s.user_id,u.username FROM voice_sessions s JOIN social_users u ON u.id=s.user_id WHERE s.project_id=? AND s.expires_at>? AND s.id<>? AND u.disabled_at IS NULL AND ${accessSql('s.project_id','s.user_id')}`).bind(body.project_id,now(),id).all();
   const visible=[];
   for(const peer of peers.results||[]){
    const distance=globalChannel(body.project_id)?0:await near(db,body.project_id,user.id,peer.user_id,now(),radius);
@@ -48,7 +49,7 @@ export async function serverVoice(path,request,db,user,api){
  if(path==='/v1/voice/leave'){if(body.session_id!==own.id)bad(409,'Voice session changed');await db.prepare('DELETE FROM voice_sessions WHERE id=?').bind(own.id).run();return reply({ok:true});}
  if(path==='/v1/voice/signal'){
   if(typeof body.to!=='string'||!/^[a-f0-9]{32}$/.test(body.to))bad(400,'Invalid voice peer');
-  const target=await db.prepare('SELECT s.id,s.user_id FROM voice_sessions s JOIN social_users u ON u.id=s.user_id WHERE s.id=? AND s.project_id=? AND s.expires_at>? AND u.disabled_at IS NULL AND (EXISTS (SELECT 1 FROM project_subscriptions m WHERE m.project_id=s.project_id AND m.user_id=s.user_id) OR EXISTS (SELECT 1 FROM project_staff m WHERE m.project_id=s.project_id AND m.user_id=s.user_id))').bind(body.to,own.project_id,now()).first();
+  const target=await db.prepare(`SELECT s.id,s.user_id FROM voice_sessions s JOIN social_users u ON u.id=s.user_id WHERE s.id=? AND s.project_id=? AND s.expires_at>? AND u.disabled_at IS NULL AND ${accessSql('s.project_id','s.user_id')}`).bind(body.to,own.project_id,now()).first();
   if(!target||target.id===own.id)bad(403,'Peer not in this channel');
   if(!globalChannel(own.project_id)&&await near(db,own.project_id,user.id,target.user_id,now(),radius)===null)bad(403,'Peer outside proximity');
   if(typeof body.payload!=='string'||body.payload.length>7000)bad(400,'Signal too large');
@@ -96,3 +97,4 @@ async function near(db,project,a,b,time,radius){
  const distance=Math.hypot(players[0].x-players[1].x,players[0].y-players[1].y,players[0].z-players[1].z);
  return distance<=radius?distance:null;
 }
+

@@ -19,3 +19,4 @@ export async function openVoiceSettings(voice){
  dialog.querySelector('.voice-disconnect').addEventListener('click',()=>void voice.leave().then(()=>dialog.close()));
  dialog.addEventListener('close',()=>dialog.remove());document.body.append(dialog);dialog.showModal();
 }
+

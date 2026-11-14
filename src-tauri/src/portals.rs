@@ -224,3 +224,4 @@ pub(crate) fn exchange(owner: &str, pid: u32, snapshot: Value) -> Result<Value, 
     let reply = request(&game.endpoint, &format!("social {snapshot}"))?;
     Ok(json!({"events":reply["events"],"voice":reply["voice"]}))
 }
+

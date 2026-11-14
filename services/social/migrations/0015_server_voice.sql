@@ -17,3 +17,4 @@ CREATE TABLE voice_positions (
  dimension TEXT NOT NULL,x REAL NOT NULL,y REAL NOT NULL,z REAL NOT NULL,updated_at INTEGER NOT NULL,
  PRIMARY KEY(project_id,user_id)
 );
+

@@ -597,6 +597,42 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if (!connected()) throw Error('Primero iniciá sesión en VIS Social');
     return rpc('/v1/account');
   }
+
+  async function ceiboAccountEmail(email){
+    if(!connected())throw Error('Iniciá sesión VIS Cloud para vincular tu correo');
+    return rpc('/v1/account/email/request','POST',{email});
+  }
+  async function ceiboMfaStatus(){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/account/mfa/status');
+  }
+  async function ceiboMfaSetup(){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/account/mfa/setup','POST',{});
+  }
+  async function ceiboMfaConfirm(code){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/account/mfa/confirm','POST',{code});
+  }
+  async function ceiboMfaVerify(value){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/account/mfa/verify','POST',
+      /^\d{6}$/.test(value)?{code:value}:{recovery_code:value});
+  }
+  async function ceiboMfaRotate(){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/account/mfa/rotate-codes','POST',{});
+  }
+  async function ceiboSessions(){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/account/sessions');
+  }
+  async function ceiboRevokeSession(sessionId=null){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/account/sessions/revoke','POST',
+      sessionId?{session_id:sessionId}:{all:true});
+  }
+
   async function subscribeProject(projectId, subscribe = true) {
     if (!connected()) throw Error('VIS Social no está conectado');
     await rpc(subscribe?'/v1/projects/subscribe':'/v1/projects/unsubscribe','POST',
@@ -615,6 +651,40 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     });
     await sync();
   }
+  async function projectCommunity(projectId){
+    if(!connected())throw Error('Conectá tu cuenta VIS Cloud para ver los miembros');
+    return rpc('/v1/projects/community','POST',{project_id:projectId});
+  }
+  async function requestProjectJoin(projectId,note=''){
+    if(!connected())throw Error('Iniciá sesión VIS Cloud para pedir acceso');
+    const result=await rpc('/v1/projects/request-join','POST',{project_id:projectId,note});
+    await sync();return result;
+  }
+  async function projectMember(projectId,username,role,canPlay,action='grant'){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/community-members','POST',{
+      project_id:projectId,username,role,can_play:canPlay,action
+    });
+  }
+  async function reviewProjectJoin(projectId,username,action){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/review-join','POST',{project_id:projectId,username,action});
+  }
+  async function setProjectPolicy(projectId,admission,playAccess){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/community-policy','POST',{
+      project_id:projectId,admission,play_access:playAccess
+    });
+  }
+  async function projectMedia(projectId,action,item={}){
+    if(!connected())throw Error('VIS Cloud no está conectado');
+    return rpc('/v1/admin/projects/community-media','POST',{project_id:projectId,action,...item});
+  }
+  async function globalAdmin(username,enabled){
+    if(!connected()||state?.role!=='super_admin')throw Error('Solo la supercuenta puede dar permisos globales');
+    return rpc('/v1/admin/accounts/global-admin','POST',{username,enabled});
+  }
+
   async function setAccountRole(username, role) {
     if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
     return rpc('/v1/admin/accounts/role','POST',{username,role});
@@ -625,6 +695,10 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   }
   return { setGameActive:value=>{const changed=gameActive!==!!value;gameActive=!!value;if(changed&&gameActive)void sync();}, hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
-    setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
+    setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin,
+    projectCommunity,requestProjectJoin,projectMember,reviewProjectJoin,setProjectPolicy,projectMedia,globalAdmin,
+    ceiboAccountEmail,ceiboMfaStatus,ceiboMfaSetup,ceiboMfaConfirm,ceiboMfaVerify,
+    ceiboMfaRotate,ceiboSessions,ceiboRevokeSession,state: () => state };
 }
+
 

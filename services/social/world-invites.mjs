@@ -52,3 +52,4 @@ export async function worldInvites(path, request, db, user, api) {
   }
   bad(404,'Not found');
 }
+

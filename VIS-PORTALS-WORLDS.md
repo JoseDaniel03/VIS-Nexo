@@ -11,7 +11,7 @@ ECDH/AES-GCM identity and stored only as opaque envelopes on the service, separa
 No descriptor tokens or Microsoft credentials reach the WebView or social service. Changing a public
 handle does not change the internal account used to authorize invitations.
 
-Apply `services/social/migrations/0011_world_invites.sql` before deploying the Worker. Health reports
+Apply `services/social/migrations/0014_world_invites.sql` before deploying the Worker. Health reports
 schema 11. Old Workers keep chat working but do not support world invitations. Update both VIS Nexo and
 the Horizon fork: old game executables do not expose the restricted launcher endpoint.
 
@@ -24,3 +24,4 @@ Validation: cargo check passed (existing warnings), dedicated world API and UI-f
 command parser tests passed. The complete social authentication/migration suite also passed after integrating the latest main changes.
 A local TCP bridge runtime test was blocked by sandbox socket permissions. Full Horizon compilation, real two-PC play, relay fallback and rendered UI
 verification remain outstanding. No production release or deployment was performed.
+

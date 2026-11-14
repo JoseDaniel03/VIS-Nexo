@@ -220,7 +220,7 @@ fn unpack_zip(archive_path:&Path,target:&Path)->Result<(),String>{
         if item.unix_mode().is_some_and(|mode|mode & 0o170000 == 0o120000){
             return Err("ZIP Horizon contiene un enlace simbólico".into())
         }
-        let member_name=item.name().to_owned();
+        let member_name=item.name().map_err(|e|e.to_string())?.into_owned();
         let path=Path::new(&member_name);let relative=safe_rel(path)?;
         let bytes=if item.is_dir(){0}else{item.size()};
         extraction_limit(&mut size,&mut count,bytes)?;

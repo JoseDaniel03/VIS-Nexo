@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {worldInvites} from '../services/social/world-invites.mjs';
 const sqlite=new DatabaseSync(':memory:');
 sqlite.exec('PRAGMA foreign_keys=ON; CREATE TABLE social_users(id TEXT PRIMARY KEY,username TEXT,disabled_at INTEGER);');
-sqlite.exec(readFileSync(new URL('../services/social/migrations/0011_world_invites.sql',import.meta.url),'utf8'));
+sqlite.exec(readFileSync(new URL('../services/social/migrations/0014_world_invites.sql',import.meta.url),'utf8'));
 for(const name of ['alice','bob','charlie'])sqlite.prepare('INSERT INTO social_users(id,username) VALUES(?,?)').run(name,name);
 const db={prepare(sql){return {args:[],bind(...args){this.args=args;return this;},async first(){return sqlite.prepare(sql).get(...this.args);},async all(){return {results:sqlite.prepare(sql).all(...this.args)};},async run(){return {meta:{changes:sqlite.prepare(sql).run(...this.args).changes}};}};}};
 let time=1000,friends=true;
@@ -41,3 +41,4 @@ assert.equal((await call('inbox','bob')).data.invitations.length,0);
 assert.equal((await call('accept','bob',{id:id3})).status,410);
 assert.equal((await call('host','alice',{room_id:room2})).status,409);
 console.log('World invitations: membership, stable handles, encryption envelopes, one-use acceptance, ownership, closure and crash leases passed');
+

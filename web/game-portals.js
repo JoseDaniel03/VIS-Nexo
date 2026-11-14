@@ -43,3 +43,4 @@ export function createGamePortals(command,social,worlds,voice,view,onError,onSet
  }
  return {start(){if(!timer)timer=setInterval(()=>void tick(),250);},async stop(){if(timer)clearInterval(timer);timer=null;await voice.leave();social.setGameActive(false);}};
 }
+

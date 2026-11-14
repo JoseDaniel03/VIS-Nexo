@@ -40,3 +40,4 @@ assert not conf['app']['security'].get('dangerousDisableAssetCspModification',Fa
 print(f'OK bridge: {len(registered_names)} registered Rust commands, {len(used)} JS command references')
 print(f'OK metadata: version {versions.pop()} consistent; application identifier preserved')
 
+

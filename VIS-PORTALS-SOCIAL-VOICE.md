@@ -22,9 +22,9 @@ seconds. Messages and endpoint credentials are not written into the game world o
 
 ## Server voice deployment
 
-Apply migration **0012_server_voice.sql** after 0011 and deploy the Worker and its imported modules together.
-Health requires schema 12. A published VIS project and subscription/staff membership authorize its channel.
-The initial mesh limit is **16 participants**. Each user has one active voice device; device collisions are
+Apply migration **0015_server_voice.sql** after 0011 and deploy the Worker and its imported modules together.
+Health requires schema 15. A published VIS project and subscription/staff membership authorize its channel.
+There is **no fixed participant-count limit** by default. Operators may explicitly set VOICE_MAX_PARTICIPANTS; actual mesh capacity still depends on bandwidth and device performance. Each user has one active voice device; device collisions are
 rejected rather than sharing a signalling session. Signals expire after thirty seconds, sessions after
 forty-five seconds. Peer volume is attenuated by the server-approved distance.
 
@@ -78,3 +78,4 @@ accepted. This is a configuration editor, not a full visual FancyMenu replacemen
   menu-validation tests passed. This does not replace compiling the full Horizon workspace.
 - Full Horizon compilation, rendered UI, real microphones, playback, two computers, NAT/TURN, and VSMedia's
   separate plugin adapter remain unverified. No production deployment or release was performed.
+

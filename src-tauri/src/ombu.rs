@@ -3,7 +3,7 @@
 use crate::accounts::Instance;
 use serde::{Deserialize, Serialize};
 use std::{fs::{self, File}, io::{Read, Write}, path::{Component, Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
-use zip::{write::FileOptions, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 
 const MANIFEST: &str = "VIS-INSTANCE.json";
 const MAX_FILES: usize = 100_000;
@@ -66,7 +66,7 @@ pub fn export_instance(dir: &Path, instance: &Instance, destination: &Path) -> R
     let outcome=(||->Result<(),String>{
         let f=File::create(&temp).map_err(|e|e.to_string())?;
         let mut zip=ZipWriter::new(f);
-        let opts=FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let opts=SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         zip.start_file(MANIFEST,opts).map_err(|e|e.to_string())?;
         zip.write_all(&serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
         for file in &files {
@@ -114,7 +114,7 @@ pub fn import_instance(archive: &Path, library: &Path, taken_names: &[String]) -
         let mut total=0u64;
         for index in 0..zip.len(){
             let mut entry=zip.by_index(index).map_err(|e|e.to_string())?;
-            if entry.name()==MANIFEST {continue;}
+            if entry.name().map_err(|e|e.to_string())?.as_ref()==MANIFEST {continue;}
             if entry.unix_mode().is_some_and(|mode| (mode & 0o170000) == 0o120000){return Err("El ZIP contiene un enlace simbólico".into());}
             let relative=entry.enclosed_name().ok_or("Ruta peligrosa dentro del ZIP")?.to_owned();
             if relative.components().any(|part| !matches!(part,Component::Normal(_))) {return Err("Ruta no válida dentro del paquete".into());}

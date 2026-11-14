@@ -106,3 +106,4 @@ export function createServerVoice(rpc,onStatus=()=>{},runtime=globalThis){
  }
  return {attachMedia,join,leave,devices,selectDevices,setVolume,status,setMute:value=>{muted=!!value;gate();},setDeaf,setPtt:value=>{ptt=!!value;gate();},setMode:value=>{mode=value==='open'?'open':'ptt';gate();}};
 }
+

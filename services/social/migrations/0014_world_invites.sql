@@ -13,3 +13,4 @@ CREATE TABLE world_invites (
   status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined'))
 );
 CREATE INDEX world_invites_inbox ON world_invites(recipient_id,status,expires_at);
+

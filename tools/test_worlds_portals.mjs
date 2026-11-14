@@ -24,3 +24,4 @@ assert.equal(accepted,1);assert.deepEqual(events.at(-1),['join','ABCDE-FGHIJ']);
 await portals.stop();
 assert.equal(sharing,false);assert.equal(events.at(-1)[0],'close');
 console.log('VIS Portals UI flow: host, invite, safe acceptance, native join and stop passed');
+

@@ -6,8 +6,10 @@ const sql=new DatabaseSync(':memory:');sql.exec(`PRAGMA foreign_keys=ON;
 CREATE TABLE social_users(id TEXT PRIMARY KEY,username TEXT,disabled_at INTEGER);
 CREATE TABLE social_projects(id TEXT PRIMARY KEY,visibility TEXT);
 CREATE TABLE project_subscriptions(project_id TEXT,user_id TEXT);
-CREATE TABLE project_staff(project_id TEXT,user_id TEXT);`);
-sql.exec(readFileSync(new URL('../services/social/migrations/0012_server_voice.sql',import.meta.url),'utf8'));
+CREATE TABLE project_staff(project_id TEXT,user_id TEXT);
+CREATE TABLE project_members(project_id TEXT,user_id TEXT,can_play INTEGER);
+CREATE TABLE project_settings(project_id TEXT,play_access TEXT);`);
+sql.exec(readFileSync(new URL('../services/social/migrations/0015_server_voice.sql',import.meta.url),'utf8'));
 for(const name of ['alice','bob','eve'])sql.prepare('INSERT INTO social_users VALUES(?,?,NULL)').run(name,name);
 for(const id of ['one','two'])sql.prepare("INSERT INTO social_projects VALUES(?,'published')").run(id);
 for(const [project,user]of [['one','alice'],['one','bob'],['two','eve']])sql.prepare('INSERT INTO project_subscriptions VALUES(?,?)').run(project,user);
@@ -50,3 +52,27 @@ assert.equal((await call('room','bob',{project_id:'one'})).data.peers.length,0);
 await positions(nearby);time+=4;
 assert.equal((await call('room','bob',{project_id:'one'})).data.peers.length,0,'stale positions fail closed');
 console.log('Authoritative proximity: authenticated publisher, distance, dimensions and stale-position isolation passed');
+
+
+// Joining the seventeenth participant must work on the default configuration.
+api.env={VOICE_GLOBAL_PROJECTS:'one'};
+for(let n=0;n<32;n++){
+ const user='load_'+n;
+ sql.prepare('INSERT INTO social_users VALUES(?,?,NULL)').run(user,user);
+ sql.prepare("INSERT INTO project_subscriptions VALUES('one',?)").run(user);
+ const joined=await call('room',user,{project_id:'one'});
+ assert.equal(joined.status,200,'participant '+n);
+ assert.equal(joined.data.capacity,null);
+}
+api.env.VOICE_MAX_PARTICIPANTS='2';
+assert.equal((await call('room','eve',{project_id:'one'})).status,403);
+sql.prepare("INSERT INTO project_subscriptions VALUES('one','eve')").run();
+assert.equal((await call('room','eve',{project_id:'one'})).status,429);
+api.env.VOICE_MAX_PARTICIPANTS='bad';
+assert.equal((await call('room','bob',{project_id:'one'})).status,503);
+api.env.VOICE_MAX_PARTICIPANTS='0';
+sql.prepare("INSERT INTO project_settings VALUES('one','members')").run();
+assert.equal((await call('room','bob',{project_id:'one'})).status,403,'subscription alone cannot bypass private play policy');
+sql.prepare("INSERT INTO project_members VALUES('one','bob',1)").run();
+assert.equal((await call('room','bob',{project_id:'one'})).status,200);
+console.log('32+ participant admission, optional operator capacity and Android community play-policy compatibility passed');

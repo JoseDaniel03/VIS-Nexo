@@ -23,3 +23,4 @@ const pending=createServerVoice(async()=>({id:'a',peers:[],iceServers:[]}),()=>{
 const joining=pending.join('project');await new Promise(resolve=>setTimeout(resolve,0));await pending.leave();release(stream);await joining;
 assert.equal(pending.status().connected,false,'late microphone permission cannot resurrect a disconnected session');
 console.log('Voice microphone consent, PTT, mute, deafen, cleanup and cancelled permission flow passed');
+

@@ -1,0 +1,9 @@
+# Protect build, identity and distribution surfaces. Enable "Require review from Code Owners" in repository rulesets.
+/.github/ @JoseDaniel03
+/src-tauri/ @JoseDaniel03
+/services/ @JoseDaniel03
+/tools/ @JoseDaniel03
+/package.json @JoseDaniel03
+/package-lock.json @JoseDaniel03
+/Cargo.toml @JoseDaniel03
+/Cargo.lock @JoseDaniel03
