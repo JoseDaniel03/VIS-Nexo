@@ -4,6 +4,9 @@ export async function serverVoice(path,request,db,user,api){
  if(rateLimit)await rateLimit(db,request,'voice:'+user.id,300);
  const body=await parseBody(request);
  const globalChannel=(project)=>(env?.VOICE_GLOBAL_PROJECTS||'').split(',').includes(project);
+ // Zero (default) means no fixed participant-count cap. Operators may opt in.
+ const capacity=Number(env?.VOICE_MAX_PARTICIPANTS||0);
+ if(!Number.isSafeInteger(capacity)||capacity<0)bad(503,'Invalid voice capacity configuration');
  const radius=Math.max(4,Math.min(128,Number(env?.VOICE_RADIUS)||48));
  const authorized=async project=>{
   const row=await db.prepare("SELECT p.id FROM social_projects p WHERE p.id=? AND p.visibility='published' AND (EXISTS (SELECT 1 FROM project_subscriptions s WHERE s.project_id=p.id AND s.user_id=?) OR EXISTS (SELECT 1 FROM project_staff s WHERE s.project_id=p.id AND s.user_id=?))").bind(project,user.id,user.id).first();
@@ -15,9 +18,11 @@ export async function serverVoice(path,request,db,user,api){
   if(typeof body.client_id!=='string'||!/^[a-f0-9]{32}$/.test(body.client_id))bad(400,'Invalid voice device');
   const own=await db.prepare('SELECT * FROM voice_sessions WHERE user_id=?').bind(user.id).first();
   if(own&&own.expires_at>now()&&own.client_id!==body.client_id)bad(409,'Voice is active on another device');
-  const count=await db.prepare('SELECT count(*) AS n FROM voice_sessions WHERE project_id=? AND expires_at>?').bind(body.project_id,now()).first();
   const same=own&&own.project_id===body.project_id&&own.expires_at>now();
-  if(!same&&count.n>=16)bad(429,'Voice channel full (16 participants)');
+  if(!same&&capacity){
+   const count=await db.prepare('SELECT count(*) AS n FROM voice_sessions WHERE project_id=? AND expires_at>?').bind(body.project_id,now()).first();
+   if(count.n>=capacity)bad(429,'Server voice capacity reached');
+  }
   const id=same?own.id:crypto.randomUUID().replace(/-/g,'');
   if(own&&!same)await db.prepare('DELETE FROM voice_sessions WHERE user_id=?').bind(user.id).run();
   await db.prepare('INSERT INTO voice_sessions(id,user_id,project_id,client_id,expires_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET expires_at=excluded.expires_at').bind(id,user.id,body.project_id,body.client_id,now()+45).run();
@@ -35,7 +40,7 @@ export async function serverVoice(path,request,db,user,api){
    const signature=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(username)));
    iceServers.push({urls:env.VOICE_TURN_URL,username,credential:btoa(String.fromCharCode(...signature))});
   }
-  return reply({id,peers:visible,iceServers,mode:globalChannel(body.project_id)?'channel':'proximity',radius});
+  return reply({id,capacity:capacity||null,peers:visible,iceServers,mode:globalChannel(body.project_id)?'channel':'proximity',radius});
  }
  const own=await db.prepare('SELECT * FROM voice_sessions WHERE user_id=? AND expires_at>?').bind(user.id,now()).first();
  if(!own)bad(410,'Voice session ended');
