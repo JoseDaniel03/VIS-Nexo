@@ -5039,7 +5039,7 @@ dependencies = [
 
 [[package]]
 name = "vsui-core"
-version = "2.19.0"
+version = "2.22.0"
 dependencies = [
  "serde",
  "serde_json",
