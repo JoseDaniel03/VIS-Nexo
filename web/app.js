@@ -26,6 +26,8 @@ function resetAccountView(){
   premiumSkinSync=true;premiumSkinModel='classic';
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();avatarLoads.clear();
  socialMediaQueue.length=0;publicSkinLookup=null;
+ projectCommunity=null;projectCommunityId='';projectCommunityLoading=false;projectCommunityError='';
+ ceiboSecurity=null;ceiboSessions=null;ceiboRecoveryStep='request';
  for(const path of Object.keys(assetCache))delete assetCache[path];
  previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
  previewLoading.clear();
@@ -37,6 +39,7 @@ async function onceOperation(key,operation){
  try{return await operation();}finally{pendingOperations.delete(key);}
 }
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
+let ceiboRecoveryKind='password',ceiboRecoveryStep='request',ceiboSecurity=null,ceiboSessions=null;
 let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
 let premiumCosmetics=null, premiumCosmeticsBusy=false;
 let premiumSkinSync=true, premiumSkinModel='classic';
@@ -99,6 +102,7 @@ async function beginMicrosoftLogin(){
 }
 
 let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null, stateEditorOpen=false;
+let projectCommunity=null, projectCommunityId='', projectCommunityLoading=false, projectCommunityError='';
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
 // The display mode is a local UI preference; it does not change account permissions.
@@ -195,6 +199,8 @@ const iconPaths = {
   trash:'<path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',
   edit:'<path d="m15 5 4 4M4 20l4-.8L20 7a2.8 2.8 0 0 0-4-4L4 15l-.8 4Z"/>',
   shield:'<path d="M12 22s9-4.5 9-11V5l-9-3-9 3v6c0 6.5 9 11 9 11Z"/>',
+  mail:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  key:'<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-4 4 3 3m-1-5 3 3"/>',
   cloud:'<path d="M20 17a4 4 0 0 0-1.3-7.8A7 7 0 0 0 5 11a4 4 0 0 0 0 8h15"/>',
   database:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 2 4 3 9 3s9-1 9-3V5M3 12c0 2 4 3 9 3s9-1 9-3"/>',
   sliders:'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="currentColor"/><circle cx="16" cy="17" r="2" fill="currentColor"/>',
@@ -550,6 +556,7 @@ const social = createSocialRemote(command, (snapshot, messages) => {
     incoming_requests:snapshot.incoming_requests||[], outgoing_requests:snapshot.outgoing_requests||[],
     messages:messages||[] };
   mergeSocialView();
+  if(page==='project'&&selectedId&&projectCommunityId!==selectedId&&!projectCommunityLoading)void loadProjectCommunity(selectedId);
   refreshSocialAvatars(snapshot);
   refreshSocialSkins(snapshot);
   scheduleSocialRender();
@@ -607,7 +614,22 @@ async function selectAndUploadSocialAvatar(){
 async function connectSocial(reuseCloudSession=false) {
   if (!native || !db.user || isGuest()) return;
   try { await social.start(db.user.username,reuseCloudSession); }
-  catch (error) { message('VIS Social sin conexión: ' + String(error), true); }
+  catch (error) {
+    if(String(error).includes('VIS_CEIBO_MFA_REQUIRED')){
+      const identity=db.user?.username;
+      const code=window.prompt('VIS Ceibo requiere un segundo factor para conectar esta cuenta. Ingresá el código de tu aplicación o uno de emergencia:');
+      if(!code){void command('social_cancel_pending_mfa').catch(()=>{});return;}
+      try{
+        const snapshot=await command('social_cloud_mfa_finish',{code:code.trim()});
+        if(db.user?.username!==identity)return;
+        db=snapshot;render();
+        await social.start(identity,true);
+        message('VIS Social conectado con MFA.');
+      }catch(failure){message('MFA VIS Social: '+String(failure),true);}
+      return;
+    }
+    message('VIS Social sin conexión: ' + String(error), true);
+  }
 }
 async function apply(name,args={},success=''){
  const generation=accountGeneration;
@@ -625,7 +647,53 @@ async function apply(name,args={},success=''){
  });
 }
 function brandLabel(){return esc(db.branding?.name||'VIS Nexo');}
+function ceiboRecoveryView(){
+ const password=ceiboRecoveryKind==='password',reset=ceiboRecoveryStep==='reset'&&password;
+ return '<main class="auth-screen"><section class="auth-glass vis-ceibo-recovery">'+
+  '<div class="auth-brand">'+logo(true)+'<span>'+brandLabel()+'</span></div>'+
+  '<div class="auth-intro"><span class="kicker">VIS CEIBO / SEGURIDAD</span><h1>'+
+  (reset?'Crear nueva contraseña':password?'Olvidé mi contraseña':'Olvidé mi usuario')+'</h1>'+
+  '<p>'+(reset?'Pegá el código recibido en tu correo verificado. Nunca compartas el código.':
+     'Las instrucciones se envían solamente a correos previamente verificados. Nunca confirmamos si una cuenta existe.')+'</p></div>'+
+  (reset?'<form id="ceibo-recovery-reset-form" class="auth-form">'+
+    '<label class="field-label" for="ceibo-reset-code">Código de un solo uso</label>'+
+    '<div class="auth-input">'+I('key',17)+'<input id="ceibo-reset-code" name="code" required minlength="43" maxlength="43" autocomplete="off" spellcheck="false"/></div>'+
+    '<label class="field-label" for="ceibo-reset-new">Nueva contraseña VIS</label>'+
+    '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-new" name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
+    '<label class="field-label" for="ceibo-reset-confirm">Confirmarla</label>'+
+    '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-confirm" name="confirm" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
+    '<label class="field-label" for="ceibo-reset-backup">Código MFA de emergencia (cuentas con MFA o administradoras)</label>'+
+    '<div class="auth-input">'+I('shield',17)+'<input id="ceibo-reset-backup" name="recovery_code" autocomplete="off" placeholder="Código de respaldo, si corresponde"/></div>'+
+    '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Cambiar contraseña</button></form>':
+    '<form id="ceibo-recovery-start-form" class="auth-form">'+
+    '<label class="field-label" for="ceibo-recovery-identity">'+
+     (password?'Correo verificado o @usuario VIS':'Correo electrónico verificado')+'</label>'+
+    '<div class="auth-input">'+I('mail',17)+'<input id="ceibo-recovery-identity" name="identity" required maxlength="254" autocomplete="email" placeholder="'+(password?'tu@email.com o @usuario':'tu@email.com')+'"/></div>'+
+    '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Enviar instrucciones</button></form>')+
+  '<div class="vis-ceibo-auth-nav">'+
+    (password?'<button type="button" class="auth-footer" data-action="ceibo-recovery-step">'+(reset?'Solicitar otro código':'Ya tengo el código')+'</button>':'')+
+    '<button type="button" class="auth-footer" data-action="ceibo-recovery-back">Volver al inicio de sesión</button>'+
+  '</div><p class="muted">Para cuentas Microsoft, la recuperación de contraseña se hace en Microsoft.</p>'+
+  '</section></main>';
+}
+function ceiboMfaLoginView(){
+ return '<main class="auth-screen"><section class="auth-glass vis-ceibo-recovery" aria-label="Segundo factor VIS Ceibo">'+
+ '<div class="auth-brand">'+logo(true)+'<span>'+brandLabel()+'</span></div>'+
+ '<div class="auth-intro"><span class="kicker">VIS CEIBO / SEGURIDAD</span>'+
+ '<h1>Verificación en dos pasos</h1>'+
+ '<p>La contraseña ya fue comprobada. Para entrar a tu cuenta VIS, ingresá el código de tu aplicación Authenticator o un código de emergencia de un solo uso.</p></div>'+
+ '<form id="ceibo-login-mfa-form" class="auth-form">'+
+ '<label class="field-label" for="ceibo-login-mfa-code">Código de autenticación</label>'+
+ '<div class="auth-input">'+I('shield',17)+
+ '<input id="ceibo-login-mfa-code" name="code" required autocomplete="one-time-code" maxlength="36" placeholder="6 dígitos o código de emergencia" spellcheck="false"/></div>'+
+ '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Confirmar identidad y entrar</button>'+
+ '</form><button class="auth-footer" data-action="ceibo-login-mfa-cancel" type="button">Cancelar inicio de sesión</button>'+
+ '<p class="muted">Sin acceso al autenticador, utilizá uno de los códigos de emergencia que guardaste al activar MFA.</p>'+
+ '</section></main>';
+}
 function loginView(){
+ if(authMode==='recover')return ceiboRecoveryView();
+ if(authMode==='mfa')return ceiboMfaLoginView();
   const reg=authMode==='register', guest=authMode==='offline';
   return `<main class="auth-screen">
     <section class="auth-glass" aria-label="${guest?'Acceso offline':reg?'Crear cuenta':'Inicio de sesión'}">
@@ -654,9 +722,11 @@ function loginView(){
         ${guest?'':`<div class="field-header"><label class="field-label" for="auth-password">Contraseña</label></div>
         <div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" id="auth-password" name="password" autocomplete="${reg?'new-password':'current-password'}" placeholder="${reg?'Creá una contraseña':'Ingresá tu contraseña'}"/><button class="eye-button" type="button" data-action="toggle-password" aria-label="Mostrar u ocultar contraseña">${I(showPassword?'eyeoff':'eye',19)}</button></div>
         `}
+        ${reg&&authProvider==='cloud'?'<label class="field-label" for="auth-register-email">Correo de recuperación (recomendado)</label><div class="auth-input">'+I('mail',17)+'<input type="email" maxlength="254" id="auth-register-email" name="email" autocomplete="email" placeholder="tu@email.com" /></div>':''}
         ${reg?`<label class="field-label" for="auth-repeat">Confirmar contraseña</label><div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" name="confirm" id="auth-repeat" autocomplete="new-password" placeholder="Repetí tu contraseña" /></div>`:''}
         <button class="primary-btn auth-submit" type="submit" ${authBusy?'disabled':''}>${authBusy?I('timer',20):I('arrow',20)}<span>${authBusy?'Validando...':guest?'Continuar sin cuenta':reg?'Crear cuenta':'Entrar al launcher'}</span></button>
       </form>`}
+      ${authProvider==='cloud'&&!reg&&!guest?'<div class="vis-ceibo-auth-nav"><button type="button" class="auth-footer" data-action="auth-forgot-password">¿Olvidaste tu contraseña?</button><button type="button" class="auth-footer" data-action="auth-forgot-username">¿Olvidaste tu usuario?</button></div>':''}
       ${authProvider==='microsoft'?'':guest?`<button class="auth-footer" data-action="auth-local" type="button">Volver al inicio de sesión</button>`:`<button class="auth-footer" data-action="switch-auth" type="button">${reg?'¿Ya tenés cuenta?':'¿Todavía no tenés cuenta?'} <strong>${reg?'Iniciá sesión':'Registrate'}</strong></button>`}
       ${!native?`<p class="auth-preview">Vista previa en navegador · Los datos de prueba no se guardan.</p>`:''}
     </section>
@@ -719,7 +789,7 @@ function socialPanel(){
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
- ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}`:''}
+ ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button><button class="mini-add" type="button" data-action="social-global-admin">Administradores globales</button>`:''}`:''}
  ${social.connected()&&social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-developer-key" title="Consultar clave pública de la cuenta para una habilitación manual en GitHub">Identidad de desarrollador${socialOwner?' · habilitada':''}</button><button class="mini-add" type="button" data-action="social-superadmin-key" title="Preparar solicitud protegida de superadministrador, sin revelar contraseña">Identidad para superadmin${accountAdmin?' · habilitada':''}</button>`:''}
  <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>${social.connected()&&!social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-enable-cloud">Vincular contraseña online</button>`:''}
  `:''}
@@ -778,6 +848,77 @@ function homePage(){
  <div class="portal-footer-note">${I('shield',14)} ${db.catalog_source?'VIS Universe · Catálogo online: '+esc(db.catalog_source):'VIS Universe · Falta configurar el catálogo remoto en Configuración → Publicación.'} Los borradores locales solo se muestran al administrador.</div></div>`;
 }
 function projectCard(p){const available=isExecutionEnabled(p);return `<button class="project-card portal-game-card" data-action="open-project" data-id="${attr(p.id)}" data-context="${attr(p.id)}"><div class="project-card-cover" ${p.banner_path?bgPhoto(p.banner_path):''}><span class="project-card-watermark">${projectIcon(p)}</span><span class="availability ${available?'available':''}">${available?'Disponible':p.installable?'Pausado':'Próximamente'}</span><span class="card-hover-cta">${I('arrow',17)} Abrir proyecto</span></div><div class="project-card-info"><span class="project-card-logo">${projectIcon(p)}</span><div><strong>${esc(p.title)}</strong><small>${esc(p.subtitle||p.mc_version||'Proyecto VIS Universe')}</small></div>${I('chevron',19)}</div></button>`;}
+
+const visProjectRoles=[
+ ['creator','Creadores'],['helper','Ayudantes'],['content_creator','Creadores de contenido'],
+ ['participant','Participantes'],['guest','Invitados'],['collaborator','Colaboradores'],['mention','Menciones']
+];
+async function loadProjectCommunity(id=selectedId){
+ if(!id||!social.connected()||projectCommunityLoading)return;
+ const generation=accountGeneration;
+ projectCommunityLoading=true;projectCommunityError='';
+ try{
+   const data=await social.projectCommunity(id);
+   if(generation!==accountGeneration||selectedId!==id)return;
+   projectCommunityId=id;projectCommunity=data;
+ }catch(error){
+   if(generation!==accountGeneration||selectedId!==id)return;
+   projectCommunityId=id;projectCommunity=null;projectCommunityError=String(error);
+ }finally{
+   projectCommunityLoading=false;
+   if(generation===accountGeneration&&selectedId===id&&page==='project')render();
+ }
+}
+function projectMediaThumbnail(item){
+ if(item.provider!=='youtube')return '';
+ let video='';
+ try{
+   const url=new URL(item.url);
+   if(url.hostname==='www.youtube.com'&&url.pathname==='/watch')video=url.searchParams.get('v')||'';
+ }catch{}
+ return /^[a-zA-Z0-9_-]{11}$/.test(video)?
+   '<img loading="lazy" alt="" src="https://i.ytimg.com/vi/'+attr(video)+'/mqdefault.jpg"/>':'';
+}
+function projectCommunitySection(p){
+ const c=projectCommunityId===p.id?projectCommunity:null;
+ if(!social.connected())return '<section class="vis-project-community"><h2>'+I('users',19)+' Participantes y medios</h2><p class="muted">Conectá tu cuenta VIS Cloud para ver los roles, solicitudes y videos de este proyecto.</p></section>';
+ if(!c)return '<section class="vis-project-community"><h2>'+I('users',19)+' Participantes y medios</h2><p class="muted">'+esc(projectCommunityError||'Cargando miembros del proyecto…')+'</p><button type="button" class="outline-btn" data-action="project-community-refresh">Consultar participantes</button></section>';
+ const media=(c.media||[]).map(item=>'<article class="vis-community-media-card">'+
+  '<div class="vis-community-media-thumb">'+(projectMediaThumbnail(item)||I(item.kind==='stream'?'play':'image',28))+'</div>'+
+  '<b>'+esc(item.title)+'</b><small>'+esc(item.kind==='stream'?'Directo':'Video')+' · '+esc(item.author)+'</small>'+
+  '<div class="vis-data-actions"><button class="outline-btn" type="button" data-action="project-community-open-media" data-id="'+attr(item.id)+'">Abrir '+esc(item.provider)+'</button>'+
+  (c.can_manage||item.author===db.user?.username?'<button class="outline-btn" type="button" data-action="project-community-delete-media" data-id="'+attr(item.id)+'">Quitar</button>':'')+'</div></article>').join('');
+ const roles=visProjectRoles.map(([key,label])=>{
+   const members=(c.members||[]).filter(x=>x.member_role===key);
+   return '<div class="vis-community-role"><h3>'+esc(label)+' <small>'+members.length+'</small></h3>'+
+     (members.length?members.map(m=>'<div class="vis-community-member"><span><b>'+esc(m.display_name||m.username)+'</b> <small>@'+esc(m.public_handle||m.username)+'</small></span>'+
+        (m.can_play?'<span class="vis-access-yes">Puede jugar</span>':'')+
+        (m.presence==='online'&&m.current_game?'<small title="Estado declarado por el jugador, no verificado por el servidor">'+I('game',12)+' '+esc(m.current_game)+'</small>':'')+'</div>').join(''):'<p class="muted">Sin integrantes todavía</p>')+'</div>';
+ }).join('');
+ const join=c.role?'':'<div class="vis-community-join">'+
+   '<p>'+esc(c.admission==='open'?'Podés unirte libremente.':c.admission==='request'?'Podés solicitar una invitación para participar.':'Se requiere invitación de los responsables.')+'</p>'+
+   (c.admission!=='invite_only'?'<button class="outline-btn" data-action="project-community-request" '+(c.request_status==='pending'?'disabled':'')+'>'+
+    (c.request_status==='pending'?'Solicitud pendiente':c.admission==='open'?'Unirme al proyecto':'Solicitar unirme')+'</button>':'')+'</div>';
+ const controls=c.can_manage?'<div class="vis-community-manage">'+
+   '<button class="outline-btn" data-action="project-community-member">Asignar rol / acceso</button>'+
+   '<button class="outline-btn" data-action="project-community-remove-member">Quitar miembro</button>'+
+   '<button class="outline-btn" data-action="project-community-policy">Invitaciones y acceso</button></div>'+
+   '<div class="vis-community-requests">'+(c.pending||[]).map(x=>'<div class="vis-community-member"><span>'+esc(x.username)+
+   (x.note?'<small>'+esc(x.note)+'</small>':'')+'</span>'+
+   '<button class="outline-btn" data-action="project-community-review" data-mode="approve" data-user="'+attr(x.username)+'">Aceptar</button>'+
+   '<button class="outline-btn" data-action="project-community-review" data-mode="reject" data-user="'+attr(x.username)+'">Rechazar</button></div>').join('')+'</div>':'';
+ const postable=c.can_manage||c.role==='content_creator';
+ return '<section class="vis-project-community"><div class="vis-community-heading"><div><span class="page-eyebrow">VIS UNIVERSE / COMUNIDAD</span><h2>Participantes de '+esc(p.title)+'</h2></div>'+
+   '<button class="outline-btn" data-action="project-community-refresh">'+I('refresh',16)+' Actualizar</button></div>'+
+   '<p class="muted">Acceso: '+esc(c.play_access==='members'?'Solo usuarios autorizados':'Público')+' · Solicitudes: '+
+   esc(c.admission==='open'?'Abiertas':c.admission==='request'?'Con aprobación':'Solo por invitación')+'</p>'+
+   (c.play_access==='members'&&!c.can_play?'<p class="vis-community-permission">Todavía no tenés autorización del proyecto para jugar. El servidor también debe verificar este permiso.</p>':'')+
+   join+controls+'<div class="vis-community-roles">'+roles+'</div>'+
+   '<div class="vis-community-heading"><h2>Streams y videos</h2>'+
+   (postable?'<button class="outline-btn" data-action="project-community-add-media">'+I('plus',16)+' Vincular contenido</button>':'')+'</div>'+
+   (media?'<div class="vis-community-media-grid">'+media+'</div>':'<p class="muted">Todavía no hay directos o videos vinculados por los participantes.</p>')+'</section>';
+}
+
 function projectPage(){
  const p=currentProject();if(!p)return `<div class="content-inner">${emptyHome()}</div>`;
  const tabs=[['news','Noticias'],['patches','Notas de parche'],['updates','Actualizaciones'],['calendar','Eventos'],['community','Comunidad']].filter(([key])=>visibleSection(p,key));
@@ -788,14 +929,15 @@ function projectPage(){
  const enabled=db.project_execution?.[p.id]!==false;
  const available=p.installable&&enabled;
  const installedProject=db.instances.find(i=>compatibleProjectInstance(i,p));
+ const playBlocked=projectCommunityId===p.id&&projectCommunity?.play_access==='members'&&!projectCommunity.can_play;
  const adminActions=isAdmin()?`<div class="project-admin-actions" aria-label="Publicación rápida"><span class="admin-actions-title">${I('shield',15)} ADMINISTRACIÓN</span><button class="admin-action" data-action="quick-publish" data-kind="news" title="Publicar una noticia">${I('newspaper',16)} Noticia</button><button class="admin-action" data-action="quick-publish" data-kind="patch" title="Publicar notas de parche">${I('settings',16)} Nota de parche</button><button class="admin-action" data-action="quick-publish" data-kind="update" title="Publicar una actualización">${I('upload',16)} Actualización</button><button class="admin-action" data-action="quick-publish" data-kind="event" title="Agregar un evento al calendario">${I('calendar',16)} Evento</button><button class="admin-action light" data-action="edit-project" data-id="${attr(p.id)}" title="Editar identidad visual, recursos y configuraciones">${I('edit',16)} Editar proyecto</button></div>`:'';
  return `<div class="content-inner project-page riot-project-page project-page-v23"><section class="project-hero portal-project-hero cinematic-project-hero" ${p.banner_path?projectHeroPhoto(p.banner_path):''} data-motion="hero"><div class="project-hero-shade"></div><div class="project-hero-content"><span class="hero-tag">${I('game',16)} ${esc(p.mc_version?'MINECRAFT '+p.mc_version:'PROYECTO VIS UNIVERSE')}</span><div class="project-wordmark">${p.logo_path&&preview(p.logo_path)?`<img class="project-logo-image" src="${preview(p.logo_path)}" alt="Logo de ${attr(p.title)}"/>`:`<h1>${esc(p.title)}</h1>`}</div><p>${esc(p.description||p.subtitle||'')}</p>
- <div class="project-actions"><button class="primary-btn" ${!available?'disabled title="Disponible próximamente"':''} data-action="project-play" data-id="${attr(p.id)}">${I(available?'play':'timer',19)} ${available?(installedProject?'Jugar':'Instalar y jugar'):'Próximamente'}</button><button class="glass-btn" data-action="go-instances" title="Gestionar instancias locales">${I('settings',18)} Instancias</button>${installedProject && !installedProject.source_owner && p.engine==='java'&&p.loader==='fabric'? `<button class="glass-btn" data-action="sync-project-mods" data-project="${attr(p.id)}" data-id="${attr(installedProject.name)}" ${minecraftBusy?'disabled':''} title="Aplicar mods añadidos y quitar los retirados, sin borrar tus mundos">${I('package',18)} Actualizar mods</button>`:''}</div></div><span class="portal-hero-caption">${available?'DISPONIBLE':enabled?'EN PREPARACIÓN':'EJECUCIÓN DESHABILITADA'}</span></section>
+ <div class="project-actions"><button class="primary-btn" ${!available||playBlocked?'disabled title="'+(playBlocked?'Necesitás autorización para jugar':'Disponible próximamente')+'"':''} data-action="project-play" data-id="${attr(p.id)}">${I(available?'play':'timer',19)} ${available?(installedProject?'Jugar':'Instalar y jugar'):'Próximamente'}</button><button class="glass-btn" data-action="go-instances" title="Gestionar instancias locales">${I('settings',18)} Instancias</button>${installedProject && !installedProject.source_owner && p.engine==='java'&&p.loader==='fabric'? `<button class="glass-btn" data-action="sync-project-mods" data-project="${attr(p.id)}" data-id="${attr(installedProject.name)}" ${minecraftBusy?'disabled':''} title="Aplicar mods añadidos y quitar los retirados, sin borrar tus mundos">${I('package',18)} Actualizar mods</button>`:''}</div></div><span class="portal-hero-caption">${available?'DISPONIBLE':enabled?'EN PREPARACIÓN':'EJECUCIÓN DESHABILITADA'}</span></section>
  ${isAdmin()?`<div class="project-execution-control"><span>${I('shield',17)} Ejecución de Minecraft: <b>${p.installable?(enabled?'Habilitada':'Bloqueada'):'Proyecto no publicado para jugar'}</b></span><button class="outline-btn" data-action="toggle-project-execution" data-id="${attr(p.id)}" title="Habilitar o deshabilitar las instalaciones y el botón Jugar">${enabled?'Bloquear ejecución':'Permitir ejecución'}</button></div>`:''}
  ${adminActions}<div class="project-lower portal-project-lower ${visibleSection(p,'notes')?'':'full-content'}"><section class="project-main"><div class="project-content-head"><div><span class="page-eyebrow">CENTRO DE NOVEDADES</span><h2>Lo último de ${esc(p.title)}</h2></div></div><div class="feed-tabs">${tabs.map(([v,label])=>`<button class="${feed===v?'active':''}" data-action="feed-tab" data-id="${v}">${label}</button>`).join('')}</div>
  ${!tabs.length?quietEmpty('Secciones ocultas','El administrador todavía no habilitó las secciones de novedades.'):posts.length?`<div class="news-list portal-news">${posts.map(post=>`<article class="news-item"><div class="news-icon">${I(isCalendar?'calendar':post.kind==='patch'?'settings':post.kind==='update'?'upload':'bell',21)}</div><div class="news-content"><small>${esc(isCalendar?post.date:(post.date||'Publicación'))}</small><h3>${esc(post.title)}</h3><p>${esc(isCalendar?post.description:post.body)}</p></div>${isAdmin()?`<div class="news-admin"><button class="icon-btn" data-action="edit-publication" data-kind="${isCalendar?'event':post.kind}" data-index="${post._index}" aria-label="Editar ${isCalendar?'evento':'publicación'}" title="Editar">${I('edit',16)}</button><button class="icon-btn danger" data-action="remove-publication" data-kind="${isCalendar?'event':post.kind}" data-index="${post._index}" aria-label="Eliminar ${isCalendar?'evento':'publicación'}" title="Eliminar">${I('trash',16)}</button></div>`:''}</article>`).join('')}</div>`:quietEmpty(isCalendar?'Todavía no hay eventos':'Todavía no hay publicaciones',isCalendar?'El calendario aparecerá cuando se publiquen eventos.':'Las novedades, parches y notas aparecerán acá cuando estén disponibles.')}</section>
  ${visibleSection(p,'notes')?`<aside class="project-details"><h3>${I('info',17)} Acerca de este proyecto</h3><div class="detail-line"><span>Estado</span><strong>${available?'Disponible':'Próximamente'}</strong></div><div class="detail-line"><span>Minecraft</span><strong>${esc(p.mc_version||'Sin configurar')} · ${esc(p.engine==='horizon'?'Rust / Horizon':(p.loader||'Vanilla'))}</strong></div><div class="detail-line"><span>Perfiles</span><strong>${p.versions?.length||0}</strong></div><div class="detail-line"><span>Mods del proyecto</span><strong>${(p.modrinth_mods||[]).length}</strong></div><div class="project-micro-info">Minecraft Java: instalación y ejecución local disponibles desde Instancias. Para servidores premium se requiere Microsoft.</div>${p.community_url?`<button class="outline-btn full" data-action="open-community" data-id="${attr(p.id)}">${I('external',17)} Comunidad</button>`:''}</aside>`:''}</div>
- </div>`;
+ ${projectCommunitySection(p)}</div>`;
 }
 function quietEmpty(title,desc){return `<div class="quiet-empty">${I('layers',25)}<h3>${esc(title)}</h3><p>${esc(desc)}</p></div>`;}
 async function loadPremiumCosmetics(){
@@ -857,6 +999,65 @@ function premiumCosmeticsPanel(){
    '</section>';
 }
 
+
+async function refreshCeiboSecurity(){
+ if(!social.connected())return;
+ const generation=accountGeneration,username=db.user?.username;
+ try{
+   const [info,mfa]=await Promise.all([social.accountInfo(),social.ceiboMfaStatus()]);
+   if(generation!==accountGeneration||db.user?.username!==username)return;
+   ceiboSecurity={...info.account,mfa};render();
+ }catch(error){if(generation===accountGeneration)message('Seguridad Ceibo: '+String(error),true);}
+}
+function displayRecoveryCodes(codes,warning=''){
+ if(!Array.isArray(codes)||!codes.length)return;
+ // Never write one-time recovery codes to disk or the social chat history.
+ const result=codes.join('\n');
+ window.prompt((warning||'Guardá estos códigos FUERA del launcher. Solo se muestran una vez.')+
+   '\nCopiá los ocho códigos de recuperación:',result);
+}
+function ceiboSecuritySection(){
+ const email=ceiboSecurity?.verified_email||'Sin verificar';
+ const mfa=ceiboSecurity?.mfa;
+ const sessions=ceiboSessions?.sessions||[];
+ return '<section class="surface-card vis-ceibo-security">'+
+   '<div class="card-heading">'+I('shield',20)+' VIS Ceibo · Seguridad y recuperación</div>'+
+   '<p class="muted">Vinculá un correo verificado para recuperar tu contraseña y usuario. Las cuentas administradoras necesitan además MFA y códigos de emergencia.</p>'+
+   (!social.connected()?'<p>Conectá tu cuenta VIS Cloud para configurar la recuperación.</p>'+
+    '<button class="outline-btn" data-action="social-retry">Conectar VIS Social</button>':
+    '<div class="vis-ceibo-section"><b>Correo verificado</b><small>'+esc(email)+'</small>'+
+      '<div class="vis-ceibo-input-line"><input type="email" id="ceibo-email-input" maxlength="254" placeholder="tu@email.com" autocomplete="email"/>'+
+      '<button class="outline-btn" type="button" data-action="ceibo-email-request">Vincular / cambiar correo</button>'+
+      '<button class="outline-btn" type="button" data-action="ceibo-email-verify">Verificar código</button></div>'+
+      '<p class="muted">Al cambiar un correo ya verificado, se pide la aprobación del correo viejo y del nuevo.</p></div>'+
+    '<div class="vis-ceibo-section"><b>Autenticación en dos pasos</b><small>'+
+      (mfa?.enrolled?'Activada · clave protegida en el servidor': 'Sin configurar')+
+      (mfa?.verified_for_seconds?' · Verificación reciente':'')+'</small>'+
+      '<div class="profile-quick-actions">'+
+      (mfa?.enrolled?'<button class="outline-btn" data-action="ceibo-mfa-verify">Verificar segundo factor</button>'+
+       '<button class="outline-btn" data-action="ceibo-mfa-rotate">Regenerar códigos de recuperación</button>':
+       '<button class="outline-btn" data-action="ceibo-mfa-setup">Configurar app de autenticación</button>')+
+      '</div></div>'+
+    '<div class="vis-ceibo-section"><b>Dispositivos y sesiones</b>'+
+      '<div class="profile-quick-actions"><button class="outline-btn" data-action="ceibo-sessions-refresh">Ver sesiones activas</button>'+
+      '<button class="outline-btn" data-action="ceibo-rebind-device">Autorizar este dispositivo</button>'+
+      '<button class="outline-btn" data-action="ceibo-logout-all">Cerrar todas las sesiones</button></div>'+
+      (sessions.length?'<div class="vis-ceibo-sessions">'+sessions.map(entry=>
+        '<div class="vis-ceibo-session"><span>'+esc(entry.auth_method==='password'?'Contraseña VIS':'Dispositivo local')+
+         (entry.current?' · Esta sesión':'')+'</span><small>'+esc(new Date(entry.created_at*1000).toLocaleString())+'</small>'+
+         '<button class="outline-btn" data-action="ceibo-revoke-session" data-id="'+attr(entry.session_id)+'">Cerrar</button></div>').join('')+'</div>':'')+
+      '</div>'+
+    '<div class="vis-ceibo-section"><b>Cambiar contraseña online</b>'+
+      '<p class="muted">Confirmá tu contraseña actual. Si usás MFA, ingresá un código nuevo de tu app. Se cerrarán todas las sesiones.</p>'+
+      '<form id="ceibo-change-password-form" class="vis-ceibo-input-line">'+
+      '<input type="password" name="current_password" required minlength="10" maxlength="128" placeholder="Contraseña actual" autocomplete="current-password"/>'+
+      '<input type="password" name="password" required minlength="10" maxlength="128" placeholder="Nueva contraseña" autocomplete="new-password"/>'+
+      '<input type="password" name="confirm" required minlength="10" maxlength="128" placeholder="Repetir contraseña" autocomplete="new-password"/>'+
+      '<input type="text" name="mfa_code" maxlength="30" placeholder="Código MFA (si está activo)" autocomplete="one-time-code"/>'+
+      '<button type="submit" class="outline-btn">Actualizar contraseña</button></form></div>'
+   )+'</section>';
+}
+
 function profilePage(){
  if(isGuest())return '<div class="content-inner"><div class="page-heading"><h1>Modo offline</h1></div>'+
    '<section class="surface-card"><p>Las cuentas offline pueden usar juegos instalados, sin identidad social.</p>'+
@@ -894,7 +1095,7 @@ function profilePage(){
   '<div class="profile-overview"><div><strong>'+skins.length+'</strong><span>Instancias propias</span></div>'+
    '<div><strong>'+db.friends.length+'</strong><span>Amigos VIS</span></div>'+
    '<div><strong>'+(publicSkin?.skin?'Publicada':localSkin?'Local':'Sin skin')+'</strong><span>Skin VIS</span></div></div>'+
-  '<div class="profile-v21-grid">'+
+  '<div class="profile-v21-grid">'+ceiboSecuritySection()+
    '<section class="surface-card profile-identity-card">'+
     '<div class="card-heading">'+I('users',20)+' Comunidad e identidad</div>'+
     '<p class="muted">Compartí tu @usuario VIS. Podés cambiarlo sin perder amigos ni chats. Tu ID permanente es distinta del nombre oficial de Minecraft.</p>'+
@@ -1415,6 +1616,8 @@ function projectInstallDialog(){
 }
 async function projectPlay(projectId){
  const p=db.projects.find(p=>p.id===projectId);if(!p)return;
+ if(projectCommunityId===projectId&&projectCommunity?.play_access==='members'&&!projectCommunity.can_play)
+   return message('Este proyecto requiere una invitación o autorización para jugar.',true);
  if(!isExecutionEnabled(p))return message('VIS STUDIOS todavía no habilitó este proyecto.',true);
  const match=db.instances.find(i=>compatibleProjectInstance(i,p)&&(!isGuest()?!i.source_owner:true))||db.instances.find(i=>compatibleProjectInstance(i,p));
  if(match){await performLaunch(projectId,match.name,match.source_owner||'');return;}
@@ -1424,6 +1627,8 @@ async function projectPlay(projectId){
 async function projectInstallAndPlay(){
  const form=document.querySelector('#vis-project-install-form');if(!(form instanceof HTMLFormElement)||!form.reportValidity())return;
  const data=new FormData(form);const projectId=dialog?.projectId;
+ if(projectCommunityId===projectId&&projectCommunity?.play_access==='members'&&!projectCommunity.can_play)
+   return message('Todavía no tenés autorización para jugar en este proyecto.',true);
  let gameDir=String(data.get('game_dir')||'').trim();const ramMb=Number(data.get('ram_mb'));
  try {
    const selectedProject=db.projects.find(p=>p.id===projectId);
@@ -1440,6 +1645,26 @@ async function projectInstallAndPlay(){
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste de RAM es exclusivo de tu perfil VIS. Los mundos y servidores siguen la política compartida de esta instancia.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
 function confirmDialog(){return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="alertdialog" aria-modal="true"><header class="modal-head"><h2>Confirmar eliminación</h2><button class="icon-btn" data-action="close-modal">${I('x',18)}</button></header><div class="modal-body"><p>¿Querés quitar <strong>${esc(dialog.label)}</strong> de VIS Nexo? Por defecto <b>se conservan todos los mundos y archivos del disco</b>.</p>
  ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los archivos del disco</b><small>Irreversible. Disponible solo para instalaciones administradas por VIS en Instancias/&lt;nombre&gt;. Cerrá el juego antes.</small></span><input type="checkbox" id="delete-instance-files"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
+
+function instanceWorldCloudSection(d){
+ if(d.sourceOwner)return '<section><h3>'+I('cloud',17)+' Nube</h3><p class="muted">Las copias de nube se vinculan desde la cuenta propietaria de la instancia.</p></section>';
+ const worlds=d.worldCloud||[];
+ const labels={grey:'Sin vincular',green:'Guardada en carpeta',orange:'Actualización pendiente',red:'Error'};
+ return '<section class="vis-cloud-worlds"><h3>'+I('cloud',17)+' Nube · mundos</h3>'+
+ '<p class="muted">Elegí una carpeta de OneDrive, Google Drive, Dropbox o Nextcloud que ya sincronices con su aplicación oficial. VIS guarda copias ZIP por mundo; el verde comprueba la copia LOCAL, no que la nube haya confirmado la subida. No se guardan contraseñas ni tokens.</p>'+
+ '<label>Carpeta gestionada por <select id="vis-world-provider"><option value="onedrive">OneDrive</option><option value="google_drive">Google Drive</option><option value="dropbox">Dropbox</option><option value="nextcloud">Nextcloud</option><option value="other">Otra carpeta sincronizada</option></select></label>'+
+ (worlds.length?worlds.map(w=>
+ '<div class="vis-cloud-world-row"><div class="vis-cloud-world-info"><b>'+esc(w.world)+'</b>'+
+ '<span class="vis-world-cloud-state is-'+attr(w.status)+'"><i aria-hidden="true"></i>'+esc(labels[w.status]||'Error')+'</span>'+
+ '<small>'+esc(w.detail||'')+'</small></div><div class="vis-data-actions">'+
+ '<button class="outline-btn" type="button" data-action="world-cloud-link" data-world="'+attr(w.world)+'">'+I('folder',14)+' Vincular</button>'+
+ (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-save" data-world="'+attr(w.world)+'">'+I('cloud',14)+' Nube</button>':'')+
+ (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-unlink" data-world="'+attr(w.world)+'">Desvincular</button>':'')+
+ (w.bytes>0?'<button class="outline-btn" type="button" data-action="world-cloud-restore" data-world="'+attr(w.world)+'">Restaurar copia</button>':'')+
+ '</div></div>').join(''):'<p class="muted">Todavía no se detectaron mundos con level.dat en esta instancia.</p>')+
+ '</section>';
+}
+
 function instanceDataDialog(){
  const d=dialog||{},backups=d.backups||[],health=d.health;
  const foreign=!!d.sourceOwner;
@@ -1473,7 +1698,7 @@ function instanceDataDialog(){
    '<label>Escribí RESTAURAR<input id="instance-data-restore-word" type="text" autocomplete="off" placeholder="RESTAURAR"/></label>'+
    '<button class="outline-btn" data-action="instance-data-restore">'+I('refresh',15)+' Restaurar copia</button>':
    foreign?'<p class="muted">La restauración de esta instancia corresponde a su propietario.</p>':'')+
- '</section>'+
+ '</section>'+instanceWorldCloudSection(d)+
  '<section><h3>'+I('shield',17)+' Diagnóstico</h3>'+
  (health?'<p>Mundos detectados: <strong>'+Number(health.worlds||0)+'</strong> · Mundos válidos: <strong>'+Number(health.valid_worlds||0)+'</strong></p>'+
  '<p>Servidores guardados: '+(health.servers_file?'Sí':'Sin lista')+
@@ -1503,11 +1728,12 @@ async function openInstanceData(projectId,name,sourceOwner){
  await onceOperation('instance-data-open:'+JSON.stringify([projectId,name,sourceOwner]),async()=>{
   try{
     const params={projectId,name,sourceOwner:sourceOwner||null};
-    const [backups,health]=await Promise.all([
-       command('instance_backups',params),command('inspect_instance_data',params)
+    const [backups,health,worldCloud]=await Promise.all([
+       command('instance_backups',params),command('inspect_instance_data',params),
+       sourceOwner?Promise.resolve([]):command('world_cloud_status',{projectId,name})
     ]);
     if(generation!==accountGeneration)return;
-    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,merge:null,
+    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,worldCloud,merge:null,
       autoBackup:!sourceOwner&&!!db.instances.find(i=>!i.source_owner&&i.project_id===projectId&&i.name===name)?.auto_backup};
     render();
   }catch(error){if(generation===accountGeneration)message('No se pudieron consultar los datos: '+String(error),true);}
@@ -1641,6 +1867,8 @@ function navigate(to,id='') {
    if(to==='project')activeFeed='news';
    contextMenu=null;render();
    if(to==='project'&&native&&db.user)void refreshAssets().catch(()=>{});
+   if(to==='project'&&social.connected())void loadProjectCommunity(id||selectedId);
+   if(to==='profile'&&social.connected())void refreshCeiboSecurity();
    root.querySelector('#main-scroll')?.scrollTo(0,0);
  },{reducedMotion:prefs.reducedMotion});
 }
@@ -1785,6 +2013,65 @@ root.addEventListener('submit',async event=>{
  const form=event.target;
  if(!(form instanceof HTMLFormElement))return;
  event.preventDefault();const formData=new FormData(form);
+
+ if(form.id==='ceibo-recovery-start-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     await command('social_recovery_start',{kind:ceiboRecoveryKind,identity:String(formData.get('identity')||'')});
+     message('Si existe una cuenta vinculada a un correo verificado, recibirás instrucciones.');
+     if(ceiboRecoveryKind==='password'){ceiboRecoveryStep='reset';render();}
+   }catch(error){message('Recuperación: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
+ if(form.id==='ceibo-recovery-reset-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     await command('social_recovery_reset',{
+       code:String(formData.get('code')||'').trim(),
+       password:String(formData.get('password')||''),
+       confirm:String(formData.get('confirm')||''),
+       recoveryCode:String(formData.get('recovery_code')||'').trim()
+     });
+     ceiboRecoveryStep='request';authMode='login';render();
+     message('Contraseña restablecida. Iniciá sesión con la nueva clave.');
+   }catch(error){message('No se pudo restablecer la contraseña: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
+ if(form.id==='ceibo-change-password-form'){
+   const password=String(formData.get('password')||'');
+   const confirm=String(formData.get('confirm')||'');
+   if(password!==confirm)return message('Las nuevas contraseñas no coinciden.',true);
+   if(!window.confirm('Cambiar la contraseña cerrará todas las sesiones actuales. ¿Continuar?'))return;
+   try{
+     await command('social_change_cloud_password',{
+       currentPassword:String(formData.get('current_password')||''),
+       password,confirm,mfaCode:String(formData.get('mfa_code')||'').trim()
+     });
+     await social.stop();resetAccountView();db=await command('logout');
+     authMode='login';authProvider='cloud';page='home';render();
+     message('Contraseña modificada. Volvé a ingresar.');
+   }catch(error){message('Contraseña VIS: '+String(error),true);}
+   return;
+ }
+
+ if(form.id==='ceibo-login-mfa-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     const code=String(formData.get('code')||'').trim();
+     db=await command('social_cloud_mfa_finish',{code});
+     resetAccountView();page='home';authMode='login';render();
+     void refreshAssets().catch(()=>{});
+     message('Segundo factor validado. Bienvenido a VIS Nexo.');
+     if(native)void connectSocial(true);
+   }catch(error){message('Verificación MFA: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
  if(form.id==='auth-form'){
   if(authBusy)return;
   const username=String(formData.get('username')||''),password=String(formData.get('password')||'');
@@ -1794,14 +2081,27 @@ root.addEventListener('submit',async event=>{
    if(cloud){
      if(authMode==='register')db=await command('social_cloud_register',{
        username,password,confirm:String(formData.get('confirm')||'')});
-     else db=await command('social_cloud_login',{identifier:username,password});
+     else{
+       const login=await command('social_cloud_login',{identifier:username,password});
+       if(!login){
+         authMode='mfa';authBusy=false;render();return;
+       }
+       db=login;
+     }
    } else {
      db=authMode==='offline'?await command('login_offline',{nickname:String(formData.get('nickname')||'')}):
        await command(authMode==='register'?'register':'login',
          authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
    }
+   const email=cloud&&authMode==='register'?String(formData.get('email')||'').trim():'';
    resetAccountView();page='home';render();void refreshAssets().catch(()=>{});message(`Sesión iniciada · ${db.user?.username}`);
-   if(native&&db.mode!=='offline')void connectSocial(cloud);
+   if(native&&db.mode!=='offline')void (async()=>{
+     await connectSocial(cloud);
+     if(email&&social.connected()){
+       try{await social.ceiboAccountEmail(email);message('Te enviamos un código para verificar el correo. Podés ingresarlo desde Mi perfil.');}
+       catch(error){message('No se pudo enviar la verificación de correo: '+String(error),true);}
+     }
+   })();
   }catch(e){message(String(e),true)}finally{authBusy=false;}
   return;
  }
@@ -1900,6 +2200,21 @@ root.addEventListener('click',async event=>{
  const act=button.dataset.action,id=button.dataset.id||'',projectId=button.dataset.project||'';
  if(['create-project','edit-project','edit-avatar','open-instance','edit-instance','delete-instance','delete-project'].includes(act))lastDialogTrigger=button;
  if(act==='modal-backdrop'){if(event.target===button)closeDialog();return;}
+
+ if(act==='ceibo-login-mfa-cancel'){
+   if(native)void command('social_cancel_pending_mfa').catch(()=>{});
+   authMode='login';authProvider='cloud';authBusy=false;render();return;
+ }
+ if(act==='auth-forgot-password'||act==='auth-forgot-username'){
+   authProvider='cloud';authMode='recover';ceiboRecoveryKind=act==='auth-forgot-password'?'password':'username';
+   ceiboRecoveryStep='request';render();return;
+ }
+ if(act==='ceibo-recovery-back'){
+   authMode='login';authProvider='cloud';ceiboRecoveryStep='request';render();return;
+ }
+ if(act==='ceibo-recovery-step'){
+   ceiboRecoveryStep=ceiboRecoveryStep==='request'?'reset':'request';render();return;
+ }
  if(act==='auth-microsoft'){void beginMicrosoftLogin();return;}
  if(act==='microsoft-copy-code'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.user_code,'Código Microsoft');return;}
  if(act==='microsoft-copy-url'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.verification_uri,'Enlace Microsoft');return;}
@@ -1940,6 +2255,84 @@ root.addEventListener('click',async event=>{
  else if(act==='sidebar-instance'){mcSelected={projectId:projectId||PERSONAL_PROJECT_ID,name:id};navigate('instances');}
  else if(act==='open-project')navigate('project',id);
  else if(act==='go-profile')navigate('profile');
+
+ else if(act==='ceibo-email-request'){
+   if(!social.connected())return message('Conectá VIS Cloud para verificar el correo.',true);
+   const email=document.getElementById('ceibo-email-input')?.value?.trim()||'';
+   if(!email)return message('Ingresá un correo electrónico válido.',true);
+   try{const result=await social.ceiboAccountEmail(email);
+     message(result.already_verified?'Este correo ya está verificado.':
+       result.dual_approval?'Revisá ambos correos: anterior y nuevo.':'Revisá tu correo e ingresá el código de verificación.');
+   }catch(error){message('Correo Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-email-verify'){
+   const code=window.prompt('Pegá el código de verificación recibido por correo:');
+   if(!code)return;
+   try{
+     const result=await command('social_recovery_verify_email',{code:code.trim()});
+     message(result.verified?'Correo verificado correctamente.':'Código confirmado. Falta aprobar desde el otro correo.');
+     await refreshCeiboSecurity();
+   }catch(error){message('Verificación Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-setup'){
+   if(!social.connected())return;
+   try{
+     const setup=await social.ceiboMfaSetup();
+     window.prompt('Configurá tu aplicación Authenticator con esta clave TOTP. Copiala y no la compartas:',setup.secret);
+     const code=window.prompt('Ingresá el código de 6 dígitos que muestra tu aplicación de autenticación:');
+     if(!code)return;
+     const confirmed=await social.ceiboMfaConfirm(code.trim());
+     displayRecoveryCodes(confirmed.recovery_codes,confirmed.warning);
+     message('Segundo factor habilitado. Guardá tus códigos fuera de VIS Nexo.');
+     await refreshCeiboSecurity();
+   }catch(error){message('MFA: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-verify'){
+   if(!social.connected())return;
+   const input=window.prompt('Código de 6 dígitos o código de emergencia MFA:');
+   if(!input)return;
+   try{await social.ceiboMfaVerify(input.trim());message('Verificación de seguridad aceptada por 10 minutos.');
+     await refreshCeiboSecurity();
+   }catch(error){message('MFA: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-rotate'){
+   if(!social.connected())return;
+   if(!window.confirm('Generar códigos nuevos invalidará todos los anteriores. ¿Continuar?'))return;
+   try{
+     const result=await social.ceiboMfaRotate();
+     displayRecoveryCodes(result.recovery_codes,result.warning);
+     message('Códigos de emergencia nuevos generados.');
+   }catch(error){message('Códigos de recuperación: '+String(error),true);}
+ }
+ else if(act==='ceibo-sessions-refresh'){
+   if(!social.connected())return;
+   try{ceiboSessions=await social.ceiboSessions();render();}
+   catch(error){message('Sesiones Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-revoke-session'){
+   if(!social.connected()||!id)return;
+   if(!window.confirm('¿Cerrar esta sesión de VIS Ceibo?'))return;
+   try{
+     await social.ceiboRevokeSession(id);
+     ceiboSessions=await social.ceiboSessions().catch(()=>null);render();
+     message('Sesión revocada.');
+   }catch(error){message('Revocar sesión: '+String(error),true);}
+ }
+ else if(act==='ceibo-logout-all'){
+   if(!social.connected())return;
+   if(!window.confirm('Esto cerrará TODAS las sesiones VIS Ceibo, incluida la actual. ¿Confirmar?'))return;
+   try{
+     await social.ceiboRevokeSession();
+     await social.stop();resetAccountView();db=await command('logout');
+     authMode='login';authProvider='cloud';page='home';render();message('Todas las sesiones fueron revocadas.');
+   }catch(error){message('Cerrar sesiones: '+String(error),true);}
+ }
+ else if(act==='ceibo-rebind-device'){
+   if(!native||!social.connected())return message('Necesitás iniciar sesión VIS Cloud con contraseña.',true);
+   try{await command('social_rebind_device');message('La identidad de este dispositivo volvió a vincularse.');
+   }catch(error){message('Dispositivo: '+String(error),true);}
+ }
+
  else if(act==='go-instances')navigate('instances');
  else if(act==='go-minecraft'){navigate('minecraft');void refreshInstalledFiles();}
  else if(act==='go-settings')navigate('settings');
@@ -2066,6 +2459,18 @@ root.addEventListener('click',async event=>{
    else await social.setAccountRole(username,choice);
    message('Permiso actualizado en el servidor');
   }catch(e){message(String(e),true);}
+ }
+ else if(act==='social-global-admin'){
+   if(social.state()?.role!=='super_admin')return message('Se requiere la supercuenta.',true);
+   const username=window.prompt('Nombre técnico de la cuenta VIS Cloud (no el @alias):');
+   if(!username)return;
+   const operation=window.prompt('grant (autorizar administrador global) o revoke (revocar)','grant');
+   if(operation!=='grant'&&operation!=='revoke')return message('Operación inválida.',true);
+   if(!window.confirm((operation==='grant'?'Otorgar':'Revocar')+' administración global a '+username+'?'))return;
+   try{
+     await social.globalAdmin(username,operation==='grant');
+     message('Permiso global actualizado. No modifica el alias ni la identidad del usuario.');
+   }catch(error){message('Administradores: '+String(error),true);}
  }
  else if(act==='social-edit-status'){stateEditorOpen=!stateEditorOpen;render();}
  else if(act==='premium-refresh'){await loadPremiumCosmetics();}
@@ -2217,6 +2622,66 @@ root.addEventListener('click',async event=>{
    const ok=await apply('configure_shared_ram',{sourceOwner:dialog.sourceOwner,projectId:dialog.projectId,name:dialog.name,ramMb},'Memoria de este perfil actualizada');
    if(ok){dialog=null;render();}
  }
+ else if(act==='project-community-refresh'){await loadProjectCommunity(selectedId);}
+ else if(act==='project-community-request'){
+   try{
+     const result=await social.requestProjectJoin(selectedId);
+     message(result.status==='member'?'Ya participás en el proyecto.':'Solicitud enviada al equipo del proyecto.');
+     await loadProjectCommunity(selectedId);
+   }catch(error){message('Solicitud: '+String(error),true);}
+ }
+ else if(act==='project-community-policy'){
+   if(!projectCommunity?.can_manage)return;
+   const admission=window.prompt('Solicitudes: open, request, invite_only',projectCommunity.admission);
+   if(admission===null)return;
+   const access=window.prompt('Permisos para jugar: public o members',projectCommunity.play_access);
+   if(access===null)return;
+   try{await social.setProjectPolicy(selectedId,admission,access);await loadProjectCommunity(selectedId);message('Política actualizada.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-member'||act==='project-community-remove-member'){
+   if(!projectCommunity?.can_manage)return;
+   const username=window.prompt('Usuario VIS Cloud al que asignar permisos:');
+   if(!username)return;
+   const remove=act==='project-community-remove-member';
+   const role=remove?'participant':window.prompt('Rol: creator, helper, content_creator, participant, guest, collaborator, mention','participant');
+   if(!role)return;
+   const canPlay=!remove&&window.confirm('¿Autorizar a este usuario para jugar en proyectos con acceso restringido?');
+   try{
+     await social.projectMember(selectedId,username,role,canPlay,remove?'revoke':'grant');
+     await loadProjectCommunity(selectedId);message(remove?'Miembro quitado':'Miembro y acceso actualizados.');
+   }catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-review'){
+   if(!projectCommunity?.can_manage)return;
+   const username=button.dataset.user,mode=button.dataset.mode;
+   try{await social.reviewProjectJoin(selectedId,username,mode);await loadProjectCommunity(selectedId);message('Solicitud revisada.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-add-media'){
+   const title=window.prompt('Título del directo o video:');if(!title)return;
+   const url=window.prompt('URL pública de YouTube o Twitch:');if(!url)return;
+   const kind=window.confirm('¿Es un stream/directo? (Cancelar = video)')?'stream':'video';
+   try{await social.projectMedia(selectedId,'add',{title,url,kind});await loadProjectCommunity(selectedId);message('Contenido vinculado al proyecto.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-delete-media'){
+   const item=projectCommunity?.media?.find(x=>x.id===id);if(!item)return;
+   if(!window.confirm('¿Quitar este contenido del proyecto?'))return;
+   try{await social.projectMedia(selectedId,'delete',{id});await loadProjectCommunity(selectedId);}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-open-media'){
+   const item=projectCommunity?.media?.find(x=>x.id===id);
+   if(!item)return;
+   try{
+     const url=new URL(item.url);
+     if(url.protocol!=='https:'||!['www.youtube.com','youtu.be','www.twitch.tv','twitch.tv','clips.twitch.tv'].includes(url.hostname))
+       throw Error('Origen de video no permitido');
+     if(native)await T.opener.openUrl(url.toString());
+     else window.open(url.toString(),'_blank','noopener,noreferrer');
+   }catch(error){message('No se pudo abrir el contenido: '+String(error),true);}
+ }
  else if(act==='project-play'){await projectPlay(id);}
  else if(act==='confirm-project-install'){await projectInstallAndPlay();}
  else if(act==='pick-project-folder'){
@@ -2317,6 +2782,37 @@ root.addEventListener('click',async event=>{
  }
  else if(act==='instance-data-tools'){
    await openInstanceData(projectId,id,button.dataset.source||'');
+ }
+ else if(['world-cloud-link','world-cloud-save','world-cloud-restore','world-cloud-unlink'].includes(act)){
+   const d=dialog,world=button.dataset.world||'',generation=accountGeneration;
+   if(!native||d?.type!=='instance-data'||d.sourceOwner||!world)return;
+   await onceOperation('cloud-world:'+JSON.stringify([d.projectId,d.name,world]),async()=>{
+     try{
+       const params={projectId:d.projectId,name:d.name,world};
+       if(act==='world-cloud-link'){
+         if(!T?.dialog?.open)throw Error('Selector de carpetas no disponible');
+         const provider=document.getElementById('vis-world-provider')?.value||'other';
+         const folder=await T.dialog.open({directory:true,multiple:false,title:'Elegí tu carpeta de nube ya sincronizada'});
+         if(typeof folder!=='string'||!folder)return;
+         await command('link_world_cloud',{...params,folder,provider});
+         message('Carpeta vinculada; guardá la primera copia del mundo con Nube.');
+       }else if(act==='world-cloud-unlink'){
+         if(!window.confirm('Desvincular Nube para '+world+'? Las copias guardadas no se eliminan.'))return;
+         await command('unlink_world_cloud',params);
+         message('Nube desvinculada del mundo; se conservaron los respaldos externos.');
+       }else if(act==='world-cloud-save'){
+         const backup=await command('backup_world_cloud',params);
+         message('Mundo copiado a carpeta sincronizada: '+fmtBytes(backup.bytes));
+       }else{
+         if(!window.confirm('Se restaurará una COPIA con nombre nuevo; el mundo actual no se reemplazará. ¿Continuar?'))return;
+         const restored=await command('restore_world_cloud',{...params,confirmation:'RESTAURAR'});
+         message('Mundo restaurado como '+restored+'. Se conservó el original.');
+       }
+       if(generation!==accountGeneration||dialog!==d)return;
+       d.worldCloud=await command('world_cloud_status',{projectId:d.projectId,name:d.name});
+       if(generation===accountGeneration&&dialog===d)render();
+     }catch(error){if(generation===accountGeneration)message('Nube: '+String(error),true);}
+   });
  }
  else if(act==='instance-data-backup')await runInstanceDataAction('backup');
  else if(act==='instance-data-toggle-auto-backup'){

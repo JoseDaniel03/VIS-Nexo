@@ -582,7 +582,8 @@ fn extract_natives(tasks:&[Task],dir:&Path)->Result<(),String>{
   let mut zip=zip::ZipArchive::new(f).map_err(|e|e.to_string())?;
   for i in 0..zip.len(){let mut entry=zip.by_index(i).map_err(|e|e.to_string())?;
    if entry.is_dir()||entry.size()>100*1024*1024 {continue}
-   let Some(name)=entry.name().split('/').last() else{continue};
+   let entry_name=entry.name().map_err(|e|e.to_string())?.into_owned();
+   let Some(name)=entry_name.split('/').last() else{continue};
    if !name.ends_with(".so")&&!name.ends_with(".dll")&&!name.ends_with(".dylib")&&!name.ends_with(".jnilib"){continue}
    let name=safe_file_name(name)?;let mut out=File::create(dir.join(name)).map_err(|e|e.to_string())?;
    std::io::copy(&mut entry,&mut out).map_err(|e|e.to_string())?;

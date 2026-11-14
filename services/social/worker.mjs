@@ -1,6 +1,8 @@
 // VIS Social, authenticated Cloudflare Worker. The launcher PIN never leaves the PC.
 // Ed25519 proof-of-possession authenticates a local device. D1 stores only hashes of
 // temporary bearer sessions and opaque ECDH/AES-GCM encrypted message envelopes.
+import {createCeiboRecovery} from "./ceibo_recovery.mjs";
+import {createCeiboMfa} from "./ceibo_mfa.mjs";
 const te = new TextEncoder();
 const USERNAME = /^[a-z0-9_]{3,24}$/;
 const MAX_BODY = 8192;
@@ -98,9 +100,11 @@ async function getSession(request, db) {
   const token = header.slice(7);
   const tokenHash = await hash(token);
   const user = await db.prepare(
-    "SELECT u.id,u.username,u.public_handle,u.public_handle_updated_at,u.display_name,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at, " +
-    "CASE WHEN u.password_hash!=\'\' THEN 1 ELSE 0 END AS cloud_login_enabled " +
-    "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id " +
+    "SELECT u.id,u.username,u.public_handle,u.public_handle_updated_at,u.display_name,u.public_id,u.avatar_version,u.skin_version,u.presence,u.custom_status,u.current_game,u.encryption_public_key,u.role,u.disabled_at,s.auth_method,s.mfa_verified_at,s.created_at AS auth_created_at, " +
+    "CASE WHEN u.password_hash!=\'\' THEN 1 ELSE 0 END AS cloud_login_enabled, " +
+    "CASE WHEN m.user_id IS NULL THEN 0 ELSE 1 END AS mfa_enrolled " +
+    "FROM auth_sessions s JOIN social_users u ON u.id=s.user_id "+
+    "LEFT JOIN account_totp m ON m.user_id=u.id " +
     "WHERE s.token_hash=? AND s.expires_at>?"
   ).bind(tokenHash, now()).first();
   if (!user) bad(401, "Session expired");
@@ -112,10 +116,12 @@ async function register(request, db) {
   const username = normalName(body.username);
   if (!await verifySignature(body.public_key, body.signature,
     "VIS-SOCIAL-REGISTER-V1\n" + username)) bad(401, "Invalid device signature");
-  const current = await db.prepare("SELECT username,signing_public_key,disabled_at FROM social_users WHERE username=?").bind(username).first();
+  const current = await db.prepare("SELECT username,signing_public_key,disabled_at,device_credential_epoch,legacy_device_key_epoch FROM social_users WHERE username=?").bind(username).first();
   if (current) {
     if (current.disabled_at !== null && current.disabled_at !== undefined) bad(403, "Account disabled");
-    if (current.signing_public_key !== body.public_key) bad(409, "Username already registered on another device");
+    if (current.signing_public_key !== body.public_key ||
+        current.device_credential_epoch!==current.legacy_device_key_epoch)
+      bad(409, "Esta cuenta requiere vincular el dispositivo desde una sesión VIS Cloud");
     return reply({ ok: true, username, existing: true });
   }
   await rateLimit(db, request, "register", 8);
@@ -155,21 +161,19 @@ async function session(request, db) {
   const username = normalName(body.username);
   if (typeof body.challenge_id !== "string" || body.challenge_id.length > 80) bad(400, "Invalid challenge ID");
   const row = await db.prepare(
-    "SELECT c.id,c.nonce,c.expires_at,u.id AS user_id,u.signing_public_key " +
+    "SELECT c.id,c.nonce,c.expires_at,u.id AS user_id,u.signing_public_key,"+
+    "u.device_credential_epoch,u.legacy_device_key_epoch,u.public_id " +
     "FROM auth_challenges c JOIN social_users u ON u.id=c.user_id " +
     "WHERE c.id=? AND u.username=? AND u.disabled_at IS NULL AND c.expires_at>?"
   ).bind(body.challenge_id, username, now()).first();
-  if (!row) bad(401, "Invalid or expired challenge");
+  if (!row||row.device_credential_epoch!==row.legacy_device_key_epoch)
+    bad(401, "La clave del dispositivo fue revocada; usá la contraseña VIS Cloud");
   const message = "VIS-SOCIAL-AUTH-V1\n" + username + "\n" + row.id + "\n" + row.nonce;
   if (!await verifySignature(row.signing_public_key, body.signature, message)) bad(401, "Invalid device signature");
   const claim = await db.prepare("DELETE FROM auth_challenges WHERE id=? AND user_id=? AND expires_at>?")
     .bind(row.id, row.user_id, now()).run();
   if (!claim.meta || claim.meta.changes !== 1) bad(401, "Challenge already used");
-  const token = randomToken();
-  const expiresAt = now() + 12 * HOUR;
-  await db.prepare("INSERT INTO auth_sessions (token_hash,user_id,expires_at) VALUES (?,?,?)")
-    .bind(await hash(token), row.user_id, expiresAt).run();
-  return reply({ token, expires_at: expiresAt, username });
+  return beginCloudSession(db,{id:row.user_id,username,public_id:row.public_id},"device");
 }
 // The Rust client derives an Ed25519 credential from the account password
 // using Argon2id (19 MiB, t=2). The password/seed never leaves the launcher.
@@ -180,13 +184,43 @@ function cloudVerifier(body, username) {
   try {unbase64(pub, 32);}catch {bad(400,"Invalid cloud public verifier");}
   return { salt, pub, text: "VIS-CLOUD-REGISTER-V2\n"+username+"\n"+salt };
 }
-async function startCloudSession(db, user) {
-  const token = randomToken();
-  const expiresAt = now() + 12 * HOUR;
-  await db.prepare("INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES (?,?,?)")
-    .bind(await hash(token), user.id, expiresAt).run();
+async function startCloudSession(db,user,authMethod="password",verifiedAt=0){
+  const token=randomToken(),expiresAt=now()+12*HOUR;
+  await db.prepare(
+    "INSERT INTO auth_sessions(token_hash,user_id,expires_at,session_id,auth_method,mfa_verified_at) "+
+    "VALUES (?,?,?,?,?,?)"
+  ).bind(await hash(token),user.id,expiresAt,crypto.randomUUID(),authMethod,verifiedAt).run();
   return reply({ok:true,token,expires_at:expiresAt,username:user.username,
     public_id:user.public_id});
+}
+// The first factor never receives a bearer when TOTP is enrolled.
+async function beginCloudSession(db,user,authMethod="password"){
+  if(!await ceiboMfa.enrolled(db,user.id))return startCloudSession(db,user,authMethod);
+  const ticket=randomToken();
+  await db.prepare("INSERT INTO account_mfa_login_tickets(ticket_hash,user_id,auth_method,expires_at) "+
+    "VALUES (?,?,?,?)").bind(await hash(ticket),user.id,authMethod,now()+300).run();
+  return reply({ok:true,mfa_required:true,mfa_ticket:ticket,username:user.username,expires_in:300});
+}
+async function finishCloudMfa(request,db,env){
+  await rateLimit(db,request,"ceibo-login-mfa-ip",12);
+  const body=await parseBody(request,300);
+  if(typeof body.mfa_ticket!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(body.mfa_ticket))
+    bad(401,"Código MFA inválido o vencido");
+  const ticketHash=await hash(body.mfa_ticket);
+  const row=await db.prepare(
+    "UPDATE account_mfa_login_tickets SET attempts=attempts+1 "+
+    "WHERE ticket_hash=? AND expires_at>? AND attempts<5 RETURNING user_id,auth_method"
+  ).bind(ticketHash,now()).first();
+  if(!row)bad(401,"Código MFA inválido o vencido");
+  await ceiboMfa.verifyLoginFactor(db,row.user_id,body,env);
+  const claimed=await db.prepare(
+    "DELETE FROM account_mfa_login_tickets WHERE ticket_hash=? AND user_id=? AND expires_at>?"
+  ).bind(ticketHash,row.user_id,now()).run();
+  if(claimed.meta?.changes!==1)bad(401,"Este código MFA ya se utilizó");
+  const user=await db.prepare("SELECT id,username,public_id FROM social_users "+
+    "WHERE id=? AND disabled_at IS NULL").bind(row.user_id).first();
+  if(!user)bad(401,"Cuenta deshabilitada");
+  return startCloudSession(db,user,row.auth_method,now());
 }
 async function cloudRegister(request, db) {
   await rateLimit(db,request,"cloud-register",5);
@@ -264,7 +298,7 @@ async function cloudVerify(request, db) {
     "DELETE FROM auth_challenges WHERE id=? AND user_id=? AND expires_at>?"
   ).bind(row.id,row.user_id,now()).run();
   if(claimed.meta?.changes!==1)bad(401,"Challenge already used");
-  return startCloudSession(db,{id:row.user_id,username:row.username,public_id:row.public_id});
+  return beginCloudSession(db,{id:row.user_id,username:row.username,public_id:row.public_id});
 }
 async function upgradeCloudLogin(request, db, user) {
   await rateLimit(db,request,"cloud-upgrade:"+user.id,3);
@@ -569,7 +603,7 @@ function projectId(value) {
 }
 function isSuper(user) { return user.role === "super_admin"; }
 async function canDevelop(db, user) {
-  if (isSuper(user)) return true;
+  if (await isGlobalAdmin(db,user)) return true;
   const grant=await db.prepare("SELECT user_id FROM developer_grants WHERE user_id=?")
     .bind(user.id).first();
   return !!grant;
@@ -599,6 +633,8 @@ async function accountInfo(db, user) {
     cloud_credential_public_key: row.password_hash?.startsWith("ed25519:")
       ? row.password_hash.slice(8) : null,
     developer: await canDevelop(db,user),
+    global_admin: await isGlobalAdmin(db,user),
+    verified_email: (await ceibo.mailbox(db,user.id))?.email_lower||null,
     signing_public_key: row.signing_public_key, created_at: row.created_at
   } });
 }
@@ -919,9 +955,284 @@ async function cleanup(db) {
     db.prepare("DELETE FROM auth_sessions WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM auth_rate_limits WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM pending_messages WHERE expires_at<? OR acknowledged_at IS NOT NULL").bind(t),
-    db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t)
+    db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM account_recovery_tokens WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM account_email_pending WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM account_totp_pending WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM account_mfa_login_tickets WHERE expires_at<?").bind(t)
   ]);
 }
+
+// VIS Universe community: all writes are authorized against D1 immutable user IDs.
+// Local VIS launcher flags and display names never grant server permissions.
+const COMMUNITY_ROLES=new Set(["creator","helper","content_creator","participant","guest","collaborator","mention"]);
+async function isGlobalAdmin(db,user) {
+  if(isSuper(user))return true;
+  return !!(await db.prepare("SELECT user_id FROM global_admin_grants WHERE user_id=?")
+    .bind(user.id).first());
+}
+async function canManageCommunity(db,user,id) {
+  if(await isGlobalAdmin(db,user))return true;
+  const own=await db.prepare("SELECT id FROM social_projects WHERE id=? AND created_by=?")
+    .bind(id,user.id).first();
+  if(own)return true;
+  const staff=await db.prepare(
+    "SELECT user_id FROM project_staff WHERE project_id=? AND user_id=? AND staff_role='manager'"
+  ).bind(id,user.id).first();
+  if(staff)return true;
+  return !!(await db.prepare(
+    "SELECT user_id FROM project_members WHERE project_id=? AND user_id=? AND member_role='creator'"
+  ).bind(id,user.id).first());
+}
+async function communityOverview(request,db,user) {
+  await rateLimit(db,request,"community-read:"+user.id,100);
+  const data=await parseBody(request,600);
+  const id=projectId(data.project_id);
+  const project=await db.prepare(
+    "SELECT id,title,visibility FROM social_projects WHERE id=?"
+  ).bind(id).first();
+  if(!project)bad(404,"Project not found");
+  const manager=await canManageCommunity(db,user,id);
+  const myself=await db.prepare(
+    "SELECT member_role,can_play FROM project_members WHERE project_id=? AND user_id=?"
+  ).bind(id,user.id).first();
+  if(project.visibility!=="published"&&!manager&&!myself)bad(404,"Project not found");
+  const [settings,members,media,requestRow,pending]=await Promise.all([
+    db.prepare("SELECT admission,play_access FROM project_settings WHERE project_id=?").bind(id).first(),
+    db.prepare(
+      "SELECT u.username,u.public_handle,u.display_name,u.presence,u.current_game,m.member_role,m.can_play,m.joined_at "+
+      "FROM project_members m JOIN social_users u ON u.id=m.user_id "+
+      "WHERE m.project_id=? AND u.disabled_at IS NULL ORDER BY m.joined_at ASC LIMIT 250"
+    ).bind(id).all(),
+    db.prepare(
+      "SELECT m.id,m.title,m.url,m.provider,m.kind,m.created_at,u.username AS author "+
+      "FROM project_media m JOIN social_users u ON u.id=m.author_id "+
+      "WHERE m.project_id=? ORDER BY m.created_at DESC LIMIT 30"
+    ).bind(id).all(),
+    db.prepare("SELECT status FROM project_join_requests WHERE project_id=? AND user_id=?")
+      .bind(id,user.id).first(),
+    manager?db.prepare(
+      "SELECT u.username,r.note,r.created_at FROM project_join_requests r "+
+      "JOIN social_users u ON u.id=r.user_id WHERE r.project_id=? AND r.status='pending' "+
+      "ORDER BY r.created_at ASC LIMIT 100"
+    ).bind(id).all():Promise.resolve({results:[]})
+  ]);
+  const access=settings?.play_access||"public";
+  return reply({project_id:id,can_manage:manager,role:myself?.member_role||"",
+    can_play:project.visibility==="published"&&(access==="public"||myself?.can_play===1),
+    admission:settings?.admission||"request",play_access:access,
+    request_status:requestRow?.status||"",
+    members:members.results||[],media:media.results||[],pending:pending.results||[]});
+}
+async function requestJoinCommunity(request,db,user) {
+  await rateLimit(db,request,"project-join:"+user.id,10);
+  const data=await parseBody(request,700),id=projectId(data.project_id);
+  const note=typeof data.note==="string"?data.note.trim():"";
+  if(note.length>300)bad(400,"Message too long");
+  const project=await db.prepare(
+    "SELECT p.visibility,COALESCE(s.admission,'request') AS admission "+
+    "FROM social_projects p LEFT JOIN project_settings s ON s.project_id=p.id WHERE p.id=?"
+  ).bind(id).first();
+  if(project?.visibility!=="published")bad(404,"Project not found");
+  if(project.admission==="invite_only")bad(403,"Project requires an invitation");
+  const existing=await db.prepare("SELECT user_id FROM project_members WHERE project_id=? AND user_id=?")
+    .bind(id,user.id).first();
+  if(existing)return reply({ok:true,status:"member"});
+  if(project.admission==="open"){
+    await db.batch([
+      db.prepare("INSERT OR IGNORE INTO project_members(project_id,user_id,member_role,can_play,added_by) VALUES (?,?,'participant',1,?)")
+        .bind(id,user.id,user.id),
+      db.prepare(
+        "INSERT INTO project_join_requests(project_id,user_id,status,note,reviewed_at,reviewed_by) "+
+        "VALUES (?,?,'approved',?,unixepoch(),?) ON CONFLICT(project_id,user_id) "+
+        "DO UPDATE SET status='approved',reviewed_at=unixepoch(),reviewed_by=excluded.reviewed_by"
+      ).bind(id,user.id,note,user.id)
+    ]);
+    return reply({ok:true,status:"member"});
+  }
+  const existingRequest=await db.prepare(
+    "SELECT status,created_at FROM project_join_requests WHERE project_id=? AND user_id=?"
+  ).bind(id,user.id).first();
+  if(existingRequest?.status==="pending")return reply({ok:true,status:"pending"});
+  if(existingRequest&&now()-existingRequest.created_at<7*24*3600)
+    bad(429,"Wait before requesting to join again");
+  await db.prepare(
+    "INSERT INTO project_join_requests(project_id,user_id,status,note,created_at,reviewed_at,reviewed_by) "+
+    "VALUES (?,?,'pending',?,unixepoch(),NULL,NULL) ON CONFLICT(project_id,user_id) "+
+    "DO UPDATE SET status='pending',note=excluded.note,created_at=unixepoch(),reviewed_at=NULL,reviewed_by=NULL"
+  ).bind(id,user.id,note).run();
+  return reply({ok:true,status:"pending"});
+}
+async function manageCommunityMembers(request,db,user) {
+  await rateLimit(db,request,"project-members:"+user.id,20);
+  const data=await parseBody(request,900),id=projectId(data.project_id);
+  if(!await canManageCommunity(db,user,id))bad(403,"Project manager required");
+  const username=normalName(data.username),role=data.role,action=data.action;
+  if(!["grant","revoke"].includes(action)|| (action==="grant"&&!COMMUNITY_ROLES.has(role)))
+    bad(400,"Invalid membership update");
+  if(role==="creator"&&!await isGlobalAdmin(db,user))
+    bad(403,"Only a global administrator can grant creator roles");
+  const target=await db.prepare("SELECT id,role FROM social_users WHERE username=? AND disabled_at IS NULL")
+    .bind(username).first();
+  if(!target)bad(404,"Account not found");
+  // 'role' is caller-controlled. On revoke, read the actual role from D1,
+  // otherwise a manager could remove a creator by sending role='participant'.
+  const existingRole=await db.prepare(
+    "SELECT member_role FROM project_members WHERE project_id=? AND user_id=?"
+  ).bind(id,target.id).first();
+  if(action==="revoke"&&existingRole?.member_role==="creator"&&!await isGlobalAdmin(db,user))
+    bad(403,"Only global administrators can revoke a project creator");
+  const project=await db.prepare("SELECT id FROM social_projects WHERE id=?").bind(id).first();
+  if(!project)bad(404,"Project not found");
+  if(action==="revoke"){
+    await db.batch([
+      db.prepare("DELETE FROM project_members WHERE project_id=? AND user_id=?").bind(id,target.id),
+      auditStatement(db,user.id,"project.member.revoke",id+":"+username)
+    ]);
+  }else{
+    const play=role!=="mention"&&data.can_play===true?1:0;
+    await db.batch([
+      db.prepare(
+        "INSERT INTO project_members(project_id,user_id,member_role,can_play,added_by) VALUES (?,?,?,?,?) "+
+        "ON CONFLICT(project_id,user_id) DO UPDATE SET member_role=excluded.member_role,"+
+        "can_play=excluded.can_play,added_by=excluded.added_by"
+      ).bind(id,target.id,role,play,user.id),
+      auditStatement(db,user.id,"project.member.grant",id+":"+username+":"+role)
+    ]);
+  }
+  return reply({ok:true,project_id:id,username,role:action==="revoke"?"":role});
+}
+async function reviewCommunityJoin(request,db,user) {
+  await rateLimit(db,request,"project-review:"+user.id,25);
+  const data=await parseBody(request,700),id=projectId(data.project_id);
+  if(!await canManageCommunity(db,user,id))bad(403,"Project manager required");
+  const username=normalName(data.username);
+  if(!["approve","reject"].includes(data.action))bad(400,"Invalid review action");
+  const target=await db.prepare("SELECT id FROM social_users WHERE username=? AND disabled_at IS NULL")
+    .bind(username).first();
+  if(!target)bad(404,"Account not found");
+  const requested=await db.prepare(
+    "SELECT status FROM project_join_requests WHERE project_id=? AND user_id=?"
+  ).bind(id,target.id).first();
+  if(requested?.status!=="pending")bad(409,"No pending request");
+  const status=data.action==="approve"?"approved":"rejected";
+  const changed=await db.prepare(
+    "UPDATE project_join_requests SET status=?,reviewed_at=unixepoch(),reviewed_by=? "+
+    "WHERE project_id=? AND user_id=? AND status='pending'"
+  ).bind(status,user.id,id,target.id).run();
+  if(changed.meta?.changes!==1)bad(409,"Already reviewed");
+  if(status==="approved"){
+    await db.prepare(
+      "INSERT INTO project_members(project_id,user_id,member_role,can_play,added_by) "+
+      "VALUES (?,?,'participant',1,?) ON CONFLICT(project_id,user_id) "+
+      "DO UPDATE SET can_play=1,member_role='participant',added_by=excluded.added_by"
+    ).bind(id,target.id,user.id).run();
+  }
+  await auditStatement(db,user.id,"project.join."+status,id+":"+username).run();
+  return reply({ok:true,project_id:id,username,status});
+}
+async function setCommunityPolicy(request,db,user) {
+  await rateLimit(db,request,"project-policy:"+user.id,12);
+  const data=await parseBody(request,600),id=projectId(data.project_id);
+  if(!await canManageCommunity(db,user,id))bad(403,"Project manager required");
+  if(!["open","request","invite_only"].includes(data.admission)||
+     !["public","members"].includes(data.play_access))bad(400,"Invalid admission policy");
+  const project=await db.prepare("SELECT id FROM social_projects WHERE id=?").bind(id).first();
+  if(!project)bad(404,"Project not found");
+  await db.batch([
+    db.prepare(
+      "INSERT INTO project_settings(project_id,admission,play_access) VALUES (?,?,?) "+
+      "ON CONFLICT(project_id) DO UPDATE SET admission=excluded.admission,"+
+      "play_access=excluded.play_access,updated_at=unixepoch()"
+    ).bind(id,data.admission,data.play_access),
+    auditStatement(db,user.id,"project.policy",id+":"+data.admission+":"+data.play_access)
+  ]);
+  return reply({ok:true});
+}
+async function grantGlobalAdmin(request,db,user) {
+  requireSuper(user); // A global admin is never allowed to promote other admins.
+  await rateLimit(db,request,"global-admin:"+user.id,5);
+  const data=await parseBody(request,500),username=normalName(data.username);
+  if(typeof data.enabled!=="boolean")bad(400,"Invalid grant value");
+  const target=await db.prepare(
+    "SELECT id,role FROM social_users WHERE username=? AND disabled_at IS NULL"
+  ).bind(username).first();
+  if(!target||target.role==="super_admin"||target.id===user.id)
+    bad(403,"Target cannot be changed");
+  if(data.enabled){
+    await db.batch([
+      db.prepare("INSERT OR IGNORE INTO global_admin_grants(user_id,granted_by) VALUES (?,?)")
+        .bind(target.id,user.id),
+      auditStatement(db,user.id,"account.global_admin.grant",username)
+    ]);
+  }else{
+    await db.batch([
+      db.prepare("DELETE FROM global_admin_grants WHERE user_id=?").bind(target.id),
+      auditStatement(db,user.id,"account.global_admin.revoke",username)
+    ]);
+  }
+  return reply({ok:true,username,enabled:data.enabled});
+}
+function communityMediaProvider(input) {
+  if(typeof input!=="string"||input.length>500)bad(400,"Invalid media URL");
+  let url;
+  try{url=new URL(input);}catch{bad(400,"Invalid media URL");}
+  if(url.protocol!=="https:"||url.username||url.password||url.port||
+    url.hash||!["www.youtube.com","youtube.com","youtu.be","www.twitch.tv","twitch.tv","clips.twitch.tv"].includes(url.hostname))
+    bad(400,"Only official YouTube or Twitch URLs are allowed");
+  let provider="";
+  if(url.hostname==="youtu.be"||url.hostname.endsWith("youtube.com")){
+    provider="youtube";
+    const video=url.hostname==="youtu.be"?url.pathname.slice(1):url.pathname==="/watch"?url.searchParams.get("v"):null;
+    if(!/^[A-Za-z0-9_-]{11}$/.test(video||""))bad(400,"Invalid YouTube video");
+    return {provider,url:"https://www.youtube.com/watch?v="+video,video_id:video};
+  }
+  provider="twitch";
+  if(!/^\/[a-zA-Z0-9_]{3,25}\/?$/.test(url.pathname) &&
+     !(url.hostname==="clips.twitch.tv"&&/^\/[A-Za-z0-9_-]{4,100}\/?$/.test(url.pathname)))
+    bad(400,"Invalid Twitch channel or clip URL");
+  if(url.search)bad(400,"Twitch tracking or custom parameters are not allowed");
+  return {provider,url:"https://"+url.hostname+url.pathname};
+}
+async function manageCommunityMedia(request,db,user) {
+  await rateLimit(db,request,"project-media:"+user.id,12);
+  const data=await parseBody(request,1400),id=projectId(data.project_id);
+  const manager=await canManageCommunity(db,user,id);
+  const member=await db.prepare(
+    "SELECT member_role FROM project_members WHERE project_id=? AND user_id=?"
+  ).bind(id,user.id).first();
+  if(!manager&&member?.member_role!=="content_creator")bad(403,"Media posting not allowed");
+  if(data.action==="delete"){
+    const media=await db.prepare("SELECT author_id FROM project_media WHERE id=? AND project_id=?")
+      .bind(data.id,id).first();
+    if(!media)bad(404,"Media not found");
+    if(!manager&&media.author_id!==user.id)bad(403,"Cannot delete another creator's media");
+    await db.prepare("DELETE FROM project_media WHERE id=? AND project_id=?").bind(data.id,id).run();
+    return reply({ok:true});
+  }
+  if(data.action!=="add")bad(400,"Invalid media action");
+  const title=typeof data.title==="string"?data.title.trim():"";
+  if(title.length<2||title.length>120||!["stream","video"].includes(data.kind))
+    bad(400,"Invalid media item");
+  const parsed=communityMediaProvider(data.url);
+  const count=await db.prepare("SELECT count(*) AS n FROM project_media WHERE project_id=?")
+    .bind(id).first();
+  if(count.n>=150)bad(429,"Project media limit reached");
+  const mediaId=crypto.randomUUID();
+  await db.prepare(
+    "INSERT INTO project_media(id,project_id,author_id,kind,provider,url,title) VALUES (?,?,?,?,?,?,?)"
+  ).bind(mediaId,id,user.id,data.kind,parsed.provider,parsed.url,title).run();
+  return reply({ok:true,id:mediaId});
+}
+
+const ceiboMfa=createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit,revokeRealtime});
+const ceibo=createCeiboRecovery({
+  reply,bad,now,hash,randomToken,parseBody,rateLimit,cloudVerifier,
+  verifySignature,revokeRealtime,requireStepup:ceiboMfa.requireStepup,
+  consumeRecoveryCode:ceiboMfa.consumeRecoveryCode,
+  mfaEnrolled:ceiboMfa.enrolled
+});
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -938,26 +1249,50 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets','public_handle_history')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets','public_handle_history'," +
+          "'global_admin_grants','project_members','project_settings','project_join_requests','project_media'," +
+          "'account_emails','account_email_pending','account_recovery_tokens'," +
+          "'account_recovery_notice_limits','account_totp','account_totp_pending','account_recovery_codes','account_mfa_login_tickets')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
-          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version','public_handle','public_handle_updated_at')"
+          "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version','public_handle','public_handle_updated_at','device_credential_epoch','legacy_device_key_epoch')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name)).size === 15 &&
-          new Set((columns.results || []).map(x=>x.name)).size === 8;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 10 : 0 },
+        const sessionFields=await db.prepare(
+          "SELECT name FROM pragma_table_info('auth_sessions') "+
+          "WHERE name IN ('session_id','auth_method','mfa_verified_at')"
+        ).all();
+        const ready = new Set((tables.results || []).map(x => x.name)).size === 28 &&
+          new Set((columns.results || []).map(x=>x.name)).size === 10 &&
+          new Set((sessionFields.results||[]).map(x=>x.name)).size === 3;
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 13 : 0 },
           ready ? 200 : 503);
       }
       if (method === "GET" && path === "/v1/realtime/connect")return await consumeRealtimeTicket(request,db,env);
       if (method === "POST" && path === "/v1/accounts/register") return await cloudRegister(request, db);
       if (method === "POST" && path === "/v1/accounts/login/challenge") return await cloudChallenge(request, db);
       if (method === "POST" && path === "/v1/accounts/login/verify") return await cloudVerify(request, db);
+      if (method === "POST" && path === "/v1/accounts/login/mfa") return await finishCloudMfa(request,db,env);
       if (method === "POST" && path === "/v1/auth/register") return await register(request, db);
       if (method === "POST" && path === "/v1/auth/challenge") return await challenge(request, db);
       if (method === "POST" && path === "/v1/auth/session") return await session(request, db);
+      if (method === "POST" && path.startsWith("/v1/recovery/"))
+        return await ceibo.publicRoute(path,request,db,env) || reply({error:"Not found"},404);
       if (!path.startsWith("/v1/")) return reply({ error: "Not found" }, 404);
       const user = await getSession(request, db);
+      // Legacy sessions issued before MFA enrollment cannot access content
+      // until their second factor is verified; the login API never issues
+      // these sessions after MFA enrollment.
+      if(user.mfa_enrolled && (!user.mfa_verified_at ||
+         user.mfa_verified_at<user.auth_created_at) &&
+         !["/v1/account/mfa/verify","/v1/account/mfa/status","/v1/auth/logout"].includes(path))
+        bad(403,"MFA verification required before using VIS Ceibo");
+      const mfaResult=await ceiboMfa.privateRoute(path,method,request,db,user,env);
+      if(mfaResult)return mfaResult;
+      const ceiboResult=await ceibo.privateRoute(path,method,request,db,user,env);
+      if(ceiboResult)return ceiboResult;
+      if(path.startsWith("/v1/admin/")&&(isSuper(user)||await isGlobalAdmin(db,user)))
+        await ceiboMfa.requireStepup(db,user,true);
       if (method === "POST" && path === "/v1/realtime/ticket")return await createRealtimeTicket(request,db,user,env);
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
@@ -965,6 +1300,14 @@ export default {
       if (method === "POST" && path === "/v1/account/display") return await updateDisplayName(request,db,user);
       if (method === "POST" && path === "/v1/account/handle") return await changePublicHandle(request,db,user);
       if (method === "GET" && path === "/v1/projects") return reply({projects:await getProjects(db,user)});
+      if (method === "POST" && path === "/v1/projects/community")return await communityOverview(request,db,user);
+      if (method === "POST" && path === "/v1/projects/request-join")return await requestJoinCommunity(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/community-members")return await manageCommunityMembers(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/review-join")return await reviewCommunityJoin(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/community-policy")return await setCommunityPolicy(request,db,user);
+      if (method === "POST" && path === "/v1/admin/projects/community-media")return await manageCommunityMedia(request,db,user);
+      if (method === "POST" && path === "/v1/admin/accounts/global-admin")return await grantGlobalAdmin(request,db,user);
+
       if (method === "POST" && path === "/v1/projects/subscribe") return await projectSubscription(request,db,user,"subscribe");
       if (method === "POST" && path === "/v1/projects/unsubscribe") return await projectSubscription(request,db,user,"unsubscribe");
       if (method === "POST" && path === "/v1/admin/projects/upsert") return await adminProjectUpsert(request,db,user);
