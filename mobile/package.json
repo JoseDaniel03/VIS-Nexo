@@ -1,7 +1,7 @@
 {
   "name": "vis-nexo-android-companion",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "VIS Nexo Android with explicit native McRust preview handoff",
   "scripts": {
