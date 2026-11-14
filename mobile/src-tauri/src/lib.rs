@@ -6,10 +6,10 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ed25519_dalek::{Signer, SigningKey};
 use rand_core::{OsRng, RngCore};
 use reqwest::blocking::Client;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
-use std::{sync::{Mutex, OnceLock}, time::Duration};
-use tauri::State;
+use std::{sync::{Mutex, OnceLock}, time::Duration, path::{Path,PathBuf}, fs};
+use tauri::{State, Manager, AppHandle};
 
 const SERVER: &str = "https://vis-social.defreitascarranza-845.workers.dev";
 
@@ -457,6 +457,140 @@ async fn mobile_logout(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{
     mobile_status(state)
 }
 
+// Phone-local instance manifests. The runtime is deliberately unavailable:
+// creating an instance prepares metadata/folders, not an installed game.
+#[derive(Clone,Serialize,Deserialize)]
+struct MobileInstance {
+    id:String,
+    name:String,
+    engine:String,
+    version:String,
+    loader:String,
+    project_id:String,
+    created_at:u64
+}
+fn instance_root(app:&AppHandle,user:&str)->Result<PathBuf,String>{
+    validate_username(user)?;
+    let root=app.path().app_data_dir()
+        .map_err(|_|"No se pudo abrir el almacenamiento Android")?
+        .join("mobile-worlds").join(user);
+    fs::create_dir_all(&root).map_err(|_|"Sin acceso al directorio de instancias")?;
+    Ok(root)
+}
+fn instances_file(app:&AppHandle,user:&str)->Result<PathBuf,String>{
+    Ok(instance_root(app,user)?.join("instances.json"))
+}
+fn read_instances(path:&Path)->Result<Vec<MobileInstance>,String>{
+    if !path.is_file(){return Ok(Vec::new());}
+    let data=fs::read(path).map_err(|_|"No se pudo leer la lista de instancias")?;
+    if data.len()>1024*1024{return Err("El manifiesto local de instancias es demasiado grande".into());}
+    serde_json::from_slice(&data)
+        .map_err(|_|"El archivo de instancias está dañado; no se sobrescribirá".into())
+}
+fn persist_instances(path:&Path,items:&[MobileInstance])->Result<(),String>{
+    let bytes=serde_json::to_vec_pretty(items)
+        .map_err(|_|"No se pudieron serializar las instancias")?;
+    if bytes.len()>1024*1024{return Err("Demasiadas instancias locales".into());}
+    let mut rand=[0u8;12];OsRng.fill_bytes(&mut rand);
+    let suffix=rand.iter().map(|v|format!("{v:02x}")).collect::<String>();
+    let tmp=path.with_extension(format!("tmp.{suffix}"));
+    let result=(||{
+        use std::io::Write;
+        let mut out=fs::OpenOptions::new().write(true).create_new(true).open(&tmp)
+            .map_err(|_|"No se pudo preparar el manifiesto Android")?;
+        out.write_all(&bytes).map_err(|_|"No se pudo escribir el manifiesto")?;
+        out.sync_all().map_err(|_|"No se pudo guardar el manifiesto")?;
+        fs::rename(&tmp,path).map_err(|_|"No se pudo confirmar el manifiesto Android")
+    })();
+    if result.is_err(){let _=fs::remove_file(tmp);}
+    result
+}
+fn current_android_user(state:&Mutex<Session>)->Result<String,String>{
+    let s=state.lock().map_err(|_|"La cuenta está ocupada")?;
+    if s.bearer.is_none(){return Err("Iniciá sesión en VIS Ceibo para gestionar instancias".into());}
+    let username=s.username.clone().ok_or("No hay un usuario activo")?;
+    validate_username(&username)?;
+    Ok(username)
+}
+fn game_metadata_ok(name:&str,engine:&str,version:&str,loader:&str,project:&str)->Result<(),String>{
+    if name.trim().is_empty()||name.chars().count()>64||
+       name.chars().any(|c|c.is_control()){
+        return Err("Nombre de instancia inválido".into());
+    }
+    if !["java","horizon"].contains(&engine){
+        return Err("Seleccioná Java o Rust Horizon".into());
+    }
+    if !(1..=48).contains(&version.len())||!version.bytes().all(|c|
+        c.is_ascii_alphanumeric()||c==b'.'||c==b'-'||c==b'_'){
+        return Err("La versión de juego no es válida".into());
+    }
+    if !["vanilla","fabric","quilt","neoforge","forge"].contains(&loader){
+        return Err("Loader no compatible".into());
+    }
+    if engine=="horizon"&&loader!="vanilla"{
+        return Err("Los loaders de Java no son compatibles con Horizon Rust".into());
+    }
+    if !project.is_empty()&&(project.len()>48||!project.bytes().all(|c|
+        c.is_ascii_lowercase()||c.is_ascii_digit()||c==b'-'||c==b'_')){
+        return Err("Proyecto VIS Universe inválido".into());
+    }
+    Ok(())
+}
+#[tauri::command]
+fn mobile_instances(state:State<'_,Mutex<Session>>,app:AppHandle)->Result<Vec<MobileInstance>,String>{
+    let user=current_android_user(&state)?;
+    read_instances(&instances_file(&app,&user)?)
+}
+#[tauri::command]
+fn mobile_instance_create(
+    state:State<'_,Mutex<Session>>,app:AppHandle,
+    name:String,engine:String,version:String,loader:String,project_id:Option<String>
+)->Result<MobileInstance,String>{
+    let user=current_android_user(&state)?;
+    let project=project_id.unwrap_or_default();
+    game_metadata_ok(&name,&engine,&version,&loader,&project)?;
+    let path=instances_file(&app,&user)?;
+    let mut items=read_instances(&path)?;
+    if items.len()>=128{return Err("El máximo es 128 instancias Android".into());}
+    if items.iter().any(|i|i.name.eq_ignore_ascii_case(name.trim())){
+        return Err("Ya tenés una instancia con ese nombre".into());
+    }
+    let mut random=[0u8;16];OsRng.fill_bytes(&mut random);
+    let id=random.iter().map(|v|format!("{v:02x}")).collect::<String>();
+    let created_at=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_secs();
+    let instance=MobileInstance{
+        id:id.clone(),name:name.trim().into(),engine,version,loader,
+        project_id:project,created_at
+    };
+    let root=instance_root(&app,&user)?.join(&id);
+    for component in ["worlds","mods","config","resourcepacks","backups"]{
+        fs::create_dir_all(root.join(component))
+            .map_err(|_|"No se pudieron preparar las carpetas Android")?;
+    }
+    items.push(instance.clone());
+    persist_instances(&path,&items)?;
+    Ok(instance)
+}
+#[tauri::command]
+fn mobile_instance_remove(
+    state:State<'_,Mutex<Session>>,app:AppHandle,id:String
+)->Result<usize,String>{
+    if id.len()!=32||!id.bytes().all(|b|b.is_ascii_hexdigit()){
+        return Err("Identificador de instancia incorrecto".into());
+    }
+    let user=current_android_user(&state)?;
+    let path=instances_file(&app,&user)?;
+    let mut items=read_instances(&path)?;
+    let initial=items.len();
+    items.retain(|i|i.id!=id);
+    if items.len()==initial{return Err("Instancia inexistente".into());}
+    // Deliberately keep instance folders: worlds/backups must NOT be removed
+    // just because a launcher metadata entry was unlinked.
+    persist_instances(&path,&items)?;
+    Ok(items.len())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){
     tauri::Builder::default()
@@ -465,7 +599,8 @@ pub fn run(){
             mobile_status,mobile_health,mobile_login,mobile_register,
             mobile_mfa,mobile_cancel_mfa,mobile_read,mobile_community,
             mobile_recovery_start,mobile_recovery_reset,mobile_logout,
-            mobile_action,mobile_email_verify,mobile_password_change
+            mobile_action,mobile_email_verify,mobile_password_change,
+            mobile_instances,mobile_instance_create,mobile_instance_remove
         ])
         .run(tauri::generate_context!())
         .expect("VIS Nexo Android no pudo iniciar");
@@ -479,6 +614,16 @@ mod tests {
         assert!(validate_identifier("https://example.com").is_err());
         assert!(validate_username("Administrator").is_err());
         assert_eq!(validate_identifier("@usuario_1").unwrap(),"usuario_1");
+    }
+    #[test]
+    fn mobile_instance_metadata_is_sandboxed(){
+        assert!(game_metadata_ok("Survival","java","26.3","fabric","virgoland").is_ok());
+        assert!(game_metadata_ok("Horizon","horizon","26.3","vanilla","").is_ok());
+        assert!(game_metadata_ok("../escape","java","26.3","fabric","").is_ok());
+        assert!(game_metadata_ok("Bad","horizon","26.3","fabric","").is_err());
+        assert!(game_metadata_ok("Bad","java","../../secret","vanilla","").is_err());
+        assert!(game_metadata_ok("Good","java","26.3","fabric","../escape").is_err());
+        assert!(game_metadata_ok("Bad\nName","java","26.3","vanilla","").is_err());
     }
     #[test]
     fn session_never_exposes_bearer_or_ticket(){
