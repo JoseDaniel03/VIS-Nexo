@@ -2,7 +2,7 @@
 use super::mcrust_catalog;
 use jni::{JNIEnv, objects::{JObject, JValue}};
 use std::path::Path;
-pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Path, target:&mcrust_catalog::Target)->Result<String,String> {
+pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Path, target:&mcrust_catalog::Target, skin:Option<&str>)->Result<String,String> {
     // A fixed stage identifier is safe to display; never echo the Intent,
     // account token, JNI exception message, or filesystem paths.
     let mut stage="consulta de paquetes";
@@ -62,6 +62,14 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
                     let key = JObject::from(env.new_string("vis_nexo_launch")?);
                     let value = JObject::from(env.new_string(&payload)?);
                     env.call_method(&intent, "putExtra", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&key), JValue::Object(&value)])?;
+                    // Public PNG texture only; no OAuth token, VIS bearer or
+                    // private file path can be passed between app processes.
+                    if let Some(raw)=skin.filter(|v|v.starts_with("data:image/png;base64,")&&v.len()<=87500){
+                        let skin_key=JObject::from(env.new_string("vis_nexo_skin")?);
+                        let skin_value=JObject::from(env.new_string(raw)?);
+                        env.call_method(&intent, "putExtra", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;",
+                            &[JValue::Object(&skin_key), JValue::Object(&skin_value)])?;
+                    }
                     env.call_method(activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)])?;
                     Ok("started".into())
     })();
