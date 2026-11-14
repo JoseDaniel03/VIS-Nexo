@@ -503,7 +503,7 @@ fn persist_instances(path:&Path,items:&[MobileInstance])->Result<(),String>{
         fs::rename(&tmp,path).map_err(|_|"No se pudo confirmar el manifiesto Android")
     })();
     if result.is_err(){let _=fs::remove_file(tmp);}
-    result
+    Ok(result?)
 }
 fn current_android_user(state:&Mutex<Session>)->Result<String,String>{
     let s=state.lock().map_err(|_|"La cuenta está ocupada")?;
