@@ -21,12 +21,22 @@ Portals y Universe, **no el subsistema de Minecraft**.
 - Usuarios autorizados: metadatos de proyectos, miembros y equipos,
   permisos de superadministración (roles, admin global, deshabilitar cuentas).
   **Todas las decisiones se autorizan en Cloudflare**, no por la UI móvil.
+- VIS Worlds: creación y listado de instancias locales Java/Horizon,
+  elección de versión y loader, vinculación opcional a proyecto VIS Universe,
+  carpetas sandboxed de mundos, mods, configuración, packs y backups. Quitar
+  una instancia de la lista **conserva todas sus carpetas**.
 - UI touch-first con formularios, avatar/skin y botones accesibles;
   scripts ES modules; pruebas de contrato nativas y de la interfaz.
 
 **Servidor requerido:** las funciones MFA y recuperación por correo solo son
 operativas cuando el Worker real despliega el esquema D1 0013 y cuando Resend
 está configurado con un dominio verificado. La APK no despliega los servicios.
+
+**Las instancias locales son metadatos reales, no instalaciones de Minecraft.**
+Se guardan por usuario en el sandbox Android, no en AppData de escritorio,
+y no pueden ejecutar versiones Java/Rust sin un motor y loaders portados.
+Los controles de versiones no descargan binarios. Eliminarlas de la lista
+nunca elimina `worlds/` ni `backups/`.
 
 **Todavía pendiente:** ejecutar/instalar Minecraft Java o Horizon Rust en
 Android (necesita portar el cliente y loaders), gestionar mundos y mods del
