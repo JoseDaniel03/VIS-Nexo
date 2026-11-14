@@ -1,5 +1,30 @@
 //! Nexo-managed installation of the same engine release used by PC.
 use super::mcrust_catalog;
+use sha2::{Digest,Sha256};
+/// VIS account is the stable owner; public VIS handle is just the cosmetic
+/// offline player label. Premium Microsoft identity is separately verified.
+fn minecraft_label(name:&str)->bool{
+    (3..=16).contains(&name.len())
+      && name.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_')
+}
+fn fallback_label(user:&str)->String{
+    if minecraft_label(user){return user.to_owned();}
+    let hash=Sha256::digest(user.as_bytes());
+    // Deterministic, case-preserving 16-byte nickname. No cross-account
+    // collisions from naive 16-character truncation.
+    format!("{}_{:02x}{:02x}",user.chars().take(11).collect::<String>(),hash[0],hash[1])
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn names_are_bounded_and_do_not_truncate_into_same_identity(){
+        assert!(minecraft_label("Jose_Daniel"));
+        assert!(!minecraft_label("name with spaces"));
+        let a=fallback_label("verylongusernameaaaa");
+        let b=fallback_label("verylongusernameaaab");
+        assert_ne!(a,b);assert!(minecraft_label(&a));assert!(minecraft_label(&b));
+    }
+}
 use std::sync::atomic::{AtomicBool, Ordering};
 static BUSY: AtomicBool = AtomicBool::new(false);
 struct DownloadGuard;
@@ -12,13 +37,15 @@ mod android;
 #[tauri::command]
 pub(crate) async fn mobile_mcrust_launch(
     state: State<'_, Mutex<Session>>, app: AppHandle, id: String,
+    ms:State<'_,Mutex<super::microsoft::MicrosoftState>>
 ) -> Result<Value, String> {
     if BUSY.swap(true, Ordering::AcqRel) { return Err("Ya se está preparando McRust".into()); }
     let _busy = DownloadGuard;
-    let (owner, generation) = {
+    let (owner, generation, bearer) = {
         let session = state.lock().map_err(|_| "Sesión ocupada")?;
         (session.username.clone().filter(|_| session.bearer.is_some())
-            .ok_or("Iniciá sesión en VIS Ceibo")?, session.epoch)
+            .ok_or("Iniciá sesión en VIS Ceibo")?, session.epoch,
+          session.bearer.clone().ok_or("Sesión VIS Ceibo incompleta")?)
     };
     validate_username(&owner)?;
     if id.len() != 32 || !id.bytes().all(|c| c.is_ascii_hexdigit()) {
@@ -33,8 +60,24 @@ pub(crate) async fn mobile_mcrust_launch(
     let (contract, apk) = tauri::async_runtime::spawn_blocking(move || mcrust_catalog::obtain(&cache))
         .await.map_err(|_| "Descarga de McRust interrumpida")??;
     let target = contract.targets["android-arm64"].clone();
+    // Microsoft name is only used after verification against official Minecraft
+    // Services. VIS handles are cosmetic offline names, not premium proof.
+    let verified=ms.lock().map_err(|_|"Microsoft ocupado")?
+      .verified_name(&owner,generation).map(str::to_owned);
+    let player_name=if let Some(name)=verified{
+        name
+    }else{
+        let fallback=fallback_label(&owner);
+        let bearer_for_request=bearer.clone();
+        let identity=tauri::async_runtime::spawn_blocking(move||
+          super::request("/v1/account","GET",None,Some(&bearer_for_request))
+        ).await.ok().and_then(Result::ok);
+        identity.as_ref().and_then(|a|a["account"]["public_handle"].as_str())
+          .filter(|handle|minecraft_label(handle)).map(str::to_owned)
+          .unwrap_or(fallback)
+    };
     let payload = json!({"schema":1,"owner":owner,"instance":id,
-        "engine_commit":contract.engine_commit,"name":owner.chars().take(16).collect::<String>(),"server":""}).to_string();
+        "engine_commit":contract.engine_commit,"name":player_name,"server":""}).to_string();
     {
         let guard = state.lock().map_err(|_| "Sesión ocupada")?;
         nonce_guard(&guard, generation)?;
