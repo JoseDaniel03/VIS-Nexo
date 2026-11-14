@@ -1,10 +1,14 @@
-# VIS Nexo Android v0.3.0 — prueba de McRust
+# VIS Nexo Android — launcher + instalador del motor McRust compartido
 
-Incluye las funciones sociales y de cuenta de v0.2.0 y un inicio nativo del APK separado **VIS McRust Preview ARM64**. Instalá ambos APKs de la tanda. Creá una instancia Horizon 26.3 Vanilla en Mundos y tocá **Jugar McRust · prueba**. El juego descarga sus recursos la primera vez. Los mundos quedan separados por cuenta VIS e ID de instancia dentro del almacenamiento privado del APK del juego; las carpetas de metadatos de Nexo no son la ubicación de esas partidas.
+**Estado (14/11/2026): implementación en PR, todavía sin una release completa de PC/Android ni prueba física.** El código de esta rama reemplaza el antiguo handoff experimental con un instalador que usa el manifiesto `vis-mcrust-release.json` del fork `JoseDaniel03/horizon-VISNEXO`. Solo acepta paquetes provenientes del **mismo commit de motor** que Windows/Linux; nunca descarga el viejo `com.visstudios.mcrust.preview`.
 
-El inicio transporta solo nombre offline, usuario técnico e ID de instancia. No transporta tokens Ceibo/Microsoft, contraseñas, rutas ni argumentos de shell. No habilita Minecraft Java. El sistema pide instalar el APK del juego si no está disponible; no instala código silenciosamente.
+**Flujo previsto:** iniciá sesión VIS Ceibo, creá una instancia `Horizon / 26.3 / Vanilla` en Mundos y tocá **Jugar McRust**. Nexo verificará el catálogo GitHub, la huella SHA-256 del APK, y solicitará permiso y confirmación Android para instalar `com.visstudios.mcrust`. Al tocar Jugar nuevamente abrirá esa instancia. Los mundos se guardan dentro del sandbox privado de la app McRust, separados por usuario e instancia; la carpeta de metadatos del launcher no es donde se guardan las partidas.
 
-El port Android experimental reutiliza Starling a un commit fijo; no equivale a la versión de PC. Chat E2EE multidispositivo, overlay VIS nativo y voicechat Android siguen pendientes. Compilar el APK no sustituye probarlo en un teléfono. Las firmas de preview pueden cambiar entre tandas: conservá copias de tus partidas antes de reinstalar.
+**Bloqueo actual:** todavía no hay un release del fork con Windows, Linux y Android firmados bajo el mismo manifiesto. Mientras falte ese release, el launcher muestra un error descriptivo y no intenta usar otro motor. Para publicarlo hay que fusionar el PR del fork, configurar los cuatro secretos de firma Android persistente y pasar el workflow de las tres plataformas. Las acciones de cargo-check no prueban el APK ni el inicio real.
+
+**Identidad:** el juego Android recibe solo nombre offline, propietario, ID de instancia y SHA de motor. No recibe contraseñas, tokens o rutas. VIS Ceibo **no equivale** a autenticación oficial Minecraft Premium; todavía falta OAuth Microsoft/Minecraft en Android para servidores Java con `online-mode=true`. Tampoco están listos Java Edition Android, chat E2EE entre dispositivos, voicechat ni sincronización de partidas PC↔Android.
+
+Más detalles y criterios de aceptación: [integración PC/Android](../docs/ANDROID-PC-INTEGRATION.md).
 
 ## Funciones sociales heredadas
 
@@ -35,19 +39,9 @@ El port Android experimental reutiliza Starling a un commit fijo; no equivale a 
 operativas cuando el Worker real despliega el esquema D1 0013 y cuando Resend
 está configurado con un dominio verificado. La APK no despliega los servicios.
 
-**Las instancias locales son metadatos reales, no instalaciones de Minecraft.**
-Se guardan por usuario en el sandbox Android, no en AppData de escritorio,
-y no pueden ejecutar versiones Java/Rust sin un motor y loaders portados.
-Los controles de versiones no descargan binarios. Eliminarlas de la lista
-nunca elimina `worlds/` ni `backups/`.
+**La creación de instancias prepara metadatos y carpetas.** Para Horizon 26.3 Vanilla, el botón Jugar ejecuta el instalador y el handoff del motor compartido, siempre que exista un release válido del fork. Java sigue sin motor Android. Eliminar una instancia de la lista no elimina `worlds/` ni `backups/`.
 
-**Todavía pendiente:** ejecutar/instalar Minecraft Java o Horizon Rust en
-Android (necesita portar el cliente y loaders), gestionar mundos y mods del
-teléfono, copiar respaldos de instancias de PC a Android, chats E2EE
-**multidispositivo**, llamadas/voicechat, notificaciones push de Android,
-persistencia de sesión, login Microsoft Premium y passkeys/WebAuthn. No se
-leen/modifican mundos. Es una **versión ampliada del launcher social móvil**,
-no un launcher de Minecraft funcional.
+**Todavía pendiente:** validar en teléfono físico la ejecución del port Horizon Android compartido, autenticar Minecraft Premium en Android, instalar Java, respaldar/importar mundos del juego, copiar partidas entre PC/Android, chat E2EE multidispositivo, voz, notificaciones push, sesiones persistentes y passkeys/WebAuthn. No afirmar que se puede jugar hasta verificar instalación de APK, recursos, mundo y conexión a servidor.
 
 ### Chat E2EE multidispositivo
 El escritorio VIS Portals utiliza una sola clave ECDH P-256 privada por cuenta,
