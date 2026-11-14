@@ -103,12 +103,13 @@ async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std:
                 let session = state.lock().map_err(|_| "Sesión ocupada")?;
                 nonce_guard(&session, generation)?;
                 if session.bearer.is_none() { return Err("La sesión se cerró".into()); }
-                let result = android::operate(env, activity, &payload, &apk, &target);
-                if result.is_err() {
-                    let _ = env.exception_clear();
-                    return Err("Android no pudo instalar o abrir la versión compartida de McRust".into());
+                // Native Android returns a safe failure stage without logging
+                // JNI exception contents or the VIS launch payload.
+                let status = android::operate(env, activity, &payload, &apk, &target)?;
+                match status.as_str() {
+                    "signature_mismatch" => Err("La firma de McRust instalado es distinta de la publicación. Respaldá sus mundos antes de reemplazarlo.".into()),
+                    _ => Ok(status)
                 }
-                match result.map_err(|e| e.to_string())? { status if status == "signature_mismatch" => Err("La firma de McRust instalada no corresponde a este release".into()), status => Ok(status) }
             })();
             let _ = sender.send(result);
         });
