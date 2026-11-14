@@ -1514,7 +1514,7 @@ async fn launch_horizon(
     ms:State<'_,Mutex<microsoft::MicrosoftState>>,
     project_id:String,name:String,session_file:String,source_owner:Option<String>
 )->Result<minecraft::LaunchResult,String>{
-    let (owner,mut instance,root,visitor,active,is_ms_profile,guest) = {
+    let (owner,mut instance,root,visitor,active,is_ms_profile,guest,vis_skin) = {
         let s=locked(&state)?;
         if let Some(nick)=s.guest_name.as_ref(){
             // Guest mode may use installed game resources, but cannot consume a
@@ -1529,7 +1529,7 @@ async fn launch_horizon(
                     && i.name==name && i.project_id==project_id)
                 .ok_or("La instancia Horizon no está disponible para modo offline")?;
             (source.to_owned(),ins,s.data_root.clone(),Some(nick.clone()),
-                String::new(),false,Some(nick.clone()))
+                String::new(),false,Some(nick.clone()),None)
         }else{
             let active=s.username()?.to_owned();
             let is_ms_profile=s.storage.get(&active).is_some_and(|a|a.microsoft_linked);
@@ -1542,7 +1542,7 @@ async fn launch_horizon(
                 (other.to_owned(),ins)
             }else{checked_instance(&s,&project_id,&name,true)?};
             (owner,instance,s.data_root.clone(),from.map(|_|active.clone()),
-                active,is_ms_profile,None)
+                active.clone(),is_ms_profile,None,local_horizon_skin(&s,&active))
         }
     };
     if instance.engine!="horizon"{return Err("No es una instancia Horizon".into());}
@@ -1582,8 +1582,8 @@ async fn launch_horizon(
         }else{dir.clone()};
         let outcome=if let Some(player)=visitor {
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
-            horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir)
-        }else{horizon::launch(&app,&dir,&instance,&effective)};
+            horizon::launch_shared_with_skin(&app,&dir,&instance,&effective,&game_dir,vis_skin.as_deref())
+        }else{horizon::launch_with_skin(&app,&dir,&instance,&effective,vis_skin.as_deref())};
         if let Ok(ref launched)=outcome {
             portals::register(active,launched.pid,instance.name.clone(),instance.project_id.clone(),game_dir.join(".vis/portals.json"));
         }
