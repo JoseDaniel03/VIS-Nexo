@@ -2,8 +2,11 @@
 use super::mcrust_catalog;
 use jni::{JNIEnv, objects::{JObject, JValue}};
 use std::path::Path;
-pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Path, target:&mcrust_catalog::Target)->jni::errors::Result<String> {
-
+pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Path, target:&mcrust_catalog::Target)->Result<String,String> {
+    // A fixed stage identifier is safe to display; never echo the Intent,
+    // account token, JNI exception message, or filesystem paths.
+    let mut stage="consulta de paquetes";
+    let result=(|| -> jni::errors::Result<String> {
                     use sha2::{Digest, Sha256};
                     let package = JObject::from(env.new_string(mcrust_catalog::PACKAGE)?);
                     let pm = env.call_method(activity, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[])?.l()?;
@@ -11,6 +14,7 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
                     let installed = match info { Ok(v) => Some(v.l()?), Err(_) => { env.exception_clear()?; None } };
                     let mut ready = false;
                     if let Some(info) = installed {
+                        stage="verificación de firma de McRust";
                         let version = env.call_method(&info, "getLongVersionCode", "()J", &[])?.j()?;
                         let signing = env.get_field(&info, "signingInfo", "Landroid/content/pm/SigningInfo;")?.l()?;
                         let signatures = env.call_method(signing, "getApkContentsSigners", "()[Landroid/content/pm/Signature;", &[])?.l()?;
@@ -23,6 +27,7 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
                         ready = version == target.version_code;
                     }
                     if !ready {
+                        stage="permisos de instalación";
                         let allowed = env.call_method(&pm, "canRequestPackageInstalls", "()Z", &[])?.z()?;
                         let own = env.call_method(activity, "getPackageName", "()Ljava/lang/String;", &[])?.l()?;
                         let own_text: String = env.get_string(&jni::objects::JString::from(own))?.into();
@@ -34,6 +39,7 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
                             let uri = env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&uri_text)])?.l()?;
                             env.call_method(&intent, "setData", "(Landroid/net/Uri;)Landroid/content/Intent;", &[JValue::Object(&uri)])?;
                         } else {
+                            stage="FileProvider de Android";
                             let file_path = JObject::from(env.new_string(apk.to_string_lossy())?);
                             let file = env.new_object("java/io/File", "(Ljava/lang/String;)V", &[JValue::Object(&file_path)])?;
                             let authority = JObject::from(env.new_string(format!("{own_text}.mcrust.files"))?);
@@ -44,9 +50,11 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
                             env.call_method(&intent, "setDataAndType", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&uri), JValue::Object(&mime)])?;
                             env.call_method(&intent, "addFlags", "(I)Landroid/content/Intent;", &[JValue::Int(1)])?;
                         }
+                        stage="abrir instalador o permiso de Android";
                         env.call_method(activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)])?;
                         return Ok(if allowed { "install_requested" } else { "permission_required" }.into());
                     }
+                    stage="abrir NativeActivity de McRust";
                     let intent = env.new_object("android/content/Intent", "()V", &[])?;
                     let package = JObject::from(env.new_string(mcrust_catalog::PACKAGE)?);
                     let class = JObject::from(env.new_string("android.app.NativeActivity")?);
@@ -56,5 +64,14 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
                     env.call_method(&intent, "putExtra", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&key), JValue::Object(&value)])?;
                     env.call_method(activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)])?;
                     Ok("started".into())
-                
+    })();
+    match result{
+        Ok(status)=>Ok(status),
+        Err(_) => {
+            // The Java exception text can contain private paths and user data.
+            // Keep it out of visible errors and logs.
+            let _=env.exception_clear();
+            Err(format!("Falló McRust en la etapa: {stage}. Revisá permisos de instalación y el estado de la app."))
+        }
+    }
 }
