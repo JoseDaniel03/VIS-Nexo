@@ -1017,10 +1017,12 @@ function ceiboSecuritySection(){
          '<button class="outline-btn" data-action="ceibo-revoke-session" data-id="'+attr(entry.session_id)+'">Cerrar</button></div>').join('')+'</div>':'')+
       '</div>'+
     '<div class="vis-ceibo-section"><b>Cambiar contraseña online</b>'+
-      '<p class="muted">Requiere haber ingresado con tu contraseña VIS. Cierra todas las sesiones, incluidas las de otros dispositivos.</p>'+
+      '<p class="muted">Confirmá tu contraseña actual. Si usás MFA, ingresá un código nuevo de tu app. Se cerrarán todas las sesiones.</p>'+
       '<form id="ceibo-change-password-form" class="vis-ceibo-input-line">'+
+      '<input type="password" name="current_password" required minlength="10" maxlength="128" placeholder="Contraseña actual" autocomplete="current-password"/>'+
       '<input type="password" name="password" required minlength="10" maxlength="128" placeholder="Nueva contraseña" autocomplete="new-password"/>'+
       '<input type="password" name="confirm" required minlength="10" maxlength="128" placeholder="Repetir contraseña" autocomplete="new-password"/>'+
+      '<input type="text" name="mfa_code" maxlength="30" placeholder="Código MFA (si está activo)" autocomplete="one-time-code"/>'+
       '<button type="submit" class="outline-btn">Actualizar contraseña</button></form></div>'
    )+'</section>';
 }
@@ -2014,7 +2016,10 @@ root.addEventListener('submit',async event=>{
    if(password!==confirm)return message('Las nuevas contraseñas no coinciden.',true);
    if(!window.confirm('Cambiar la contraseña cerrará todas las sesiones actuales. ¿Continuar?'))return;
    try{
-     await command('social_change_cloud_password',{password,confirm});
+     await command('social_change_cloud_password',{
+       currentPassword:String(formData.get('current_password')||''),
+       password,confirm,mfaCode:String(formData.get('mfa_code')||'').trim()
+     });
      await social.stop();resetAccountView();db=await command('logout');
      authMode='login';authProvider='cloud';page='home';render();
      message('Contraseña modificada. Volvé a ingresar.');
