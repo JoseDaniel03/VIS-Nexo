@@ -42,6 +42,8 @@ NO compilada para distribución. El fork Horizon permanece intacto.
 
 ## MFA
 - Se utiliza TOTP RFC 6238, 6 dígitos, pasos de 30 segundos, ventana ±30 s.
+- Habilitar TOTP exige autenticación reciente (máximo 5 minutos) para evitar
+  que un bearer robado y antiguo habilite MFA bajo control de un tercero.
 - El secreto TOTP se guarda en D1 cifrado con AES-256-GCM y AAD=user_id.
   La clave de cifrado reside exclusivamente en Cloudflare Secrets.
 - Al activar MFA se muestran ocho códigos de rescate aleatorios de 100 bits,
