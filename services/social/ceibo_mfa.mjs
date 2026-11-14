@@ -116,6 +116,8 @@ export function createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit}){
       db.prepare("DELETE FROM account_totp_pending WHERE user_id=?").bind(user.id),
       db.prepare("DELETE FROM account_recovery_codes WHERE user_id=?").bind(user.id),
       ...rows,
+      db.prepare("DELETE FROM auth_sessions WHERE user_id=? AND token_hash!=?").bind(user.id,user.tokenHash),
+      db.prepare("DELETE FROM realtime_tickets WHERE user_id=?").bind(user.id),
       db.prepare("UPDATE auth_sessions SET mfa_verified_at=? "+
         "WHERE token_hash=? AND user_id=?").bind(now(),user.tokenHash,user.id)
     ]);
@@ -129,6 +131,27 @@ export function createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit}){
     const result=await db.prepare("DELETE FROM account_recovery_codes "+
       "WHERE code_hash=? AND user_id=?").bind(digest,userId).run();
     return result.meta?.changes===1;
+  }
+  // Used ONLY after the first-factor login proof has been validated.
+  // This does not create a bearer; the caller atomically consumes the ticket.
+  async function verifyLoginFactor(db,userId,data,env){
+    const saved=await db.prepare(
+      "SELECT secret_ciphertext,last_counter FROM account_totp WHERE user_id=?"
+    ).bind(userId).first();
+    if(!saved)bad(401,"El código MFA es inválido");
+    if(typeof data.code==="string"&&/^\d{6}$/.test(data.code)){
+      const secret=await open(env,userId,saved.secret_ciphertext);
+      const counter=await matchCode(secret,data.code,saved.last_counter);
+      if(counter<0)bad(401,"El código MFA es inválido");
+      const claimed=await db.prepare(
+        "UPDATE account_totp SET last_counter=? WHERE user_id=? AND last_counter<?"
+      ).bind(counter,userId,counter).run();
+      if(claimed.meta?.changes!==1)bad(401,"El código MFA ya fue utilizado");
+    }else if(typeof data.recovery_code==="string"){
+      if(!await consumeRecoveryCode(db,userId,data.recovery_code))
+        bad(401,"El código MFA es inválido");
+    }else bad(401,"Ingresá tu código MFA o un código de emergencia");
+    return true;
   }
   async function verify(request,db,user,env){
     await rateLimit(db,request,"ceibo-totp-verify:"+user.id,9);
@@ -180,5 +203,5 @@ export function createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit}){
     if(path==="/v1/account/mfa/rotate-codes")return rotateCodes(request,db,user);
     return null;
   }
-  return {privateRoute,requireStepup,consumeRecoveryCode,enrolled};
+  return {privateRoute,requireStepup,consumeRecoveryCode,verifyLoginFactor,enrolled};
 }
