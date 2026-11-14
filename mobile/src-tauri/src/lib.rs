@@ -12,6 +12,7 @@ use std::{sync::{Mutex, OnceLock}, time::Duration, path::{Path,PathBuf}, fs};
 use tauri::{State, Manager, AppHandle};
 
 mod mcrust;
+mod mcrust_catalog;
 
 const SERVER: &str = "https://vis-social.defreitascarranza-845.workers.dev";
 

@@ -228,7 +228,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         (i.project_id?' · '+E(i.project_id):'')+'</div>'+
         '<div class="small-row"><span class="tiny-note">Carpetas de mundos, mods, configuraciones y backups preparadas en el teléfono.</span>'+
         button('remove-instance','Quitar de lista','data-id="'+safeAttr(i.id)+'"')+'</div>'+
-        (i.engine==='horizon'&&i.version==='26.3'?button('play-mcrust','Jugar McRust · prueba','data-id="'+safeAttr(i.id)+'"'):'<p class="muted">Motor no disponible en esta prueba Android.</p>')+'</article>'
+        (i.engine==='horizon'&&i.version==='26.3'?button('play-mcrust','Jugar McRust','data-id="'+safeAttr(i.id)+'"'):'<p class="muted">Motor no disponible en esta prueba Android.</p>')+'</article>'
       ).join(''):'<p class="muted">No creaste ninguna instancia Android.</p>')+
       '</section>';
   }
@@ -409,8 +409,8 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     try{
       const name=button.dataset.name;
       if(act==='play-mcrust'){
-        await command('mobile_mcrust_launch',{id:button.dataset.id});
-        toast('McRust está abriendo la instancia. La primera vez descarga los recursos del juego.');
+        const result=await command('mobile_mcrust_launch',{id:button.dataset.id});
+        toast(result.status==='started'?'McRust está abriendo la instancia.':result.status==='permission_required'?'Permití que Nexo instale McRust y volvé a tocar Jugar.':'Confirmá la instalación de McRust y después tocá Jugar.');
       }else if(act==='friend-accept'){
         await nativeAction('friends.accept',{username:name});
         await afterMutation('Amistad aceptada');

@@ -69,7 +69,7 @@ checks={
     and 'No se pudieron preparar las carpetas Android' in native
     and 'launch_minecraft' not in native
     and 'launch_horizon' not in native,
-  "Java remains unavailable; McRust uses an explicit external preview handoff":
+  "Java remains unavailable; McRust installs from the shared engine catalog":
     'Minecraft Rust / Java' in ui
     and 'mobile_mcrust_launch' in features
     and 'mcrust::mobile_mcrust_launch' in native,
