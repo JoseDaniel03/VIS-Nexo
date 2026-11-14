@@ -79,6 +79,8 @@ export function createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit,revokeRea
   }
   async function setup(request,db,user,env){
     await rateLimit(db,request,"ceibo-totp-setup:"+user.id,4);
+    if(!user.auth_created_at||now()-user.auth_created_at>5*60)
+      bad(403,"Para habilitar MFA, volvé a iniciar sesión con tu contraseña VIS o clave del dispositivo");
     if(await enrolled(db,user.id))bad(409,"El segundo factor ya está registrado");
     const bytes=crypto.getRandomValues(new Uint8Array(20));
     const encrypted=await seal(env,user.id,bytes);
