@@ -21,7 +21,8 @@ class D1Database {
        '../services/social/migrations/0009_realtime_tickets.sql',
        '../services/social/migrations/0010_public_handles.sql',
        '../services/social/migrations/0011_project_community.sql',
-       '../services/social/migrations/0012_ceibo_recovery.sql'
+       '../services/social/migrations/0012_ceibo_recovery.sql',
+       '../services/social/migrations/0013_mfa_login_gate.sql'
     ]) this.sqlite.exec(readFileSync(new URL(path, import.meta.url), 'utf8'));
   }
   prepare(sql) {
@@ -150,7 +151,7 @@ async function account(username) {
 }
 let response = await call('/health');
 assert.equal(response.status, 200, JSON.stringify(response));
-assert.equal(response.data.schema, 12);
+assert.equal(response.data.schema, 13);
 assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
