@@ -65,7 +65,7 @@ assert(features.adminPanel().includes('Superadministración'));
 assert(features.communityPanel().includes('Miembros'));
 const worlds=features.instancePanel();
 assert(worlds.includes('Rust Survival'));
-assert(worlds.includes('Horizon Rust 26.3'));
+assert(worlds.includes('Minecraft Rust Horizon 26.3'));
 assert(worlds.includes('Instalar / Jugar'));
 assert(!worlds.includes('Minecraft Java Edition'));
 assert(!worlds.includes('name="engine"'));
