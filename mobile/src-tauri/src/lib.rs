@@ -13,6 +13,7 @@ use tauri::{State, Manager, AppHandle};
 
 mod mcrust;
 mod mcrust_catalog;
+mod microsoft;
 
 const SERVER: &str = "https://vis-social.defreitascarranza-845.workers.dev";
 
@@ -445,7 +446,8 @@ async fn mobile_password_change(
 }
 
 #[tauri::command]
-async fn mobile_logout(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{
+async fn mobile_logout(state:State<'_,Mutex<Session>>,ms:State<'_,Mutex<microsoft::MicrosoftState>>)->Result<AuthView,String>{
+    ms.lock().map_err(|_|"Microsoft ocupado")?.clear();
     let bearer={
         let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
         s.epoch=s.epoch.wrapping_add(1);
@@ -592,13 +594,16 @@ fn mobile_instance_remove(
 pub fn run(){
     tauri::Builder::default()
         .manage(Mutex::new(Session::default()))
+        .manage(Mutex::new(microsoft::MicrosoftState::default()))
         .invoke_handler(tauri::generate_handler![
             mobile_status,mobile_health,mobile_login,mobile_register,
             mobile_mfa,mobile_cancel_mfa,mobile_read,mobile_community,
             mobile_recovery_start,mobile_recovery_reset,mobile_logout,
             mobile_action,mobile_email_verify,mobile_password_change,
             mobile_instances,mobile_instance_create,mobile_instance_remove,
-            mcrust::mobile_mcrust_launch
+            mcrust::mobile_mcrust_launch,
+            microsoft::mobile_ms_begin,microsoft::mobile_ms_poll,
+            microsoft::mobile_ms_status,microsoft::mobile_ms_disconnect
         ])
         .run(tauri::generate_context!())
         .expect("VIS Nexo Android no pudo iniciar");
