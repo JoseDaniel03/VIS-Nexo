@@ -199,7 +199,7 @@ async function beginCloudSession(db,user,authMethod="password"){
   const ticket=randomToken();
   await db.prepare("INSERT INTO account_mfa_login_tickets(ticket_hash,user_id,auth_method,expires_at) "+
     "VALUES (?,?,?,?)").bind(await hash(ticket),user.id,authMethod,now()+300).run();
-  return reply({ok:true,mfa_required:true,mfa_ticket:ticket,expires_in:300});
+  return reply({ok:true,mfa_required:true,mfa_ticket:ticket,username:user.username,expires_in:300});
 }
 async function finishCloudMfa(request,db,env){
   await rateLimit(db,request,"ceibo-login-mfa-ip",12);
