@@ -543,14 +543,20 @@ fn next_horizon_log(game_dir:&Path)->PathBuf{
     game_dir.join(".vis").join(format!("horizon-launch-{epoch}-{}.log",std::process::id()))
 }
 pub fn launch(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str)->Result<LaunchResult,String>{
-    launch_in_directory(app,dir,ins,session_file,dir)
+    launch_in_directory(app,dir,ins,session_file,dir,None)
+}
+pub fn launch_with_skin(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,skin:Option<&Path>)->Result<LaunchResult,String>{
+    launch_in_directory(app,dir,ins,session_file,dir,skin)
 }
 /// Reuse Horizon build/resources and (by default) the same instance data,
 /// while keeping Microsoft authentication tied to the active account.
 pub fn launch_shared(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,visitor_dir:&Path)->Result<LaunchResult,String>{
-    launch_in_directory(app,dir,ins,session_file,visitor_dir)
+    launch_in_directory(app,dir,ins,session_file,visitor_dir,None)
 }
-fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,game_dir:&Path)->Result<LaunchResult,String>{
+pub fn launch_shared_with_skin(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,visitor_dir:&Path,skin:Option<&Path>)->Result<LaunchResult,String>{
+    launch_in_directory(app,dir,ins,session_file,visitor_dir,skin)
+}
+fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,game_dir:&Path,offline_skin:Option<&Path>)->Result<LaunchResult,String>{
     let probe=inspect(dir,ins)?;
     if !probe.resources_ready{return Err("Prepará y verificá los recursos de Horizon antes de jugar".into())}
     // Java and Horizon now share game data per instance by default.
@@ -566,6 +572,12 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
         crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
         cmd.env("VIS_PORTALS_ENDPOINT",game_dir.join(".vis/portals.json"));
         cmd.env("VIS_PROJECT_MENU",dir.join(".vis/menu.json"));
+        // The Horizon renderer already reads HORIZON_OFFLINE_SKIN. Only set it
+        // for offline VIS identities; official Microsoft textures retain priority.
+        if let Some(path)=offline_skin {
+            cmd.env("HORIZON_OFFLINE_SKIN",path);
+            cmd.env("HORIZON_OFFLINE_SKIN_MODEL","classic");
+        }
         cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
             .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir);
         if !ins.player_name.is_empty(){cmd.arg("--name").arg(&ins.player_name);}
