@@ -165,7 +165,8 @@ fn nonce_guard(s:&Session,expected:u64)->Result<(),String>{
 }
 #[tauri::command]
 fn mobile_status(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{
-    Ok(auth_view(&state.lock().map_err(|_|"Sesión ocupada")?))
+    let guard=state.lock().map_err(|_|"Sesión ocupada")?;
+    Ok(auth_view(&guard))
 }
 #[tauri::command]
 async fn mobile_health()->Result<Value,String>{
@@ -245,7 +246,9 @@ async fn mobile_read(state:State<'_,Mutex<Session>>,kind:String)->Result<Value,S
     let result=tauri::async_runtime::spawn_blocking(move||
         request(path,"GET",None,Some(&token))
     ).await.map_err(|_|"Consulta VIS interrumpida")??;
-    nonce_guard(&state.lock().map_err(|_|"Sesión ocupada")?,generation)?;
+    let guard=state.lock().map_err(|_|"Sesión ocupada")?;
+    nonce_guard(&guard,generation)?;
+    drop(guard);
     Ok(result)
 }
 #[tauri::command]
@@ -264,7 +267,9 @@ async fn mobile_community(
         request("/v1/projects/community","POST",
             Some(&json!({"project_id":project_id})),Some(&token))
     ).await.map_err(|_|"Consulta del proyecto interrumpida")??;
-    nonce_guard(&state.lock().map_err(|_|"Sesión ocupada")?,generation)?;
+    let guard=state.lock().map_err(|_|"Sesión ocupada")?;
+    nonce_guard(&guard,generation)?;
+    drop(guard);
     Ok(data)
 }
 #[tauri::command]
