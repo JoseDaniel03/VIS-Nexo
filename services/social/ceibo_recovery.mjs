@@ -1,7 +1,7 @@
 // VIS Ceibo: verified email, one-time account recovery and session management.
 // No email-provider secret, token or plaintext password is exposed to the WebView.
 export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,rateLimit,
-  cloudVerifier,verifySignature,revokeRealtime,requireStepup,consumeRecoveryCode}) {
+  cloudVerifier,verifySignature,revokeRealtime,requireStepup,consumeRecoveryCode,mfaEnrolled}) {
   const tokenRegex=/^[A-Za-z0-9_-]{43}$/;
   const generic=()=>reply({ok:true,message:"Si existe una cuenta con un correo verificado, recibirás instrucciones."});
   function emailOf(raw){
@@ -47,6 +47,11 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
     await rateLimit(db,request,"ceibo-email:"+user.id,4);
     const data=await parseBody(request,400),next=emailOf(data.email);
     if(!configured(env))bad(503,"El correo de recuperación todavía no está habilitado");
+    // A stolen or hours-old device bearer cannot attach an attacker's email
+    // and later use the email reset flow to take ownership of a VIS account.
+    if(user.auth_method!=="password"||!user.auth_created_at||
+       now()-user.auth_created_at>5*60)
+      bad(403,"Confirmá tu contraseña VIS mediante un inicio de sesión reciente para vincular el correo");
     await requireStepup(db,user);
     const current=await mailbox(db,user.id);
     if(current?.email_lower===next)return reply({ok:true,already_verified:true});
@@ -175,9 +180,9 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
     const {salt,pub,text}=cloudVerifier(data,row.username);
     if(!await verifySignature(pub,data.registration_signature,text))
       bad(401,"La nueva contraseña no pasó la prueba criptográfica");
-    if(await isAdmin(db,row)){
+    if(await isAdmin(db,row)||await mfaEnrolled(db,row.user_id)){
       if(!await consumeRecoveryCode(db,row.user_id,data.recovery_code))
-        bad(403,"La recuperación administrativa requiere un código MFA de emergencia");
+        bad(403,"La recuperación de esta cuenta requiere un código de emergencia MFA válido");
     }
     const claimed=await db.prepare("DELETE FROM account_recovery_tokens WHERE token_hash=? AND purpose='reset' AND expires_at>?")
       .bind(tokenHash,now()).run();
