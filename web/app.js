@@ -1172,6 +1172,7 @@ function profilePage(){
       '<button class="primary-btn" data-action="publish-vis-skin" '+(!skinPath||!connected||skinSharingBusy?'disabled':'')+'>'+
         I('cloud',15)+' '+(skinSharingBusy?'Publicando…':'Compartir skin VIS')+'</button>'+
       (publicSkin?.skin?'<button class="subtle-btn" data-action="remove-vis-skin">'+I('trash',15)+' Dejar de compartir</button>':'')+
+      (publicSkin?.skin&&microsoftGamertag?'<button class="outline-btn" data-action="premium-sync-vis-skin" '+(premiumCosmeticsBusy?'disabled':'')+'>'+I('game',15)+' Aplicar skin VIS a Java Premium</button>':'')+
     '</div>'+
    '</section>'+
    '<section class="surface-card profile-library-card">'+
@@ -2622,6 +2623,12 @@ root.addEventListener('click',async event=>{
  else if(act==='edit-profile'){dialog={type:'edit-profile'};render();}
  else if(act==='publish-vis-skin'){void publishLocalSkin();}
  else if(act==='remove-vis-skin'){void removePublicSkin();}
+ else if(act==='premium-sync-vis-skin'){
+   const skin=db.user?.username?socialSkins.get(db.user.username)?.skin:null;
+   if(!skin||!microsoftGamertag)return message('Conectá tu Minecraft Premium y publicá la skin VIS antes de sincronizarla.',true);
+   if(!window.confirm('¿Querés reemplazar tu skin oficial de Minecraft Java por la skin VIS publicada? Este cambio afecta a tu cuenta Microsoft y a los demás jugadores.'))return;
+   void changePremiumCosmetic('microsoft_publish_vis_skin',{png:skin,variant:premiumSkinModel});
+ }
  else if(act==='skin-lookup'){
    const username=window.prompt('Usuario VIS cuya skin querés ver (no gamertag):','');
    if(username!==null&&username.trim())void lookupPublicSkin(username);
