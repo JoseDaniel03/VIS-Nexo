@@ -1373,7 +1373,8 @@ async fn fabric_loaders(version:String)->Result<Vec<String>,String>{
 #[tauri::command]
 fn horizon_project_menu(state:State<'_,Mutex<Backend>>,project_id:String,name:String,config:Option<serde_json::Value>)->Result<(),String>{
     let s=locked(&state)?;
-    if project_id!=PERSONAL_PROJECT_ID{s.admin()?;}
+    // Editing Horizon's server/menu layout is developer-only, including on personal instances.
+    s.admin()?;
     let(owner,instance)=checked_instance(&s,&project_id,&name,true)?;
     if instance.engine!="horizon"{return Err("La instancia no es Horizon".into());}
     let folder=minecraft::instance_dir(&s.data_root,&owner,&instance)?.join(".vis");
