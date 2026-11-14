@@ -10,6 +10,8 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
   let avatarPreview='';
   let skinPreview='';
   const security={mfa:null,sessions:null};
+  // Display-safe Microsoft state only; OAuth/Minecraft tokens remain native Rust.
+  let microsoft={status:'idle',user_code:'',verification_uri:'',name:'',uuid:''};
   const trustedDataImage=(raw,mime,max)=>{
     const prefix='data:'+mime+';base64,';
     return typeof raw==='string'&&raw.startsWith(prefix)&&raw.length<max
@@ -120,7 +122,21 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const mfa=security.mfa;
     const sessions=Array.isArray(security.sessions?.sessions)?security.sessions.sessions:[];
     const enableMfa=mfa?.enrolled;
-    return '<section class="mobile-panel"><div class="section-title">Editar perfil</div>'+
+    return '<section class="mobile-panel"><div class="section-title">Minecraft Premium · Microsoft</div>'+
+      '<p class="muted">Vinculación opcional con tu cuenta Microsoft. VIS Ceibo sigue siendo tu identidad principal; nunca compartimos tokens con la interfaz ni con McRust.</p>'+
+      (microsoft.status==='connected'
+        ?'<p class="muted">Cuenta Minecraft verificada: <strong>'+E(microsoft.name)+'</strong></p>'+
+           button('ms-disconnect','Desvincular Microsoft de este teléfono')
+        :microsoft.user_code
+        ?'<p class="muted">Ingresá este código en el sitio oficial de Microsoft:</p>'+
+          '<div class="session-list"><strong>'+E(microsoft.user_code)+'</strong></div>'+
+          '<a href="https://www.microsoft.com/link" target="_blank" rel="noopener noreferrer">Abrir microsoft.com/link</a>'+
+          '<div class="small-row">'+button('ms-poll','Comprobar autorización')+
+            button('ms-disconnect','Cancelar')+'</div>'
+        :button('ms-begin','Conectar con Microsoft'))+
+      '<p class="tiny-note">La verificación de Minecraft Premium depende de Microsoft y Mojang. Jugar en servidores premium desde Android requiere todavía un traspaso de sesión seguro al motor.</p>'+
+      '</section>'+
+      '<section class="mobile-panel"><div class="section-title">Editar perfil</div>'+
       '<form data-feature="display-name" class="inline-form">'+
       '<label>Nombre visible</label>'+
       '<input name="display_name" minlength="2" maxlength="32" value="'+E(a.display_name||'')+'" required>'+
@@ -290,9 +306,21 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       results[1].status==='fulfilled'?results[1].value.skin:null,'image/png',90000);
     if(state.view==='account')screen();
   }
+  async function refreshMicrosoft(){
+    if(!state.auth?.signed_in)return;
+    const username=state.auth.username;
+    try {
+      const result=await command('mobile_ms_status');
+      if(!state.auth?.signed_in||state.auth.username!==username)return;
+      microsoft={...microsoft,...result};
+      if(result.status==='idle')microsoft={status:'idle',user_code:'',verification_uri:'',name:'',uuid:''};
+      if(state.view==='account')screen();
+    }catch(error){toast('Microsoft: '+String(error),true);}
+  }
   function clear(){
     security.mfa=null;security.sessions=null;
     avatarPreview='';skinPreview='';
+    microsoft={status:'idle',user_code:'',verification_uri:'',name:'',uuid:''};
   }
   async function handleForm(form){
     const name=form.dataset.feature;
@@ -399,14 +427,34 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const act=button.dataset.action;
     const supported=new Set([
       'friend-accept','friend-alias','project-sub','request-review','setup-mfa','rotate-codes',
-      'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics','remove-instance','play-mcrust'
+      'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics','remove-instance','play-mcrust',
+      'ms-begin','ms-poll','ms-disconnect'
     ]);
     if(!supported.has(act))return false;
     if(uiBusy)return true;
     uiBusy=true;
     try{
       const name=button.dataset.name;
-      if(act==='play-mcrust'){
+      if(act==='ms-begin'){
+        const result=await command('mobile_ms_begin');
+        microsoft={...result,status:'pending',name:'',uuid:''};
+        screen();toast('Código Microsoft generado. Abrí microsoft.com/link y autorizá el dispositivo.');
+      }else if(act==='ms-poll'){
+        const result=await command('mobile_ms_poll');
+        microsoft={...microsoft,...result};
+        if(result.status==='connected'){
+          microsoft.user_code='';microsoft.verification_uri='';
+          toast('Cuenta Minecraft Premium verificada: '+result.name);
+        }else if(result.status==='denied'||result.status==='expired'){
+          microsoft={status:'idle',user_code:'',verification_uri:'',name:'',uuid:''};
+          toast('El código Microsoft expiró o fue rechazado.',true);
+        }else toast('La autorización todavía está pendiente.');
+        screen();
+      }else if(act==='ms-disconnect'){
+        await command('mobile_ms_disconnect');
+        microsoft={status:'idle',user_code:'',verification_uri:'',name:'',uuid:''};
+        screen();toast('Vinculación Microsoft cerrada en este teléfono.');
+      }else if(act==='play-mcrust'){
         toast('Comprobando y preparando McRust…');
         const result=await command('mobile_mcrust_launch',{id:button.dataset.id});
         toast(result.status==='started'?'McRust está abriendo la instancia.':result.status==='permission_required'?'Permití que Nexo instale McRust y volvé a tocar Jugar.':'Confirmá la instalación de McRust y después tocá Jugar.');
@@ -500,6 +548,6 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     finally{uiBusy=false}
   }
   return {friendControls,friendsPanel,projectControls,communityPanel,
-    accountPanel,adminPanel,instancePanel,canEditProjects,refreshSecurity,refreshCosmetics,refreshInstances,
+    accountPanel,adminPanel,instancePanel,canEditProjects,refreshSecurity,refreshCosmetics,refreshInstances,refreshMicrosoft,
     clear,handleForm,handleAction,handleFile};
 }
