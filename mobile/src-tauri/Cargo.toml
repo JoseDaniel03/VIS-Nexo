@@ -10,6 +10,11 @@ publish = false
 name = "vis_nexo_android_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Keep mobile debug signing, but omit large Rust DWARF sections.
+[profile.dev]
+debug = 0
+strip = "debuginfo"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
