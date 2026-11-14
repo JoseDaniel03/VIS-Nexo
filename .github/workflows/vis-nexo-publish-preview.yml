@@ -1,5 +1,5 @@
 name: VIS Nexo 2.22.2 prerelease - Windows Linux Android
-# Preview rebuild: admin-only Horizon menu editor, with backend authorization enforced.
+# Preview rebuild: admin-only Horizon menu editor; align Cargo workspace version to 2.22.2.
 on:
   workflow_dispatch:
   push:
