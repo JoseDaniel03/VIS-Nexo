@@ -89,3 +89,41 @@ button.link{background:transparent;border:0;color:#c5b0ff;font-size:12px;min-hei
 #notifications.error{background:#522638;border-color:#e17d92}
 @media (max-width:380px){.locked-feature .tag{display:none}.top{padding-left:14px;padding-right:14px}.content{padding-left:15px;padding-right:15px}.auth-content{padding-left:15px;padding-right:15px}}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition-duration:0!important;animation-duration:0!important}}
+
+/* Android mobile feature modules — native authority, touch-friendly editing. */
+.mobile-panel{display:flex;flex-direction:column;gap:11px;padding:15px;border-radius:15px;
+  background:linear-gradient(140deg,#312044b8,#1d1631);border:1px solid #ffffff1c;min-width:0}
+.mobile-panel .section-title{font-size:14px;margin-bottom:2px}
+.mobile-panel p{margin:0}
+.mobile-panel input:not([type=checkbox]),.mobile-panel select,.mobile-panel textarea{
+  width:100%;min-width:0;max-width:100%;padding:11px 12px;border-radius:10px;
+  background:#1a112d;border:1px solid #685685;font-size:13px;color:#faf5ff;
+}
+.mobile-panel textarea{resize:vertical;min-height:95px;line-height:1.4}
+.mobile-panel label{font-size:12px;color:#e0d4f8}
+.mobile-panel .inline-form{display:flex;flex-direction:column;gap:9px;margin:0}
+.mobile-panel .inline-form+.inline-form{margin-top:13px;padding-top:14px;border-top:1px solid #ffffff17}
+.mobile-panel button{min-height:44px;padding:10px;border-radius:10px;flex-shrink:0}
+.mobile-panel button.primary{margin:0}
+.mobile-panel button.outline,.mobile-panel button.danger{margin:0}
+.mobile-panel .small-row,.small-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;min-width:0;
+  padding:9px 0;border-bottom:1px solid #ffffff13}
+.mobile-panel .small-row:last-child{border-bottom:0}
+.mobile-panel .small-row small{font-size:11px;color:#b9abd3}
+.mobile-panel .small-row a{color:#c6b2ff;text-decoration:underline;overflow-wrap:anywhere}
+.mobile-panel .small-row>span{min-width:0;overflow-wrap:anywhere;flex:1 1 100px;font-size:12px}
+.mobile-panel .small-row button{min-height:38px;padding:7px 10px}
+.mobile-panel .muted{font-size:11px;line-height:1.6}
+.tiny-note{font-size:10px;color:#a89cbb;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.friend{flex-wrap:wrap}.friend-tools{display:flex;align-items:center;gap:8px;flex:0 0 100%;padding-left:52px}
+.friend-tools .outline{font-size:11px;padding:6px 10px;min-height:35px;border-radius:8px}
+.friend-tools .tiny-note{max-width:190px}
+.project{flex-wrap:wrap}.project-actions{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px}
+.project-actions button{min-height:38px;padding:8px 13px}
+.project-actions .tag{margin-left:auto}
+.mobile-panel .session-list{max-height:250px;overflow-y:auto;padding:4px 0}
+.mobile-panel input[type="file"]{width:100%;font-size:12px;min-height:52px;display:block;padding:13px 6px}
+.mobile-panel input[type=checkbox]{width:18px;height:18px;accent-color:#baa1f8;vertical-align:middle}
+.mobile-panel .section-title:not(:first-child){margin-top:15px;padding-top:8px;border-top:1px solid #ffffff15}
+.mobile-panel+.mobile-panel{margin-top:4px}
+@media(max-width:375px){.friend-tools{padding-left:0}.mobile-panel{padding:13px}.mobile-panel .small-row button{flex:1 1 auto}}
