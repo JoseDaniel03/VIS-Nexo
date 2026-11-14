@@ -1,3 +1,4 @@
+import { serverVoice, serverVoicePositions } from "./server-voice.mjs";
 import { worldInvites } from "./world-invites.mjs";
 // VIS Social, authenticated Cloudflare Worker. The launcher PIN never leaves the PC.
 // Ed25519 proof-of-possession authenticates a local device. D1 stores only hashes of
@@ -921,7 +922,10 @@ async function cleanup(db) {
     db.prepare("DELETE FROM auth_rate_limits WHERE expires_at<?").bind(t),
     db.prepare("DELETE FROM pending_messages WHERE expires_at<? OR acknowledged_at IS NOT NULL").bind(t),
     db.prepare("DELETE FROM realtime_tickets WHERE expires_at<?").bind(t),
-    db.prepare("DELETE FROM world_rooms WHERE lease_until<?").bind(t-3600)
+    db.prepare("DELETE FROM world_rooms WHERE lease_until<?").bind(t-3600),
+    db.prepare("DELETE FROM voice_sessions WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM voice_signals WHERE expires_at<?").bind(t),
+    db.prepare("DELETE FROM voice_positions WHERE updated_at<?").bind(t-60)
   ]);
 }
 export default {
@@ -940,15 +944,15 @@ export default {
         const tables = await db.prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
           "('social_users','friend_requests','friendships','friend_aliases'," +
-          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets','public_handle_history','world_rooms','world_invites')"
+          "'pending_messages','auth_sessions','auth_challenges','social_projects','project_subscriptions','admin_audit','social_avatars','social_skins','developer_grants','realtime_tickets','public_handle_history','world_rooms','world_invites','voice_sessions','voice_signals','voice_positions')"
         ).all();
         const columns=await db.prepare(
           "SELECT name FROM pragma_table_info('social_users') "+
           "WHERE name IN ('public_id','password_hash','password_salt','password_iterations','avatar_version','skin_version','public_handle','public_handle_updated_at')"
         ).all();
-        const ready = new Set((tables.results || []).map(x => x.name) ).size === 17 &&
+        const ready = new Set((tables.results || []).map(x => x.name) ).size === 20 &&
           new Set((columns.results || []).map(x=>x.name)).size === 8;
-        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 11 : 0 },
+        return reply({ service: "vis-social", status: ready ? "ready" : "migration_required", schema: ready ? 12 : 0 },
           ready ? 200 : 503);
       }
       if (method === "GET" && path === "/v1/realtime/connect")return await consumeRealtimeTicket(request,db,env);
@@ -959,8 +963,10 @@ export default {
       if (method === "POST" && path === "/v1/auth/challenge") return await challenge(request, db);
       if (method === "POST" && path === "/v1/auth/session") return await session(request, db);
       if (!path.startsWith("/v1/")) return reply({ error: "Not found" }, 404);
+      if(method==='POST'&&path==='/v1/voice/positions')return await serverVoicePositions(request,db,{env,parseBody,bad,reply,now});
       const user = await getSession(request, db);
       if (method === "POST" && path === "/v1/realtime/ticket")return await createRealtimeTicket(request,db,user,env);
+      if(method==="POST"&&["room","poll","signal","leave"].some(action=>path===`/v1/voice/${action}`))return await serverVoice(path,request,db,user,{parseBody,bad,reply,now,rateLimit,env});
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
       if (method === "GET" && path === "/v1/account") return await accountInfo(db,user);

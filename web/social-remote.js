@@ -108,6 +108,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   let state = null, keys = null, privateDb = null, currentUser = '';
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
   let lastFingerprint = '', chatActive=false, sessionEpoch=0, consecutiveErrors=0;
+  let gameActive=false;
   let historyRequest=0;
   let worldInvitations=[];
   let realtimeSocket=null,realtimeRetry=null,realtimeFailures=0;
@@ -133,13 +134,13 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     }
   }
   function scheduleRealtime(epoch){
-    if(epoch!==sessionEpoch||!connected()||document.hidden||!navigator.onLine
+    if(epoch!==sessionEpoch||!connected()||(document.hidden&&!gameActive)||!navigator.onLine
         ||realtimeRetry||realtimeSocket||realtimeConnecting)return;
     const delay=Math.min(60000,1000*Math.pow(2,Math.min(6,realtimeFailures++)));
     realtimeRetry=setTimeout(()=>{realtimeRetry=null;void connectRealtime(epoch);},delay);
   }
   async function connectRealtime(epoch){
-    if(epoch!==sessionEpoch||!connected()||document.hidden||!navigator.onLine
+    if(epoch!==sessionEpoch||!connected()||(document.hidden&&!gameActive)||!navigator.onLine
         ||realtimeSocket||realtimeConnecting)return;
     const attempt=++realtimeAttempt;
     realtimeConnecting=true;
@@ -148,7 +149,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
       // The long-lived authenticated VIS Social bearer remains inside Rust.
       const access=await command('social_realtime_ticket');
       if(epoch!==sessionEpoch||attempt!==realtimeAttempt
-          ||!connected()||document.hidden)return;
+          ||!connected()||(document.hidden&&!gameActive))return;
       const target=new URL(access.ws_url);
       if(target.protocol!=='wss:'||target.username||target.password
           ||target.pathname!=='/v1/realtime/connect'
@@ -165,7 +166,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
         void sync();
       };
       ws.onmessage=event=>{
-        if(epoch!==sessionEpoch||realtimeSocket!==ws||document.hidden)return;
+        if(epoch!==sessionEpoch||realtimeSocket!==ws||(document.hidden&&!gameActive))return;
         if(typeof event.data!=='string'||event.data.length>128)return;
         if(event.data==='pong')return;
         let message;try{message=JSON.parse(event.data);}catch{return;}
@@ -274,14 +275,14 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     }
   }
   function scheduleNext(epoch) {
-    if(epoch!==sessionEpoch||!connected()||document.hidden)return;
+    if(epoch!==sessionEpoch||!connected()||(document.hidden&&!gameActive))return;
     if(interval)clearTimeout(interval);
     interval=setTimeout(()=>{interval=null;void sync();},
       (realtimeSocket?.readyState===WebSocket.OPEN)
         ? 45000 : socialPollDelay(chatActive,consecutiveErrors));
   }
   async function sync() {
-    if (!connected() || busy || document.hidden) return;
+    if (!connected() || busy || (document.hidden&&!gameActive)) return;
     const epoch=sessionEpoch,username=currentUser;
     if(interval){clearTimeout(interval);interval=null;}
     busy = true;
@@ -405,7 +406,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     }
   }
   function onVisibility() {
-    if(document.hidden){
+    if((document.hidden&&!gameActive)){
       if(interval){clearTimeout(interval);interval=null;}
       stopRealtime();
     }else if(connected()){
@@ -622,7 +623,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
     return rpc('/v1/admin/accounts/disable','POST',{username,disabled});
   }
-  return { hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
+  return { setGameActive:value=>{const changed=gameActive!==!!value;gameActive=!!value;if(changed&&gameActive)void sync();}, hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
     setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin, state: () => state };
 }

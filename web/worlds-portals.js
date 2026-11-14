@@ -4,8 +4,9 @@ export function createWorldsPortals(command,social,account,choose,onError){
   const rooms=new Map();
   let timer=null,busy=false;
   const owner=()=>account();
-  async function game(){
+  async function game(preferredPid){
     const games=await command('portals_games');
+    if(preferredPid){const selected=games.find(g=>g.pid===preferredPid);if(!selected)throw Error('La partida ya no está disponible');return selected;}
     if(!games.length)throw Error('Iniciá una instancia Horizon actualizada desde VIS Nexo. Abrí un mundo para invitar, o quedate en el menú para unirte.');
     return games.length===1?games[0]:choose(games);
   }
@@ -30,9 +31,9 @@ export function createWorldsPortals(command,social,account,choose,onError){
       if(!rooms.size&&timer){clearInterval(timer);timer=null;}
     }
   }
-  async function invite(to){
+  async function invite(to,preferredPid){
     if(!social.connected())throw Error('Conectá VIS Portals antes de invitar');
-    const identity=owner(),selected=await game();
+    const identity=owner(),selected=await game(preferredPid);
     if(!selected)return;
     await command('portals_command',{pid:selected.pid,action:'host',code:null});
     let status;
@@ -51,8 +52,8 @@ export function createWorldsPortals(command,social,account,choose,onError){
     await social.inviteWorld(to,room.id,room.code);
     if(!timer)timer=setInterval(()=>void renew(),30000);
   }
-  async function join(id){
-    const identity=owner(),selected=await game();
+  async function join(id,preferredPid){
+    const identity=owner(),selected=await game(preferredPid);
     if(!selected)return;
     // Check the game bridge before consuming a one-use invitation.
     const status=await command('portals_command',{pid:selected.pid,action:'status',code:null});

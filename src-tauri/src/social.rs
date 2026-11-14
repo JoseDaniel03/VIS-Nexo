@@ -334,6 +334,7 @@ pub(crate) async fn social_request(
         "/v1/admin/accounts/disable", "/v1/friends/request",
         "/v1/friends/accept", "/v1/friends/alias",
         "/v1/messages/send", "/v1/messages/ack",
+        "/v1/voice/room", "/v1/voice/poll", "/v1/voice/signal", "/v1/voice/leave",
         "/v1/worlds/host", "/v1/worlds/close", "/v1/worlds/invite", "/v1/worlds/accept", "/v1/worlds/decline"
     ];
     if !(method == "GET" && GET.contains(&path.as_str())

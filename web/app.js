@@ -1,6 +1,9 @@
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 import { createSocialRemote } from './social-remote.js';
 import { createWorldsPortals } from './worlds-portals.js';
+import {createServerVoice} from './server-voice.js';
+import {createGamePortals} from './game-portals.js';
+import {openVoiceSettings} from './voice-settings.js';
 /* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
    VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
    VIS Nexo 2.17 — Universe / Worlds / Horizon Rust Edition + compartir instancias offline.
@@ -21,6 +24,7 @@ let accountGeneration=0;
 const pendingOperations=new Set();
 function resetAccountView(){
  accountGeneration++;
+ if(native)void serverVoice.leave();
  mcSelected=null;modResults=[];installedFiles=[];horizonChecks=[];
  bulkInstanceMode=false;bulkInstanceSelection.clear();
  cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;downloadJobs=[];teamReview=null;
@@ -567,6 +571,9 @@ const portalsWorlds=createWorldsPortals(command,social,()=>db.user?.username||''
  if(!selected)throw Error('Partida inválida');
  return selected;
 },error=>message(String(error),true));
+const serverVoice=createServerVoice((path,method,body)=>command('social_request',{path,method,body}),state=>{if(state.error)message(state.error,true);});
+const gamePortals=createGamePortals(command,social,portalsWorlds,serverVoice,()=>db,error=>{console.warn('VIS Portals:',error);},()=>void openVoiceSettings(serverVoice));
+if(native)gamePortals.start();
 async function enableSocialCloudPassword(){
  if(!social.connected()){message('Conectá VIS Social para vincular la cuenta.',true);return;}
  const password=window.prompt('Nueva contraseña online (mínimo 10 caracteres, no uses el PIN local):');
@@ -720,7 +727,7 @@ function socialPanel(){
  <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(socialDisplayName(db.user?.username||''))}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')} · Cuenta VIS</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
 
  <div class="social-group-head"><span class="social-contacts-label">${I('users',15)} ${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'} ${db.incoming_requests?.length?`<span class="contact-notification" title="Solicitudes de amistad pendientes">${db.incoming_requests.length}</span>`:''} </span><span>${projectFriends.length}</span></div>
- ${native&&social.connected()?`<button class="mini-add" data-action="world-stop">Dejar de compartir mundo</button>`:''}
+ ${native&&social.connected()?`<button class="mini-add" data-action="voice-settings">Ajustes de voz</button><button class="mini-add" data-action="world-stop">Dejar de compartir mundo</button>`:''}
  ${social.worldInvitations().map(inv=>`<div class="request-row"><span>${esc(inv.sender)} te invita a su mundo · 26.3</span><button class="mini-add" data-action="world-join" data-id="${attr(inv.id)}">Unirme</button><button class="mini-add" data-action="world-decline" data-id="${attr(inv.id)}">Rechazar</button></div>`).join('')}
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
@@ -1039,7 +1046,7 @@ function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const 
  ${i.source_owner&&!isGuest()&&i.share_game_data!==false?`<button class="outline-btn" data-action="recover-legacy-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}" title="Recuperar mundos y servidores guardados en antiguas carpetas separadas de tu perfil">${I('refresh',15)} Recuperar datos antiguos</button>`:''}
  ${i.source_owner&&!isGuest()?`<button class="outline-btn" data-action="hide-shared-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}" title="Solo oculta de tu biblioteca, no borra los mundos">${I('x',15)} Ocultar</button><button class="outline-btn" data-action="shared-ram" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}">${I('settings',16)} RAM</button>`:''}
  ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="export-worlds-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Exportar instancia completa a ZIP" aria-label="Exportar ${attr(i.name)}">${I('upload',16)}</button>`}
- ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="duplicate-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Duplicar configuración sin copiar mundos" aria-label="Duplicar ${attr(i.name)}">${I('layers',16)}</button><button class="icon-btn" data-action="edit-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Ajustar instancia">${I('edit',16)}</button><button class="outline-btn danger" data-action="delete-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Quitar instancia; por defecto conserva mundos">${I('trash',16)} Quitar</button>`}</div></article>`;
+ ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="duplicate-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Duplicar configuración sin copiar mundos" aria-label="Duplicar ${attr(i.name)}">${I('layers',16)}</button>${i.engine==='horizon'&&(isAdmin()||i.project_id===PERSONAL_PROJECT_ID)?`<button class="outline-btn" data-action="horizon-menu" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">Menú del juego</button>`:''}<button class="icon-btn" data-action="edit-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Ajustar instancia">${I('edit',16)}</button><button class="outline-btn danger" data-action="delete-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Quitar instancia; por defecto conserva mundos">${I('trash',16)} Quitar</button>`}</div></article>`;
 }
 function minecraftExitNotice(){
  if(!lastMinecraftExit || lastMinecraftExit.success)return '';
@@ -1997,6 +2004,19 @@ root.addEventListener('click',async event=>{
  else if(act==='toggle-social'){if(socialVisible){beginSurfaceDismiss(root,'.social-pane',()=>{socialVisible=false;render();},{reducedMotion:prefs.reducedMotion});}else{socialVisible=true;render();}}
  else if(act==='social-global'){socialTab='global';render();}
  else if(act==='social-projects'){socialTab='projects';render();}
+ else if(act==='voice-settings'){await openVoiceSettings(serverVoice);}
+ else if(act==='horizon-menu'){
+   const server=window.prompt('Servidor asignado (vacío para recuperar el menú normal):','');
+   if(server!==null)try{
+    let config=null;
+    if(server.trim()){
+     const initial={server:server.trim(),buttons:[{action:'play',label:'Jugar',x:.5,y:.42,width:.6},{action:'settings',label:'Ajustes',x:.5,y:.58,width:.6},{action:'quit',label:'Salir',x:.5,y:.74,width:.6}]};
+     const text=window.prompt('Editá los botones: action, label, x, y, width (posiciones entre 0 y 1):',JSON.stringify(initial));
+     if(text===null)return;config=JSON.parse(text);
+    }
+    await command('horizon_project_menu',{projectId,name:id,config});message('Menú guardado. Se aplica al volver a iniciar Horizon.');
+   }catch(error){message(String(error),true);}
+ }
  else if(act==='world-invite'){try{await portalsWorlds.invite(id);message('Invitación enviada. El mundo se ejecuta en tu PC.');}catch(error){message(String(error),true);}}
  else if(act==='world-join'){try{await portalsWorlds.join(id);message('Conectando al mundo de tu amigo…');}catch(error){message(String(error),true);}}
  else if(act==='world-decline'){try{await social.declineWorld(id);}catch(error){message(String(error),true);}}

@@ -1358,6 +1358,31 @@ async fn fabric_loaders(version:String)->Result<Vec<String>,String>{
     tauri::async_runtime::spawn_blocking(move||minecraft::get_fabric_loaders(&version)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
+fn horizon_project_menu(state:State<'_,Mutex<Backend>>,project_id:String,name:String,config:Option<serde_json::Value>)->Result<(),String>{
+    let s=locked(&state)?;
+    if project_id!=PERSONAL_PROJECT_ID{s.admin()?;}
+    let(owner,instance)=checked_instance(&s,&project_id,&name,true)?;
+    if instance.engine!="horizon"{return Err("La instancia no es Horizon".into());}
+    let folder=minecraft::instance_dir(&s.data_root,&owner,&instance)?.join(".vis");
+    if folder.exists()&&fs::symlink_metadata(&folder).map_err(|e|e.to_string())?.file_type().is_symlink(){return Err("Carpeta de configuración inválida".into());}
+    fs::create_dir_all(&folder).map_err(|e|e.to_string())?;
+    let path=folder.join("menu.json");
+    if let Some(value)=config {
+        let server=value["server"].as_str().ok_or("Falta el servidor")?;
+        if server.is_empty()||server.len()>255||!server.bytes().all(|b|b.is_ascii_alphanumeric()||b".-_:[]".contains(&b)){return Err("Dirección de servidor inválida".into());}
+        let buttons=value["buttons"].as_array().ok_or("Faltan botones")?;
+        if buttons.is_empty()||buttons.len()>12||value.to_string().len()>16384{return Err("Menú demasiado grande".into());}
+        if !buttons.iter().any(|b|b["action"]=="play"){return Err("Falta el botón Jugar".into());}
+        for button in buttons {
+            if !["play","settings","quit","friends"].contains(&button["action"].as_str().unwrap_or("")){return Err("Acción de botón inválida".into());}
+            let label=button["label"].as_str().ok_or("Falta la etiqueta")?;if label.chars().count()>40||label.chars().any(char::is_control){return Err("Etiqueta inválida".into());}
+            if button["width"].as_f64().unwrap_or(0.0)<0.1{return Err("El botón es demasiado angosto".into());}
+            for key in ["x","y","width"] {let n=button[key].as_f64().ok_or("Posición inválida")?;if !(0.0..=1.0).contains(&n){return Err("Usá posiciones relativas entre 0 y 1".into());}}
+        }
+        atomic_json(&path,&value)
+    }else{if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;}Ok(())}
+}
+#[tauri::command]
 fn horizon_source_build()->Result<String,String>{
     horizon::bundled_source_path()
 }
@@ -1466,7 +1491,7 @@ async fn launch_horizon(
             horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir)
         }else{horizon::launch(&app,&dir,&instance,&effective)};
         if let Ok(ref launched)=outcome {
-            portals::register(active,launched.pid,instance.name.clone(),game_dir.join(".vis/portals.json"));
+            portals::register(active,launched.pid,instance.name.clone(),instance.project_id.clone(),game_dir.join(".vis/portals.json"));
         }
         if let Some(path)=session_path{let _=fs::remove_file(path);}
         outcome
@@ -1487,6 +1512,13 @@ async fn portals_command(state:State<'_,Mutex<Backend>>,pid:u32,action:String,co
     Ok(result)
 }
 
+#[tauri::command]
+async fn portals_exchange(state:State<'_,Mutex<Backend>>,pid:u32,snapshot:serde_json::Value)->Result<serde_json::Value,String>{
+    let owner={let s=locked(&state)?;s.username()?.to_owned()};let active=owner.clone();
+    let result=tauri::async_runtime::spawn_blocking(move||portals::exchange(&owner,pid,snapshot)).await.map_err(|e|e.to_string())??;
+    {let s=locked(&state)?;if s.username()?!=active{return Err("Cambió la cuenta activa".into());}}
+    Ok(result)
+}
 #[tauri::command]
 fn download_jobs(state:State<'_,Mutex<Backend>>)->Result<Vec<download_manager::DownloadJob>,String>{
     let s=locked(&state)?;
@@ -1910,7 +1942,7 @@ fn main() {
             social::social_cloud_register, social::social_cloud_login,
             social::social_enable_cloud_password,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
-            portals_games, portals_command, set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
+            horizon_project_menu, portals_exchange, portals_games, portals_command, set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project

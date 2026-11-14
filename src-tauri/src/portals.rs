@@ -16,6 +16,7 @@ use std::{
 pub(crate) struct Game {
     pub pid: u32,
     pub name: String,
+    pub project_id: String,
     #[serde(skip)]
     owner: String,
     #[serde(skip)]
@@ -25,7 +26,13 @@ static GAMES: OnceLock<Mutex<HashMap<u32, Game>>> = OnceLock::new();
 fn games() -> &'static Mutex<HashMap<u32, Game>> {
     GAMES.get_or_init(Mutex::default)
 }
-pub(crate) fn register(owner: String, pid: u32, name: String, endpoint: PathBuf) {
+pub(crate) fn register(
+    owner: String,
+    pid: u32,
+    name: String,
+    project_id: String,
+    endpoint: PathBuf,
+) {
     if let Ok(mut games) = games().lock() {
         games.insert(
             pid,
@@ -33,6 +40,7 @@ pub(crate) fn register(owner: String, pid: u32, name: String, endpoint: PathBuf)
                 owner,
                 pid,
                 name,
+                project_id,
                 endpoint,
             },
         );
@@ -183,7 +191,13 @@ mod tests {
                 writeln!(stream, "{response}").unwrap();
             }
         });
-        register("alice".into(), 42, "Mundo".into(), path.clone());
+        register(
+            "alice".into(),
+            42,
+            "Mundo".into(),
+            "project".into(),
+            path.clone(),
+        );
         assert!(command("bob", 42, "status", None).is_err());
         assert!(command("alice", 42, "quit", None).is_err());
         assert!(command("alice", 42, "join", Some("ABCDE-FGHIJ\nquit")).is_err());
@@ -194,4 +208,19 @@ mod tests {
         remove(42);
         let _ = fs::remove_file(path);
     }
+}
+
+pub(crate) fn exchange(owner: &str, pid: u32, snapshot: Value) -> Result<Value, String> {
+    if !snapshot.is_object() || snapshot.to_string().len() > 12000 {
+        return Err("Panel social demasiado grande".into());
+    }
+    let game = games()
+        .lock()
+        .map_err(|_| "VIS Portals ocupado")?
+        .get(&pid)
+        .filter(|game| game.owner == owner)
+        .cloned()
+        .ok_or("Partida de otra sesión")?;
+    let reply = request(&game.endpoint, &format!("social {snapshot}"))?;
+    Ok(json!({"events":reply["events"],"voice":reply["voice"]}))
 }

@@ -565,6 +565,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
         let mut cmd=Command::new(executable(&folder,"horizon-client"));
         crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
         cmd.env("VIS_PORTALS_ENDPOINT",game_dir.join(".vis/portals.json"));
+        cmd.env("VIS_PROJECT_MENU",dir.join(".vis/menu.json"));
         cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
             .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir);
         if !ins.player_name.is_empty(){cmd.arg("--name").arg(&ins.player_name);}
@@ -618,6 +619,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     let mut cmd=Command::new(executable(&folder,"horizon-client"));
     crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
         cmd.env("VIS_PORTALS_ENDPOINT",game_dir.join(".vis/portals.json"));
+        cmd.env("VIS_PROJECT_MENU",dir.join(".vis/menu.json"));
     // Keep any relative game writes in this player's folder. The engine
     // executable and --resources remain absolute paths in the owner install.
     cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
