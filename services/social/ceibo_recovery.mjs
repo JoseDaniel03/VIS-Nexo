@@ -188,6 +188,7 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
         .bind("ed25519:"+pub,salt,row.user_id),
       db.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(row.user_id),
       db.prepare("DELETE FROM auth_challenges WHERE user_id=?").bind(row.user_id),
+      db.prepare("DELETE FROM account_mfa_login_tickets WHERE user_id=?").bind(row.user_id),
       db.prepare("DELETE FROM realtime_tickets WHERE user_id=?").bind(row.user_id),
       db.prepare("DELETE FROM account_recovery_tokens WHERE user_id=?").bind(row.user_id)
     ]);
@@ -212,6 +213,7 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
         .bind("ed25519:"+pub,salt,user.id),
       db.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(user.id),
       db.prepare("DELETE FROM auth_challenges WHERE user_id=?").bind(user.id),
+      db.prepare("DELETE FROM account_mfa_login_tickets WHERE user_id=?").bind(user.id),
       db.prepare("DELETE FROM realtime_tickets WHERE user_id=?").bind(user.id)
     ]);
     await revokeRealtime(env,user.id);
@@ -219,7 +221,9 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
   }
   async function rebindDevice(request,db,user){
     await rateLimit(db,request,"ceibo-device:"+user.id,4);
-    if(user.auth_method!=="password")bad(403,"Se requiere una sesión con contraseña VIS");
+    if(user.auth_method!=="password"||!user.auth_created_at||
+       now()-user.auth_created_at>5*60)
+      bad(403,"Confirmá tu contraseña VIS mediante un nuevo inicio de sesión para vincular dispositivos");
     await requireStepup(db,user);
     const data=await parseBody(request,500);
     if(typeof data.public_key!=="string"||typeof data.signature!=="string")
