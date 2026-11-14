@@ -1,5 +1,5 @@
-name: VIS Nexo 2.22.1 prerelease - Windows Linux Android
-# Re-run after Windows canonical-path unit-test fix (8.3 names versus Win32 final paths).
+name: VIS Nexo 2.22.2 prerelease - Windows Linux Android
+# Preview rebuild: admin-only Horizon menu editor, with backend authorization enforced.
 on:
   workflow_dispatch:
   push:
@@ -287,7 +287,7 @@ jobs:
           cp "${linux[0]}" release/
           (cd release && sha256sum -- *.zip *.AppImage *.apk > SHA256SUMS && sha256sum -c SHA256SUMS)
           cat > release/NOTAS.txt <<'NOTES'
-          VIS Nexo 2.22.1 (Windows/Linux) / Android 0.4.1
+          VIS Nexo 2.22.2 (Windows/Linux) / Android 0.4.1
           Vista previa de integración — NO release estable.
           - Chat: el campo se limpia tras enviar con éxito.
           - VIS Portals: controles técnicos y de compartir mundo fuera del panel global.
@@ -307,9 +307,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="vis-nexo-v2.22.1-preview"
+          tag="vis-nexo-v2.22.2-preview"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Pre-release $tag already exists; refusing to overwrite an immutable preview."
             exit 0
           fi
-          gh release create "$tag"             release/*.AppImage             release/*.zip             release/*.apk             release/SHA256SUMS             release/NOTAS.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "VIS Nexo 2.22.1 + Android 0.4.1 (preview)"             --notes-file release/NOTAS.txt             --prerelease
+          gh release create "$tag"             release/*.AppImage             release/*.zip             release/*.apk             release/SHA256SUMS             release/NOTAS.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "VIS Nexo 2.22.2 + Android 0.4.1 (preview)"             --notes-file release/NOTAS.txt             --prerelease
