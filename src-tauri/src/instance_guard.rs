@@ -171,7 +171,7 @@ mod tests{
         fs::create_dir_all(old.join(".vslauncher")).unwrap();
         fs::create_dir_all(&launcher).unwrap();
         fs::write(old.join(".vslauncher/install.json"),b"{\"version\":\"26.3\"}").unwrap();
-        assert_eq!(deletion_target(&old,"Horizon","project",&launcher).unwrap(),old);
+        assert_eq!(deletion_target(&old,"Horizon","project",&launcher).unwrap(),destination(&old).unwrap());
         let unknown=base.join("Downloads/data");
         fs::create_dir_all(&unknown).unwrap();
         fs::write(unknown.join("personal.txt"),b"keep me").unwrap();
