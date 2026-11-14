@@ -487,6 +487,7 @@ function refreshSocialSkins(snapshot){
    if(socialSkins.get(username)?.version===version)continue;
    if(version===0){
      rememberSocialMedia(socialSkins,username,{version,skin:null,head:''},45);
+     if(username===owner&&native)void command('cache_vis_skin',{png:null}).catch(()=>{});
      continue;
    }
    const key=username+':'+version;if(skinLoads.has(key))continue;
@@ -499,6 +500,11 @@ function refreshSocialSkins(snapshot){
        if(png&&(!png.startsWith('data:image/png;base64,')||png.length>87500))return;
        const head=png?await skinHeadPreview(png):'';
        if(generation!==accountGeneration||db.user?.username!==owner)return;
+       if(username===owner&&native){
+         // Only a validated PNG returned for the authenticated VIS user may
+         // become a local Horizon offline texture; no token or chat is cached.
+         await command('cache_vis_skin',{png}).catch(()=>{});
+       }
        rememberSocialMedia(socialSkins,username,{version,skin:png,head},45);
        scheduleSocialRender();
      }catch{/* Invalid or unavailable skins remain placeholders. */}
