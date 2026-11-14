@@ -184,7 +184,7 @@ async fn mobile_health()->Result<Value,String>{
             .map_err(|_|"Respuesta de salud VIS no compatible")?;
         let status=health.get("status").and_then(Value::as_str).unwrap_or("unknown");
         let schema=health.get("schema").and_then(Value::as_i64).unwrap_or(0);
-        Ok(json!({"reachable":true,"ready":code==200&&status=="ready"&&schema>=13,
+        Ok(json!({"reachable":true,"ready":code==200&&status=="ready"&&schema>=15,
             "http_status":code,"status":status,"schema":schema}))
     }).await.map_err(|_|"No se pudo verificar la conexión")?
 }

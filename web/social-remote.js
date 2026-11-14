@@ -118,7 +118,9 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   // A peer key change is still checked against its persisted TOFU pin.
   const pinnedPeers=new Map(), derivedKeys=new Map();
   const connected = () => !!(state && privateDb && keys);
-  const status = (value, error = '') => onStatus?.(value, error);
+  let networkStatus='disconnected';
+  const status = (value, error = '') => {networkStatus=value;onStatus?.(value,error);};
+  const online = () => connected() && networkStatus==='connected';
   const rpc = (path, method = 'GET', body = null) => command('social_request',
     { path, method, body });
   function stopRealtime(){
@@ -693,7 +695,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
     return rpc('/v1/admin/accounts/disable','POST',{username,disabled});
   }
-  return { setGameActive:value=>{const changed=gameActive!==!!value;gameActive=!!value;if(changed&&gameActive)void sync();}, hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, friendRequest, acceptFriend, setAlias,
+  return { setGameActive:value=>{const changed=gameActive!==!!value;gameActive=!!value;if(changed&&gameActive)void sync();}, hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, online, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
     setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin,
     projectCommunity,requestProjectJoin,projectMember,reviewProjectJoin,setProjectPolicy,projectMedia,globalAdmin,

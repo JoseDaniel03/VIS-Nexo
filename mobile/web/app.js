@@ -139,21 +139,25 @@ function home(){
 }
 function friends(){
   const data=state.social;
-  const list=Array.isArray(data?.friends)?data.friends:[];
+  const list=Array.isArray(data?.friends)?[...data.friends].sort((a,b)=>Number(b.presence==='online')-Number(a.presence==='online')||String(a.alias||a.display_name||a.username).localeCompare(String(b.alias||b.display_name||b.username))):[];
+  const connected=state.network?.ready===true&&!!data;
+  const labels={online:'Conectado',away:'Ausente',busy:'Ocupado',invisible:'Desconectado',offline:'Desconectado'};
   const requests=Array.isArray(data?.incoming_requests)?data.incoming_requests:[];
   return '<div class="section-label">VIS / PORTALS</div><h1>Amigos</h1>'+
-    '<p class="intro">Presencia, solicitudes, estados personalizados y gestión de contactos. El chat E2EE multidispositivo necesita sincronización segura de claves.</p>'+
+    '<p class="intro">Tu comunidad, estés donde estés.</p>'+
+    '<div class="portals-mobile-network '+(connected?'is-online':'is-offline')+'" role="status">'+E(connected?'Cuenta VIS conectada · @'+state.auth.username:state.network?.reachable?'Servicio VIS pendiente de actualización':'Sin conexión a VIS Social')+'</div>'+
+    '<div class="portals-mobile-counts"><span><b>'+list.length+'</b> contactos</span><span><b>'+list.filter(f=>connected&&['online','away','busy'].includes(f.presence)).length+'</b> disponibles</span><span><b>'+requests.length+'</b> solicitudes</span></div>'+
     '<button class="outline full" data-action="refresh">Actualizar presencia</button>'+features.friendsPanel()+
     '<div class="section-title"><span>Contactos</span><small>'+list.length+' vinculados</small></div>'+
     (list.length?'<div class="friends">'+list.map(f=>
       '<div class="friend"><div class="avatar">'+E((f.display_name||f.username||'?').slice(0,1).toUpperCase())+'</div>'+
       '<div><strong>'+E(f.alias||f.display_name||f.public_handle||f.username)+'</strong>'+
       '<small>@'+E(f.public_handle||f.username)+'</small>'+
-      (f.current_game?'<small class="activity">Jugando: '+E(f.current_game)+'</small>':'')+features.friendControls(f)+
-      '</div><span class="presence '+(f.presence==='online'?'online':'')+'"></span></div>').join('')+'</div>':
+      '<small class="activity">'+E(labels[connected?f.presence:'offline']||'Desconectado')+'</small>'+
+      (connected&&f.presence==='online'&&f.current_game?'<small class="activity">Jugando: '+E(f.current_game)+'</small>':'')+features.friendControls(f)+
+      '</div><span class="presence '+(connected&&['online','away','busy'].includes(f.presence)?f.presence:'offline')+'"></span></div>').join('')+'</div>':
       '<div class="empty">No hay contactos sincronizados todavía.</div>')+
-    (requests.length?'<div class="section-title">Invitaciones recibidas</div>'+
-       '<div class="empty">'+requests.map(E).join(' · ')+'</div>':'');
+    '<p class="muted">Los mensajes cifrados entre dispositivos requieren sincronización segura de claves; no se muestran como disponibles en esta versión.</p>';
 }
 function projects(){
   const list=Array.isArray(state.projects?.projects)?state.projects.projects:[];
@@ -206,7 +210,7 @@ async function refreshAll(){
       ]);
       const keys=['account','social','projects'];
       values.forEach((v,i)=>{
-        if(v.status==='fulfilled')state[keys[i]]=v.value;
+        state[keys[i]]=v.status==='fulfilled'?v.value:null;
       });
       if(values.every(v=>v.status==='rejected'))toast('No se pudieron consultar los servicios VIS',true);
       else toast('Conexión y datos de VIS actualizados');

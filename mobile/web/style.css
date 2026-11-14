@@ -141,3 +141,14 @@ button.link{background:transparent;border:0;color:#c5b0ff;font-size:12px;min-hei
 .vis-error-dialog :focus-visible{outline:2px solid #d0b1ff;outline-offset:3px}
 
 .vis-error-detail-button{display:inline-block;margin:7px 6px 3px;padding:8px 12px;border-radius:9px;border:1px solid #ac87de;background:#503076;color:#fff;min-height:40px;font-size:12px}
+
+/* VIS Portals mobile */
+.portals-mobile-network{padding:12px 14px;border-radius:10px;font-size:12px;line-height:1.6;background:#1a1d2b;overflow-wrap:anywhere;margin-bottom:14px;}
+.portals-mobile-network.is-online{color:#91dfb5;}.portals-mobile-network.is-offline{color:#efbe92;}
+.portals-mobile-counts{display:flex;justify-content:space-between;gap:12px;margin:18px 0 23px;color:#a5a8bd;font-size:11px;}
+.portals-mobile-counts b{display:block;color:#eeedf7;font-size:24px;font-weight:600;margin-bottom:4px;}
+.portals-mobile-details summary{cursor:pointer;font-weight:600;padding:5px 0;min-height:32px;}.portals-mobile-details[open] summary{margin-bottom:14px;}
+.friends .friend{border-radius:12px;align-items:flex-start;min-height:80px;background:#181b28;padding:15px;gap:12px;}
+.friends .friend>div:nth-child(2){min-width:0;flex:1;overflow-wrap:anywhere;}.friends .friend strong{color:#eeedf7;}
+.friends .friend .friend-tools{margin-top:9px;}.friend-tools button{min-height:40px;}
+.presence.away{background:#e0b554;}.presence.busy{background:#ed7c84;}

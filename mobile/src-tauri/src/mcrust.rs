@@ -39,6 +39,7 @@ pub(crate) async fn mobile_mcrust_launch(
     state: State<'_, Mutex<Session>>, app: AppHandle, id: String,
     ms:State<'_,Mutex<super::microsoft::MicrosoftState>>
 ) -> Result<Value, String> {
+    if cfg!(target_os="android") && !cfg!(target_arch="aarch64") { return Err("McRust Android se distribuye para dispositivos ARM64".into()); }
     if BUSY.swap(true, Ordering::AcqRel) { return Err("Ya se está preparando McRust".into()); }
     let _busy = DownloadGuard;
     let (owner, generation, bearer) = {
@@ -117,6 +118,7 @@ async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std:
                 // JNI exception contents or the VIS launch payload.
                 let status = android::operate(env, activity, &payload, &apk, &target, skin.as_deref())?;
                 match status.as_str() {
+                    "unsupported_android" => Err("McRust necesita Android 9 o superior (API 28) y ARM64".into()),
                     "signature_mismatch" => Err("La firma de McRust instalado es distinta de la publicación. Respaldá sus mundos antes de reemplazarlo.".into()),
                     _ => Ok(status)
                 }

@@ -34,11 +34,11 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const outgoing=state.social?.outgoing_requests||[];
     const presence=state.social?.presence||'online';
     const custom=state.social?.custom_status||'';
-    return '<section class="mobile-panel"><div class="section-title">Mi presencia</div>'+
+    return '<details class="mobile-panel portals-mobile-details"><summary>Mi estado y presencia</summary>'+
       '<form data-feature="presence" class="inline-form">'+
       selectable('presence',presence,[['online','Conectado'],['away','Ausente'],['busy','Ocupado'],['invisible','Invisible'],['offline','Desconectado']])+
       '<input name="custom_status" maxlength="160" aria-label="Estado personalizado" placeholder="Estado personalizado" value="'+E(custom)+'">'+
-      '<button class="primary" type="submit">Guardar estado</button></form></section>'+
+      '<button class="primary" type="submit">Guardar estado</button></form></details>'+
       '<section class="mobile-panel"><div class="section-title">Agregar amigo</div>'+
       '<form data-feature="friend-request" class="inline-form">'+
       formInput('username','@usuario VIS', 'text',24,'autocomplete="off"')+

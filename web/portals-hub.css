@@ -1,0 +1,35 @@
+/* VIS Portals: account, network, contacts and conversations. */
+.social-pane.portals-hub{background:#101119;color:#ececf4;border-left:1px solid #292b38;min-height:0;}
+.portals-hub .social-top{padding:23px 18px 16px;border:0;background:transparent;}
+.portals-hub .social-brand small{font-size:11px;color:#9699b0;line-height:1.6;}
+.portals-hub .social-title{font-size:15px;letter-spacing:.08em;color:#ddd8ff;}
+.portals-network{display:flex;gap:8px;align-items:center;margin:0 14px 14px;padding:9px 11px;border-radius:8px;background:#191c28;font-size:11px;line-height:1.5;}
+.portals-network.is-online{color:#8ee0b2;}.portals-network.is-offline{color:#e9bd8c;}
+.portals-network-error{margin:0 16px 13px;font-size:11px;color:#eeaaa8;overflow-wrap:anywhere;max-height:72px;overflow:auto;}
+.portals-hub .social-person{margin:10px 14px;padding:12px 10px;border:1px solid #282b3b;border-radius:10px;background:#171924;gap:6px;position:relative;}
+.portals-hub .person-left{flex:1;min-width:0;}.portals-hub .person-left>div{min-width:0;}
+.portals-hub .person-left b,.portals-hub .person-left span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.portals-hub .person-left span{font-size:10px;color:#a1a3ba;max-width:150px;}
+.portals-hub .social-tabs{margin:0 14px;display:flex;padding:3px;background:#1c1e2a;border-radius:8px;border:0;}
+.portals-hub .social-tabs button{flex:1;border:0;border-radius:6px;min-height:32px;color:#a9abc1;}
+.portals-hub .social-tabs button.active{background:#343044;color:#e4ddff;box-shadow:none;}
+.portals-counters{display:flex;justify-content:space-between;gap:6px;padding:8px 17px 13px;color:#9295ac;font-size:10px;}
+.portals-counters b{display:block;color:#ededf5;font-size:17px;font-weight:600;margin-bottom:3px;}
+.portals-hub .social-group-head{padding:10px 17px;letter-spacing:.07em;font-size:10px;}
+.portals-hub .social-search{margin:4px 14px 10px;padding:9px 10px;background:#1b1d29;border:1px solid #303344;border-radius:8px;}
+.portals-hub .social-search input{min-width:0;font-size:12px;}
+.portals-hub .friend-scroll{padding:0 7px;flex:1;min-height:70px;overscroll-behavior:contain;}
+.portals-hub .friend-item{min-height:66px;padding:11px 9px;margin:3px 0;border-radius:9px;gap:10px;transition:background .15s;}
+.portals-hub .friend-item:hover{background:#1b1e2a;}.portals-hub .friend-item.selected{background:#29253d;box-shadow:inset 2px 0 #aa97ef;}
+.portals-hub .friend-meta{min-width:0;flex:1;}.portals-hub .friend-meta b{font-size:12px;font-weight:600;}
+.portals-hub .friend-meta small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:#969bb2;max-width:180px;}
+.portals-hub .friend-meta .friend-custom-status{color:#c4bedc;margin-top:3px;}
+.portals-hub .dot.away{background:#e0b554;}.portals-hub .dot.busy{background:#ed7c84;}
+.portals-hub .social-bottom{border-top:1px solid #292b3a;padding:12px 14px;background:#13151f;display:flex;flex-wrap:wrap;gap:8px;}
+.portals-hub .social-bottom .muted{font-size:10px;line-height:1.5;}.portals-hub .friend-add-row{width:100%;display:flex;gap:6px;}
+.portals-hub .friend-add-row input{min-width:0;flex:1;min-height:36px;border:1px solid #363548;border-radius:7px;background:#1b1d29;}
+.portals-hub .friend-add-row button{min-width:36px;min-height:36px;border-radius:7px;}
+.portals-hub .social-empty{font-size:12px;line-height:1.7;padding:18px 12px;color:#a3a7bd;}
+.portals-hub .friend-item:focus-visible,.portals-hub button:focus-visible{outline:2px solid #b5a1fa;outline-offset:1px;}
+@media(max-height:650px){.portals-hub .social-top{padding-top:12px;}.portals-hub .social-person{margin-top:6px;margin-bottom:6px;}.portals-counters{padding-bottom:5px;}.portals-hub .social-bottom>.mini-add,.portals-hub .social-bottom>.muted{display:none;}}
+@media(prefers-reduced-motion:reduce){.portals-hub *{transition:none!important;}}

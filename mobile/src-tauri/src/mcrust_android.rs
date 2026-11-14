@@ -8,6 +8,7 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
     let mut stage="consulta de paquetes";
     let result=(|| -> jni::errors::Result<String> {
                     use sha2::{Digest, Sha256};
+                    if env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?.i()? < 28 { return Ok("unsupported_android".into()); }
                     let package = JObject::from(env.new_string(mcrust_catalog::PACKAGE)?);
                     let pm = env.call_method(activity, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[])?.l()?;
                     let info = env.call_method(&pm, "getPackageInfo", "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;", &[JValue::Object(&package), JValue::Int(0x08000000)]);

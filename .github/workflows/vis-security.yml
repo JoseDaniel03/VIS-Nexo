@@ -34,6 +34,7 @@ jobs:
         run: python3 tools/check_zip_extraction_policy.py
       - name: Test existing Social and Universe permissions
         run: |
+          node tools/test_game_portals.mjs
           node tools/test_social_worker.mjs
           node tools/test_universe_worker.mjs
           python3 tools/test_social_superadmin_bootstrap.py
