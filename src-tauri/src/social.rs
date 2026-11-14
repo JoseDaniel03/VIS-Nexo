@@ -120,7 +120,7 @@ fn identity(username: &str, root: &Path) -> Result<SigningKey, String> {
     Ok(key)
 }
 
-fn connect(username: &str, root: &Path) -> Result<(String, Value), String> {
+fn connect(username: &str, root: &Path) -> Result<(Option<String>, Value), String> {
     let base = base_url()?;
     let client = client()?;
     let signing = identity(username, root)?;
@@ -139,10 +139,13 @@ fn connect(username: &str, root: &Path) -> Result<(String, Value), String> {
     let signature = STANDARD.encode(signing.sign(text.as_bytes()).to_bytes());
     let auth = request(&client, &base, "/v1/auth/session", "POST",
         Some(&json!({"username": username, "challenge_id": id, "signature": signature})), None)?;
+    if auth.get("mfa_required").and_then(Value::as_bool)==Some(true){
+        return Ok((None,auth));
+    }
     let token = auth.get("token").and_then(Value::as_str)
         .ok_or("VIS Social no entregó una sesión autenticada")?.to_owned();
     let snapshot = request(&client, &base, "/v1/state", "GET", None, Some(&token))?;
-    Ok((token, snapshot))
+    Ok((Some(token), snapshot))
 }
 
 /// Public identity for optional out-of-band super administrator provisioning.
@@ -382,8 +385,19 @@ pub(crate) async fn social_connect(
         }
     }
     let mut active = social.lock().map_err(|_| "Estado social bloqueado")?;
+    if token.is_none(){
+        let pending=valid_pending_mfa(&snapshot)?;
+        if pending.username!=username{
+            return Err("La identidad MFA no coincide con la cuenta local".into());
+        }
+        active.pending_mfa=Some(pending);
+        active.bearer=None;
+        active.username=None;
+        return Err("VIS_CEIBO_MFA_REQUIRED".into());
+    }
     active.username = Some(username);
-    active.bearer = Some(token);
+    active.bearer = token;
+    active.pending_mfa=None;
     Ok(snapshot)
 }
 
@@ -600,6 +614,7 @@ pub(crate) async fn social_disconnect(
     let token = {
         let mut active = social.lock().map_err(|_| "Estado social bloqueado")?;
         active.username = None;
+        active.pending_mfa=None;
         active.bearer.take()
     };
     if let Some(token) = token {
