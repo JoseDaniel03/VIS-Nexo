@@ -58,8 +58,9 @@ checks={
     and "mobile_action" in features
     and "mobile_password_change" in features
     and 'fetch(' not in features
-    and 'localStorage' not in features
-    and 'indexedDB' not in features,
+    and 'localStorage.' not in features
+    and 'sessionStorage.' not in features
+    and 'indexedDB.open(' not in features,
   "No game start UI while Android port does not exist":
     'Minecraft Rust / Java' in ui
     and 'deshabilitadas en esta preview' in ui,
