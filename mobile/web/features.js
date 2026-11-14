@@ -207,29 +207,31 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       :'');
   }
   function instancePanel(){
-    const list=Array.isArray(state.instances)?state.instances:[];
-    return '<section class="mobile-panel"><div class="section-title">Nueva instancia local</div>'+
-      '<p class="muted">Prepará tus instancias. Nexo descarga e instala McRust Android desde la misma versión del motor que PC. Android pide confirmar la instalación. Java todavía no puede ejecutarse.</p>'+
+    const all=Array.isArray(state.instances)?state.instances:[];
+    // Keep old Java metadata on disk for compatibility, but never offer a
+    // Java runtime or loader in this Android-only Rust launcher.
+    const list=all.filter(i=>i.engine==='horizon');
+    const legacyCount=all.length-list.length;
+    return '<section class="mobile-panel"><div class="section-title">Nueva instancia Rust</div>'+
+      '<p class="muted">Minecraft Rust Horizon 26.3 · Vanilla. La versión y el motor se configuran automáticamente. Al tocar Instalar / Jugar, Nexo descarga la edición Android compatible con PC y Android solicita confirmar la instalación.</p>'+
       '<form data-feature="instance-create" class="inline-form">'+
       formInput('name','Nombre de instancia','text',64)+
-      '<label>Motor de juego</label>'+
-      selectable('engine','java',[['java','Minecraft Java Edition'],['horizon','Minecraft Rust Horizon']])+
-      '<label>Versión Minecraft</label>'+
-      formInput('version','Versión (ej. 26.3)','text',48)+
-      '<label>Loader (Horizon requiere Vanilla)</label>'+
-      selectable('loader','vanilla',[['vanilla','Vanilla'],['fabric','Fabric'],['quilt','Quilt'],['neoforge','NeoForge'],['forge','Forge']])+
-      '<input name="project_id" maxlength="48" aria-label="ID del proyecto opcional" placeholder="ID VIS Universe (opcional)">'+
-      '<button class="primary" type="submit">Crear carpetas e instancia</button></form></section>'+
-      '<section class="mobile-panel"><div class="section-title">Mis instancias · '+list.length+'</div>'+
+      '<div class="tiny-note">Motor: Horizon Rust · versión 26.3 · Vanilla (fijos)</div>'+
+      '<button class="primary" type="submit">Crear instancia Rust</button></form></section>'+
+      '<section class="mobile-panel"><div class="section-title">Mis instancias Rust · '+list.length+'</div>'+
       (list.length?list.map(i=>
         '<article class="instance-card"><div class="small-row"><strong>'+
-        E(i.name)+'</strong><span class="tag">'+E(i.engine==='horizon'?'RUST':'JAVA')+'</span></div>'+
-        '<div class="muted">Versión '+E(i.version)+' · '+E(i.loader)+
+        E(i.name)+'</strong><span class="tag">RUST</span></div>'+
+        '<div class="muted">Minecraft '+E(i.version)+' · '+E(i.loader)+
         (i.project_id?' · '+E(i.project_id):'')+'</div>'+
-        '<div class="small-row"><span class="tiny-note">Carpetas de mundos, mods, configuraciones y backups preparadas en el teléfono.</span>'+
+        '<div class="small-row"><span class="tiny-note">El perfil está en Nexo; los mundos reales se guardan en McRust.</span>'+
         button('remove-instance','Quitar de lista','data-id="'+safeAttr(i.id)+'"')+'</div>'+
-        (i.engine==='horizon'&&i.version==='26.3'?button('play-mcrust','Jugar McRust','data-id="'+safeAttr(i.id)+'"'):'<p class="muted">Motor no disponible en esta prueba Android.</p>')+'</article>'
-      ).join(''):'<p class="muted">No creaste ninguna instancia Android.</p>')+
+        (i.version==='26.3'&&i.loader==='vanilla'
+          ?button('play-mcrust','Instalar / Jugar','data-id="'+safeAttr(i.id)+'"')
+          :'<p class="muted">Esta instancia antigua no es compatible con McRust 26.3 Vanilla.</p>')+
+        '</article>'
+      ).join(''):'<p class="muted">No creaste ninguna instancia Rust en Android.</p>')+
+      (legacyCount?'<p class="tiny-note">Se conservaron '+legacyCount+' instancias antiguas no compatibles sin mostrarlas. No se eliminaron sus datos.</p>':'')+
       '</section>';
   }
   async function refreshInstances(){
@@ -363,14 +365,10 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         await nativeAction('projects.manage',project);
         message='Proyecto guardado';
       }else if(name==='instance-create'){
-        const engine=value('engine');
-        const loader=engine==='horizon'?'vanilla':value('loader');
-        await command('mobile_instance_create',{
-          name:value('name'),engine,loader,version:value('version'),
-          projectId:value('project_id')||null
-        });
+        // Rust sets Horizon/26.3/Vanilla. No Java or user-defined engine metadata.
+        await command('mobile_instance_create',{name:value('name')});
         await refreshInstances();
-        toast('Carpetas de instancia preparadas para Android');
+        toast('Instancia Rust creada. Tocá Instalar / Jugar para preparar McRust.');
         return true;
       }else if(name==='project-staff'){
         await nativeAction('projects.staff',{
