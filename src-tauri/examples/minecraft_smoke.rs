@@ -7,6 +7,7 @@
 #[path = "../src/download_manager.rs"] mod download_manager;
 #[path = "../src/minecraft.rs"] mod minecraft;
 #[path = "../src/horizon.rs"] mod horizon;
+#[path = "../src/portals.rs"] mod portals;
 #[path = "../src/horizon_download.rs"] mod horizon_download;
 use tauri::{Listener, Manager};
 
@@ -42,3 +43,4 @@ fn main() {
         Ok(())
     }).run(tauri::generate_context!()).expect("Diagnostic runtime");
 }
+
