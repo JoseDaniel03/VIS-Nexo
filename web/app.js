@@ -1,5 +1,6 @@
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 import { createSocialRemote } from './social-remote.js';
+import { createDiagnosticDialog } from './error-dialog.js';
 import { createWorldsPortals } from './worlds-portals.js';
 import {createServerVoice} from './server-voice.js';
 import {createGamePortals} from './game-portals.js';
@@ -15,6 +16,8 @@ import {openVoiceSettings} from './voice-settings.js';
    Desktop operations ALWAYS pass through Rust commands. Browser preview is ephemeral. */
 const root = document.querySelector('#app');
 const toastRegion = document.querySelector('#toast-region');
+const diagnostics=createDiagnosticDialog(document);
+let lastDiagnosticSignature='',lastDiagnosticAt=0;
 const T = window.__TAURI__;
 const native = !!T?.core?.invoke;
 const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],catalog_source:'',hidden_shared_instances:[],mode:native?'local':'preview'});
@@ -222,7 +225,26 @@ const iconPaths = {
 function I(name,size=19){return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name]||iconPaths.grid}</svg>`}
 const logo = (big=false) => `<span class="vs-mark${big?' large':''}" aria-hidden="true">${db.branding?.launcher_logo&&preview(db.branding.launcher_logo)?`<img src="${preview(db.branding.launcher_logo)}" alt=""/>`:'<span>V</span>'}</span>`;
 const msMark=()=>'<span class="ms-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
-function message(text,bad=false){ while(toastRegion.querySelectorAll('.toast').length>=3)toastRegion.querySelector('.toast')?.remove(); const d=document.createElement('div');d.className=`toast ${bad?'bad':''}`;d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(text)}</span>`;toastRegion.append(d);setTimeout(()=>d.remove(),4400);}
+function message(text,bad=false,context=null){
+ while(toastRegion.querySelectorAll('.toast').length>=3)toastRegion.querySelector('.toast')?.remove();
+ const d=document.createElement('div');d.className=`toast ${bad?'bad':''}`;
+ d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(text)}</span>`;
+ toastRegion.append(d);
+ if(bad){
+   const info={platform:'Windows / Linux',system:context?.system||'VIS Nexo',stage:context?.stage||'Operación del launcher',
+       error:context?.error||text,code:context?.code??'',release:context?.release||''};
+   const details=document.createElement('button');
+   details.type='button';details.className='vis-error-detail-button';details.textContent='Ver y copiar error';
+   details.addEventListener('click',()=>diagnostics.open(info));
+   d.append(details);
+   const signature=info.system+'|'+info.stage+'|'+info.error;
+   if(context?.automatic===true && (signature!==lastDiagnosticSignature || Date.now()-lastDiagnosticAt>15000)){
+     lastDiagnosticSignature=signature;lastDiagnosticAt=Date.now();
+     diagnostics.open(info);
+   }
+ }
+ setTimeout(()=>d.remove(),7400);
+}
 function closeDialog(){
  beginSurfaceDismiss(root,'.dialog',()=>{
    const target=lastDialogTrigger;
@@ -3157,7 +3179,13 @@ async function boot(){
    }).catch(()=>{});
   T.event.listen('minecraft-process-exited',e=>{
     lastMinecraftExit=e.payload;
-    if(!e.payload.success)message(`Minecraft finalizó con error (${e.payload.exit_code??'sin código'}). Revisá el log: ${e.payload.log_file}`,true);
+    if(!e.payload.success)message('Minecraft se cerró con un error. Abrí el diagnóstico para copiar el informe.',true,{
+      system:'Minecraft Java / McRust',
+      stage:'Ejecución del juego',
+      error:e.payload.error||'El proceso terminó inesperadamente',
+      code:e.payload.exit_code??'Sin código',
+      automatic:true
+    });
     else message('Minecraft se cerró correctamente.');
     if(page==='minecraft'||page==='instances')render();
   }).catch(()=>{});
