@@ -1,4 +1,0 @@
-VIS Nexo preview build retry
-Reason: release-suite runtime contract was pinned to D1 schema 10, now changed to validate schema 13 without weakening realtime isolation.
-Requested outputs: Windows x64 portable ZIP, Linux x64 AppImage.
-Distribution: unsigned testing artifacts only; no release and no installer.
