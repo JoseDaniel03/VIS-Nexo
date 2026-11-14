@@ -14,6 +14,8 @@ const state={
     custom_status:'Hola',developer:true},
   projects:{projects:[{id:'vis',title:'VIS',subscribed:false}]},
   communityId:'virgoland',
+  instances:[{id:'a'.repeat(32),name:'Rust Survival',engine:'horizon',version:'26.3',
+    loader:'vanilla',project_id:'virgoland'}],
   community:{can_manage:true,can_play:false,admission:'request',play_access:'members',
     members:[{username:'bruno',member_role:'participant'}],
     media:[{title:'Bad link',url:'javascript:alert(1)'}],pending:[]}
@@ -32,6 +34,9 @@ const command=async(name,args={})=>{
     ]};
     return {ok:true};
   }
+  if(name==='mobile_instances')return state.instances;
+  if(name==='mobile_instance_create')return {id:'b'.repeat(32),name:args.name,engine:args.engine};
+  if(name==='mobile_instance_remove')return 0;
   if(name==='mobile_community')return state.community;
   if(name==='mobile_email_verify')return {verified:true};
   return {ok:true};
@@ -58,6 +63,9 @@ assert(features.friendControls(state.social.friends[0]).includes('Apodo'));
 assert(features.accountPanel().includes('Cerrar sesiones'));
 assert(features.adminPanel().includes('Superadministración'));
 assert(features.communityPanel().includes('Miembros'));
+assert(features.instancePanel().includes('Rust Survival'));
+assert(features.instancePanel().includes('Carpetas de mundos, mods'));
+
 
 await features.refreshSecurity();
 assert.deepEqual(calls.filter(x=>['account.mfa.status','account.sessions'].includes(x.args.action))
@@ -77,6 +85,15 @@ await features.handleForm(form('project-manage',{id:'virgoland',title:'Virgoland
  summary:'Nueva temporada',visibility:'draft'}));
 assert(calls.some(x=>x.args.action==='projects.manage'&&x.args.body.visibility==='draft'));
 
+await features.handleForm(form('instance-create',{
+  name:'Survival móvil',engine:'horizon',loader:'fabric',
+  version:'26.3',project_id:'virgoland'
+}));
+assert(calls.some(x=>x.name==='mobile_instance_create'&&
+  x.args.engine==='horizon'&&x.args.loader==='vanilla'&&
+  x.args.projectId==='virgoland'), 'Horizon metadata must not inherit Java loader');
+await features.handleAction({dataset:{action:'remove-instance',id:'a'.repeat(32)}});
+assert(calls.some(x=>x.name==='mobile_instance_remove'), 'unlinked instance action is native');
 await features.handleForm(form('project-staff',{
   project_id:'virgoland',username:'bruno',staff_role:'editor'
 }));
