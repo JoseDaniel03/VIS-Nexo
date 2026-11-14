@@ -63,6 +63,8 @@ jobs:
       - name: Validate mobile JavaScript and native bridge boundaries
         run: |
           node --check mobile/web/app.js
+          node --check mobile/web/features.js
+          node tools/test_vis_android_features.mjs
           python3 tools/check_android_companion.py
       - name: Initialize Android project non-interactively
         working-directory: mobile
