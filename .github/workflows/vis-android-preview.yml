@@ -1,0 +1,118 @@
+name: VIS Nexo Android - Ceibo connection preview APK
+on:
+  push:
+    branches:
+      - feature/vis-nexo-android-ceibo-companion
+    paths:
+      - "mobile/**"
+      - ".github/workflows/vis-android-preview.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vis-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-debug:
+    name: Android ARM64 debug APK — no game binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      CI: "true"
+      RUST_BACKTRACE: "1"
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - name: Checkout VIS Nexo feature branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK Platform and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          # ubuntu-24.04 ships Android SDK and cmdline-tools already.
+          # setup-android@v3 currently fails because Android removed 'tools'.
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          sdkmanager_bin="$(command -v sdkmanager || true)"
+          if [[ -z "$sdkmanager_bin" ]]; then
+            sdkmanager_bin="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)"
+          fi
+          test -x "$sdkmanager_bin"
+          yes | "$sdkmanager_bin" --licenses >/dev/null || true
+          "$sdkmanager_bin" "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}" "platform-tools"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${ANDROID_HOME}/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+      - name: Rust stable with Android ARM64 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Install pinned Tauri CLI from repository lockfile
+        run: npm ci
+      - name: Validate mobile JavaScript and native bridge boundaries
+        run: |
+          node --check mobile/web/app.js
+          node --check mobile/web/features.js
+          node tools/test_vis_android_features.mjs
+          python3 tools/check_android_companion.py
+      - name: Initialize Android project non-interactively
+        working-directory: mobile
+        run: npm run tauri -- android init --ci
+      - name: Verify Android INTERNET permission and package isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="mobile/src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          test -f "$manifest"
+          # Tauri android init normally includes this; patch only if absent.
+          if ! grep -q 'android.permission.INTERNET' "$manifest"; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p=Path("mobile/src-tauri/gen/android/app/src/main/AndroidManifest.xml")
+          s=p.read_text()
+          assert '<manifest' in s and '</manifest>' in s
+          s=s.replace('</manifest>', '    <uses-permission android:name="android.permission.INTERNET" />\n</manifest>')
+          p.write_text(s)
+          PY
+          fi
+          grep -q 'android.permission.INTERNET' "$manifest"
+      - name: Build signed-by-Android-debug-key ARM64 APK
+        working-directory: mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run tauri -- android build --debug --apk --target aarch64 --ci
+      - name: Inspect APK and generate SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p mobile-dist
+          mapfile -t apks < <(find mobile/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' | sort)
+          if (( ${#apks[@]} != 1 )); then
+            printf 'Expected one arm64 debug APK, found %s\n' "${#apks[@]}" >&2
+            printf '%s\n' "${apks[@]}"
+            exit 1
+          fi
+          cp "${apks[0]}" mobile-dist/VIS-Nexo-Android-ARM64-Debug.apk
+          test "$(stat -c '%s' mobile-dist/VIS-Nexo-Android-ARM64-Debug.apk)" -gt 1000000
+          ( cd mobile-dist && sha256sum VIS-Nexo-Android-ARM64-Debug.apk > SHA256SUMS && sha256sum -c SHA256SUMS )
+      - name: Upload Android test APK, not a release
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-android-arm64-preview
+          path: |
+            mobile-dist/VIS-Nexo-Android-ARM64-Debug.apk
+            mobile-dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
