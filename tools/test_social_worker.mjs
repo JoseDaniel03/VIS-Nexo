@@ -814,6 +814,12 @@ async function firstFactorGate(){
 const preMfa=await firstFactorGate();
 assert.equal(preMfa.status,200);
 assert(preMfa.data.token,'before enrolling MFA, a password proof is sufficient');
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=created_at-601 "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='mfa_gate')").run();
+assert.equal((await call('/v1/account/mfa/setup',{},gateRegistered.data.token)).status,403,
+  'stale bearer must not enroll a second factor');
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=unixepoch() "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='mfa_gate')").run();
 const mfaSetup=await call('/v1/account/mfa/setup',{},gateRegistered.data.token);
 assert.equal(mfaSetup.status,200,JSON.stringify(mfaSetup));
 const mfaConfirm=await call('/v1/account/mfa/confirm',{
