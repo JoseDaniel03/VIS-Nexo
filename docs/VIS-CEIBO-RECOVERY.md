@@ -6,6 +6,7 @@ NO compilada para distribución. El fork Horizon permanece intacto.
 ## Identidad y confianza
 - El identificador inmutable de la cuenta es `social_users.id`. El
   `username`, `@public_handle`, nombre visible y gamertag no dan privilegios.
+- Cambiar contraseña desde Mi perfil exige escribir la **contraseña actual** y probarla mediante un nuevo desafío Argon2id/Ed25519. La operación requiere una sesión reciente (máximo 5 minutos) y un código MFA si la cuenta lo tiene habilitado. Cambiarla invalida todas las sesiones.
 - Contraseñas VIS Cloud: el cliente Tauri obtiene una clave Ed25519 con
   Argon2id y un salt aleatorio (16 bytes); solo el verificador público se guarda
   en D1. El backend NUNCA recibe la contraseña en texto claro.
