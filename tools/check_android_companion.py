@@ -11,6 +11,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def read(p): return (ROOT/p).read_text(encoding="utf-8")
 native=read("mobile/src-tauri/src/lib.rs")
 ui=read("mobile/web/app.js")
+features=read("mobile/web/features.js")
 html=read("mobile/web/index.html")
 config=json.loads(read("mobile/src-tauri/tauri.conf.json"))
 cargo=read("mobile/src-tauri/Cargo.toml")
@@ -46,6 +47,19 @@ checks={
     and 'localStorage' not in ui
     and 'sessionStorage' not in ui
     and 'indexedDB' not in ui,
+  "Native-action bridge restricts paths and enforces upper bounds":
+    'fn action_route(action:&str)' in native
+    and '"POST","/v1/admin/accounts/role"' in native
+    and '"GET","/v1/account/mfa/status"' in native
+    and 'encoded.as_ref().is_some_and(|v|v.len()>max_bytes)' in native
+    and 'nonce_guard(&guard,generation)' in native,
+  "Portals, Universe and Ceibo mobile forms call only native Rust":
+    "createMobileFeatures" in features
+    and "mobile_action" in features
+    and "mobile_password_change" in features
+    and 'fetch(' not in features
+    and 'localStorage' not in features
+    and 'indexedDB' not in features,
   "No game start UI while Android port does not exist":
     'Minecraft Rust / Java' in ui
     and 'deshabilitadas en esta preview' in ui,
@@ -55,8 +69,10 @@ checks={
     and "connect-src ipc: http://ipc.localhost" in config["app"]["security"]["csp"]
     and "https://*" not in config["app"]["security"]["csp"],
   "Android frontend has device viewport and no external CDN scripts":
-    'viewport-fit=cover' in html and '<script src="./app.js"' in html
+    'viewport-fit=cover' in html and 'type="module" src="./app.js"' in html
     and 'https://' not in html,
+  "Mobile scripts are ES modules with isolated features":
+    "from './features.js'" in ui,
 }
 for title,ok in checks.items():
     print(("OK  " if ok else "FAIL"),title)
