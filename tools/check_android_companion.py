@@ -12,6 +12,8 @@ def read(p): return (ROOT/p).read_text(encoding="utf-8")
 native=read("mobile/src-tauri/src/lib.rs")
 ui=read("mobile/web/app.js")
 features=read("mobile/web/features.js")
+microsoft=read("mobile/src-tauri/src/microsoft.rs")
+mcrust=read("mobile/src-tauri/src/mcrust.rs")
 html=read("mobile/web/index.html")
 config=json.loads(read("mobile/src-tauri/tauri.conf.json"))
 cargo=read("mobile/src-tauri/Cargo.toml")
@@ -76,6 +78,24 @@ checks={
     and 'Minecraft Java Edition' not in features
     and "selectable('engine'" not in features
     and 'game_metadata_ok(&name,"horizon","26.3","vanilla",&project)' in native,
+  "Microsoft device-linking runs in native Rust, never in the WebView":
+    'mobile_ms_begin' in microsoft
+    and 'mobile_ms_poll' in microsoft
+    and 'mobile_ms_status' in microsoft
+    and 'Minecraft Services' in microsoft
+    and '_minecraft_token' in microsoft
+    and 'MSA_APP_ID' in microsoft
+    and 'state:' not in features.split("Microsoft Premium")[0]
+    and 'mobile_ms_begin' in features
+    and 'mobile_ms_disconnect' in features
+    and '"access_token"' not in features,
+  "McRust launch receives only validated VIS or Microsoft nickname, never a credential":
+    'verified_name(&owner,generation)' in mcrust
+    and 'public_handle' in mcrust
+    and 'minecraft_label' in mcrust
+    and '"engine_commit"' in mcrust
+    and '"name":player_name' in mcrust
+    and '"access_token"' not in mcrust,
   "Android package has a distinct ID and content security policy":
     config["identifier"]=="com.visstudios.nexo.mobile"
     and config["app"]["withGlobalTauri"] is True
