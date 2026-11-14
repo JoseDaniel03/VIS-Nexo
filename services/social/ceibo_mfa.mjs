@@ -1,6 +1,6 @@
 // VIS Ceibo: RFC 6238 TOTP step-up (AES-GCM encrypted at rest) and
 // disposable 100-bit backup codes. The AES key stays in Cloudflare Secrets.
-export function createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit}){
+export function createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit,revokeRealtime}){
   const TTL=10*60;
   const enc=new TextEncoder();
   const alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -121,6 +121,9 @@ export function createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit}){
       db.prepare("UPDATE auth_sessions SET mfa_verified_at=? "+
         "WHERE token_hash=? AND user_id=?").bind(now(),user.tokenHash,user.id)
     ]);
+    // Closing existing HTTP bearers in D1 is not enough: realtime
+    // connections already possess a one-use websocket lease.
+    await revokeRealtime(env,user.id);
     return reply({ok:true,recovery_codes:display,
       warning:"Guardá estos códigos fuera del launcher. No volverán a mostrarse."});
   }
