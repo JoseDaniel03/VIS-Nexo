@@ -1229,7 +1229,8 @@ const ceiboMfa=createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit,revokeReal
 const ceibo=createCeiboRecovery({
   reply,bad,now,hash,randomToken,parseBody,rateLimit,cloudVerifier,
   verifySignature,revokeRealtime,requireStepup:ceiboMfa.requireStepup,
-  consumeRecoveryCode:ceiboMfa.consumeRecoveryCode
+  consumeRecoveryCode:ceiboMfa.consumeRecoveryCode,
+  mfaEnrolled:ceiboMfa.enrolled
 });
 
 export default {
