@@ -614,7 +614,22 @@ async function selectAndUploadSocialAvatar(){
 async function connectSocial(reuseCloudSession=false) {
   if (!native || !db.user || isGuest()) return;
   try { await social.start(db.user.username,reuseCloudSession); }
-  catch (error) { message('VIS Social sin conexión: ' + String(error), true); }
+  catch (error) {
+    if(String(error).includes('VIS_CEIBO_MFA_REQUIRED')){
+      const identity=db.user?.username;
+      const code=window.prompt('VIS Ceibo requiere un segundo factor para conectar esta cuenta. Ingresá el código de tu aplicación o uno de emergencia:');
+      if(!code){void command('social_cancel_pending_mfa').catch(()=>{});return;}
+      try{
+        const snapshot=await command('social_cloud_mfa_finish',{code:code.trim()});
+        if(db.user?.username!==identity)return;
+        db=snapshot;render();
+        await social.start(identity,true);
+        message('VIS Social conectado con MFA.');
+      }catch(failure){message('MFA VIS Social: '+String(failure),true);}
+      return;
+    }
+    message('VIS Social sin conexión: ' + String(error), true);
+  }
 }
 async function apply(name,args={},success=''){
  const generation=accountGeneration;
@@ -661,8 +676,24 @@ function ceiboRecoveryView(){
   '</div><p class="muted">Para cuentas Microsoft, la recuperación de contraseña se hace en Microsoft.</p>'+
   '</section></main>';
 }
+function ceiboMfaLoginView(){
+ return '<main class="auth-screen"><section class="auth-glass vis-ceibo-recovery" aria-label="Segundo factor VIS Ceibo">'+
+ '<div class="auth-brand">'+logo(true)+'<span>'+brandLabel()+'</span></div>'+
+ '<div class="auth-intro"><span class="kicker">VIS CEIBO / SEGURIDAD</span>'+
+ '<h1>Verificación en dos pasos</h1>'+
+ '<p>La contraseña ya fue comprobada. Para entrar a tu cuenta VIS, ingresá el código de tu aplicación Authenticator o un código de emergencia de un solo uso.</p></div>'+
+ '<form id="ceibo-login-mfa-form" class="auth-form">'+
+ '<label class="field-label" for="ceibo-login-mfa-code">Código de autenticación</label>'+
+ '<div class="auth-input">'+I('shield',17)+
+ '<input id="ceibo-login-mfa-code" name="code" required autocomplete="one-time-code" maxlength="36" placeholder="6 dígitos o código de emergencia" spellcheck="false"/></div>'+
+ '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Confirmar identidad y entrar</button>'+
+ '</form><button class="auth-footer" data-action="ceibo-login-mfa-cancel" type="button">Cancelar inicio de sesión</button>'+
+ '<p class="muted">Sin acceso al autenticador, utilizá uno de los códigos de emergencia que guardaste al activar MFA.</p>'+
+ '</section></main>';
+}
 function loginView(){
  if(authMode==='recover')return ceiboRecoveryView();
+ if(authMode==='mfa')return ceiboMfaLoginView();
   const reg=authMode==='register', guest=authMode==='offline';
   return `<main class="auth-screen">
     <section class="auth-glass" aria-label="${guest?'Acceso offline':reg?'Crear cuenta':'Inicio de sesión'}">
@@ -2027,6 +2058,20 @@ root.addEventListener('submit',async event=>{
    return;
  }
 
+ if(form.id==='ceibo-login-mfa-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     const code=String(formData.get('code')||'').trim();
+     db=await command('social_cloud_mfa_finish',{code});
+     resetAccountView();page='home';authMode='login';render();
+     void refreshAssets().catch(()=>{});
+     message('Segundo factor validado. Bienvenido a VIS Nexo.');
+     if(native)void connectSocial(true);
+   }catch(error){message('Verificación MFA: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
  if(form.id==='auth-form'){
   if(authBusy)return;
   const username=String(formData.get('username')||''),password=String(formData.get('password')||'');
@@ -2036,7 +2081,13 @@ root.addEventListener('submit',async event=>{
    if(cloud){
      if(authMode==='register')db=await command('social_cloud_register',{
        username,password,confirm:String(formData.get('confirm')||'')});
-     else db=await command('social_cloud_login',{identifier:username,password});
+     else{
+       const login=await command('social_cloud_login',{identifier:username,password});
+       if(!login){
+         authMode='mfa';render();return;
+       }
+       db=login;
+     }
    } else {
      db=authMode==='offline'?await command('login_offline',{nickname:String(formData.get('nickname')||'')}):
        await command(authMode==='register'?'register':'login',
@@ -2150,6 +2201,10 @@ root.addEventListener('click',async event=>{
  if(['create-project','edit-project','edit-avatar','open-instance','edit-instance','delete-instance','delete-project'].includes(act))lastDialogTrigger=button;
  if(act==='modal-backdrop'){if(event.target===button)closeDialog();return;}
 
+ if(act==='ceibo-login-mfa-cancel'){
+   if(native)void command('social_cancel_pending_mfa').catch(()=>{});
+   authMode='login';authProvider='cloud';authBusy=false;render();return;
+ }
  if(act==='auth-forgot-password'||act==='auth-forgot-username'){
    authProvider='cloud';authMode='recover';ceiboRecoveryKind=act==='auth-forgot-password'?'password':'username';
    ceiboRecoveryStep='request';render();return;
