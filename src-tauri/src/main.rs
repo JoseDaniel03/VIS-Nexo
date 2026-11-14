@@ -1936,6 +1936,7 @@ fn main() {
             microsoft::microsoft_upload_skin,
             social::social_identity_info,
             social::social_cloud_register, social::social_cloud_login,
+            social::social_cloud_mfa_finish, social::social_cancel_pending_mfa,
             social::social_enable_cloud_password,
             social::social_recovery_start, social::social_recovery_verify_email,
             social::social_recovery_reset, social::social_change_cloud_password,
