@@ -139,3 +139,5 @@ button.link{background:transparent;border:0;color:#c5b0ff;font-size:12px;min-hei
 .vis-error-copy{border:1px solid #ae8ce8;background:#6c43ac;color:white}
 .vis-error-close{border:1px solid #65577b;background:#332748;color:white}
 .vis-error-dialog :focus-visible{outline:2px solid #d0b1ff;outline-offset:3px}
+
+.vis-error-detail-button{display:inline-block;margin:7px 6px 3px;padding:8px 12px;border-radius:9px;border:1px solid #ac87de;background:#503076;color:#fff;min-height:40px;font-size:12px}
