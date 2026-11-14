@@ -358,3 +358,7 @@ h1,h2,h3,p{margin-top:0}
 .vis-error-copy{border:1px solid #ae8ce8;background:#6c43ac;color:white}
 .vis-error-close{border:1px solid #65577b;background:#332748;color:white}
 .vis-error-dialog :focus-visible{outline:2px solid #d0b1ff;outline-offset:3px}
+
+.vis-instance-skin-head{display:block;width:44px;height:44px;object-fit:contain;image-rendering:pixelated;border-radius:5px}
+.vis-game-profile-head{width:26px;height:26px;object-fit:contain;image-rendering:pixelated;vertical-align:middle;margin-right:5px}
+.vis-error-detail-button{border:1px solid #8865b4;background:#45315d;color:#f4e9ff;border-radius:9px;padding:8px 10px;cursor:pointer;font-size:12px;pointer-events:auto}
