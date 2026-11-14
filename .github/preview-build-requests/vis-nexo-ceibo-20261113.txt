@@ -1,7 +1,0 @@
-VIS Nexo portable preview build request — 2026-11-13
-Target platforms: Windows x64 portable ZIP; Linux x64 AppImage.
-Source: security/vis-shield-world-cloud-projects-20261113
-Scope: PR #5 (VIS Shield / Ceibo Recovery), unsigned internal-testing artifacts.
-No installers, no publish/release, no merge to main, no Cloudflare deploy.
-Do not include signing keys, GitHub secrets, tokens or user data in artifacts.
-NOTE: recovery emails require separate Resend/Cloudflare setup.
