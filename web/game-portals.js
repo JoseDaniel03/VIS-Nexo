@@ -3,7 +3,7 @@ export function createGamePortals(command,social,worlds,voice,view,onError,onSet
  let timer=null,busy=false,owner='',muted=false,deaf=false,lastError='',inflight=0,running=false;
  function setRunning(value){if(running!==!!value){running=!!value;onGameState(running);}}
  function dispatch(task){if(inflight>=32)return;const identity=owner;inflight++;void Promise.resolve().then(()=>{if(view().user?.username===identity)return task();}).catch(error=>{lastError=String(error);onError(lastError);}).finally(()=>inflight--);}
- const failures=new Map(),queries=new Map();
+ const failures=new Map(),queries=new Map(),worldStatus=new Map();
  async function tick(){
   if(busy)return;busy=true;
   try{
@@ -11,11 +11,19 @@ export function createGamePortals(command,social,worlds,voice,view,onError,onSet
    if(!state.user||!social.connected()){social.setGameActive(false);setRunning(false);if(owner){owner='';await voice.leave();}return;}
    if(owner&&owner!==state.user.username){queries.clear();await voice.leave();}owner=state.user.username;
    const games=await command('portals_games');setRunning(games.length>0);social.setGameActive(games.length>0);
+   const activePids=new Set(games.map(g=>g.pid));for(const pid of worldStatus.keys())if(!activePids.has(pid))worldStatus.delete(pid);
    for(const game of games){
     if(Date.now()<(failures.get(game.pid)||0))continue;
     try{
+     const lastWorld=worldStatus.get(game.pid);
+     if(!lastWorld||Date.now()-lastWorld.at>2500){
+      try{
+       const status=await command('portals_command',{pid:game.pid,action:'status',code:null});
+       worldStatus.set(game.pid,{at:Date.now(),sharing:status.sharing===true});
+      }catch{worldStatus.delete(game.pid);}
+     }
      const notice=(state.messages||[]).filter(m=>m.from!==state.user.username).at(-1);
-     const snapshot={invitations:social.worldInvitations().slice(0,3).map(i=>({id:i.id,sender:i.sender})),auto_pause:localStorage.getItem("vis-portals-autopause")!=="false",hotkey:localStorage.getItem("vis-portals-hotkey")||"F8",quiet:social.state()?.presence==='busy',notice:notice?{id:notice.id||notice.created,from:notice.from}:null,friends:(state.friends||[]).filter(f=>!queries.get(game.pid)||[f.username,f.alias,f.display_name].join(" ").toLowerCase().includes(queries.get(game.pid))).slice(0,40).map(f=>({username:f.username,name:f.alias||f.display_name||f.username,presence:f.presence})),messages:(state.messages||[]).slice(-12).map(m=>({...m,body:m.body})),error:lastError.slice(0,150),voice:voice.status(),presence:social.state()?.presence||'online'};
+     const snapshot={world_sharing:worldStatus.get(game.pid)?.sharing===true,invitations:social.worldInvitations().slice(0,3).map(i=>({id:i.id,sender:i.sender})),auto_pause:localStorage.getItem("vis-portals-autopause")!=="false",hotkey:localStorage.getItem("vis-portals-hotkey")||"F8",quiet:social.state()?.presence==='busy',notice:notice?{id:notice.id||notice.created,from:notice.from}:null,friends:(state.friends||[]).filter(f=>!queries.get(game.pid)||[f.username,f.alias,f.display_name].join(" ").toLowerCase().includes(queries.get(game.pid))).slice(0,40).map(f=>({username:f.username,name:f.alias||f.display_name||f.username,presence:f.presence})),messages:(state.messages||[]).slice(-12).map(m=>({...m,body:m.body})),error:lastError.slice(0,150),voice:voice.status(),presence:social.state()?.presence||'online'};
      // Keep the wire bounded independently of history retention policy.
      while(new TextEncoder().encode(JSON.stringify(snapshot)).length>11500&&snapshot.messages.length)snapshot.messages.shift();
      const result=await command('portals_exchange',{pid:game.pid,snapshot});
@@ -26,7 +34,7 @@ export function createGamePortals(command,social,worlds,voice,view,onError,onSet
       if(event.type==='invite')dispatch(()=>worlds.invite(event.to,game.pid));
       if(event.type==='join')dispatch(()=>worlds.join(event.id,game.pid));
       if(event.type==='decline')dispatch(()=>social.declineWorld(event.id));
-      if(event.type==='stop')dispatch(()=>worlds.stop(game.pid));
+      if(event.type==='stop')dispatch(async()=>{await worlds.stop(game.pid);worldStatus.delete(game.pid);});
       if(event.type==='presence')dispatch(()=>social.setPresence(event.value,event.custom_status||''));
       if(event.type==='voice'){
        if(event.action==='join')dispatch(()=>voice.join(game.project_id));
