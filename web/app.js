@@ -36,7 +36,7 @@ function resetAccountView(){
  for(const path of Object.keys(assetCache))delete assetCache[path];
  previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
  previewLoading.clear();
- chatWith='';chatWindowSize=100;friendFilter='';
+ chatWith='';chatWindowSize=100;friendFilter='';horizonGameRunning=false;
 }
 async function onceOperation(key,operation){
  if(pendingOperations.has(key))return false;
@@ -107,6 +107,8 @@ async function beginMicrosoftLogin(){
 }
 
 let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null, stateEditorOpen=false;
+// World invitations are only available while Horizon runs under this account.
+let horizonGameRunning=false;
 let projectCommunity=null, projectCommunityId='', projectCommunityLoading=false, projectCommunityError='';
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
@@ -579,7 +581,7 @@ const portalsWorlds=createWorldsPortals(command,social,()=>db.user?.username||''
  return selected;
 },error=>message(String(error),true));
 const serverVoice=createServerVoice((path,method,body)=>command('social_request',{path,method,body}),state=>{if(state.error)message(state.error,true);});
-const gamePortals=createGamePortals(command,social,portalsWorlds,serverVoice,()=>db,error=>{console.warn('VIS Portals:',error);},()=>void openVoiceSettings(serverVoice));
+const gamePortals=createGamePortals(command,social,portalsWorlds,serverVoice,()=>db,error=>{console.warn('VIS Portals:',error);},()=>void openVoiceSettings(serverVoice),running=>{if(horizonGameRunning!==running){horizonGameRunning=running;scheduleSocialRender();}});
 if(native)gamePortals.start();
 async function enableSocialCloudPassword(){
  if(!social.connected()){message('Conectá VIS Social para vincular la cuenta.',true);return;}
@@ -797,7 +799,7 @@ function socialPanel(){
  <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(socialDisplayName(db.user?.username||''))}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')} · Cuenta VIS</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
 
  <div class="social-group-head"><span class="social-contacts-label">${I('users',15)} ${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'} ${db.incoming_requests?.length?`<span class="contact-notification" title="Solicitudes de amistad pendientes">${db.incoming_requests.length}</span>`:''} </span><span>${projectFriends.length}</span></div>
- ${native&&social.connected()?`<button class="mini-add" data-action="voice-settings">Ajustes de voz</button><button class="mini-add" data-action="world-stop">Dejar de compartir mundo</button>`:''}
+ <!-- Voice controls and stop-sharing belong to the game overlay, not the global launcher sidebar. -->
  ${social.worldInvitations().map(inv=>`<div class="request-row"><span>${esc(inv.sender)} te invita a su mundo · 26.3</span><button class="mini-add" data-action="world-join" data-id="${attr(inv.id)}">Unirme</button><button class="mini-add" data-action="world-decline" data-id="${attr(inv.id)}">Rechazar</button></div>`).join('')}
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
  <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
@@ -807,8 +809,6 @@ function socialPanel(){
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
  ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button><button class="mini-add" type="button" data-action="social-global-admin">Administradores globales</button>`:''}`:''}
- ${social.connected()&&social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-developer-key" title="Consultar clave pública de la cuenta para una habilitación manual en GitHub">Identidad de desarrollador${socialOwner?' · habilitada':''}</button><button class="mini-add" type="button" data-action="social-superadmin-key" title="Preparar solicitud protegida de superadministrador, sin revelar contraseña">Identidad para superadmin${accountAdmin?' · habilitada':''}</button>`:''}
- <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>${social.connected()&&!social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-enable-cloud">Vincular contraseña online</button>`:''}
  `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
@@ -830,7 +830,7 @@ function chatDrawer(){
  const msgs=db.messages.filter(m=>(m.from===db.user?.username&&m.to===chatWith)||(m.to===db.user?.username&&m.from===chatWith));
  // Bounded DOM rendering: O(min(messages, window)), older messages stay in data.
  const visible=msgs.slice(-chatWindowSize);
- return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b>${native&&social.connected()?`<button class="mini-add" data-action="world-invite" data-id="${attr(chatWith)}">Invitar a mi mundo</button>`:''}<button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="1300" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
+ return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b>${native&&social.connected()&&horizonGameRunning?`<button type="button" class="mini-add chat-world-invite" data-action="world-invite" data-id="${attr(chatWith)}" title="Invitar desde una partida Horizon iniciada en esta sesión">Invitar a mi mundo</button>`:''}<button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="1300" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
 }
 function emptyHome(){return `<div class="empty-projects"><div class="empty-orbit">${I('layers',38)}</div><h3>Todavía no hay proyectos</h3><p>${isAdmin()?'Creá el primer proyecto y personalizá su identidad visual desde el administrador.':'Los proyectos publicados aparecerán acá automáticamente. Si no tenés un catálogo configurado, VIS Studios debe vincular primero la URL pública de Universe.'}</p>${isAdmin()?`<button class="outline-btn" data-action="create-project">${I('plus',17)} Crear proyecto</button>`:''}</div>`;}
 function modeSelector(){
@@ -2134,10 +2134,18 @@ root.addEventListener('submit',async event=>{
  }
  if(form.id==='message-form'){
   const body=String(formData.get('body')||'');
-  if(!body||!chatWith)return;
+  const recipient=chatWith, account=db.user?.username;
+  if(!body.trim()||!recipient)return;
   if(!social.connected()){message('VIS Social sin conexión: mensaje no enviado.',true);return;}
-  try {await social.sendMessage(chatWith,body);}
-  catch(e){message(String(e),true);}
+  try {
+   await social.sendMessage(recipient,body);
+   // Live updates can replace the form during await; keep drafts written after Send.
+   const input=root.querySelector('#message-form [name="body"]');
+   if(db.user?.username===account&&chatWith===recipient&&input?.value===body){
+    input.value='';
+    input.focus({preventScroll:true});
+   }
+  }catch(e){message(String(e),true);}
   return;
  }
  if(form.id==='cloud-catalog-form'){try{await command('configure_cloud_catalog',{url:String(formData.get('url')||'').trim()});message('Catálogo configurado');await refreshCloudCatalog();}catch(e){message(String(e),true);}return;}
@@ -2410,7 +2418,12 @@ root.addEventListener('click',async event=>{
     await command('horizon_project_menu',{projectId,name:id,config});message('Menú guardado. Se aplica al volver a iniciar Horizon.');
    }catch(error){message(String(error),true);}
  }
- else if(act==='world-invite'){try{await portalsWorlds.invite(id);message('Invitación enviada. El mundo se ejecuta en tu PC.');}catch(error){message(String(error),true);}}
+ else if(act==='world-invite'){
+  if(!native||!social.connected()||!horizonGameRunning||!chatWith||id!==chatWith)
+   return message('Iniciá una partida Horizon desde VIS Nexo para invitar a este contacto.',true);
+  try{await portalsWorlds.invite(id);message('Invitación enviada desde tu partida Horizon.');}
+  catch(error){message(String(error),true);}
+ }
  else if(act==='world-join'){try{await portalsWorlds.join(id);message('Conectando al mundo de tu amigo…');}catch(error){message(String(error),true);}}
  else if(act==='world-decline'){try{await social.declineWorld(id);}catch(error){message(String(error),true);}}
  else if(act==='world-stop'){try{await portalsWorlds.stop();message('Dejaste de compartir el mundo.');}catch(error){message(String(error),true);}}
@@ -2420,6 +2433,7 @@ root.addEventListener('click',async event=>{
  else if(act==='social-upload-avatar'){void selectAndUploadSocialAvatar();}
  else if(act==='social-enable-cloud'){void enableSocialCloudPassword();}
  else if(act==='social-developer-key'){
+  if(!social.state()?.developer)return message('Opción reservada a desarrolladores autorizados.',true);
   try{
    const {account}=await social.accountInfo();
    if(!account?.cloud_credential_public_key)throw Error('Esta cuenta todavía no tiene credencial cloud.');
@@ -2431,6 +2445,7 @@ root.addEventListener('click',async event=>{
   }catch(error){message(String(error),true);}
  }
  else if(act==='social-superadmin-key'){
+  if(social.state()?.role!=='super_admin')return message('Opción reservada a la supercuenta.',true);
   try{
    const {account}=await social.accountInfo();
    if(!account?.cloud_credential_public_key)
@@ -2446,6 +2461,8 @@ root.addEventListener('click',async event=>{
   }catch(error){message(String(error),true);}
  }
  else if(act==='social-public-identity'){
+  if(social.state()?.role!=='super_admin'&&!social.state()?.developer)
+   return message('Solo personal autorizado puede acceder a esta identidad técnica.',true);
   if(!native){message('La identidad se muestra desde VIS Nexo nativo.',true);return;}
   try{
     const info=await command('social_identity_info');
