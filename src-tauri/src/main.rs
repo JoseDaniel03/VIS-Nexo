@@ -1338,6 +1338,86 @@ fn save_brand_name(state: State<'_, Mutex<Backend>>, name: String) -> Result<Sna
     Ok(s.snapshot())
 }
 
+// Per-VIS-account public skin cache. Only cosmetic PNG data is stored here:
+// no session token, password, Microsoft identity or third-party path.
+fn vis_skin_file(root:&Path,owner:&str)->Option<PathBuf>{
+    if !(3..=24).contains(&owner.len()) ||
+        !owner.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_'){
+        return None;
+    }
+    Some(root.join("assets").join("vis-skins").join(format!("{owner}.png")))
+}
+fn valid_vis_skin_png(bytes:&[u8])->bool{
+    if bytes.len()<33||bytes.len()>65536 ||
+       !bytes.starts_with(&[137,80,78,71,13,10,26,10])||
+       &bytes[12..16]!=b"IHDR" {return false;}
+    let width=u32::from_be_bytes([bytes[16],bytes[17],bytes[18],bytes[19]]);
+    let height=u32::from_be_bytes([bytes[20],bytes[21],bytes[22],bytes[23]]);
+    width==64&&[32,64].contains(&height)
+       && bytes[24]==8&&[2,6].contains(&bytes[25])
+       && bytes[26]==0&&bytes[27]==0&&bytes[28]==0
+}
+/// A published VIS Social skin is downloaded only by the signed-in launcher.
+/// Clear it on skin deletion; preserve each account's separate cached texture.
+#[tauri::command]
+fn cache_vis_skin(state:State<'_,Mutex<Backend>>,png:Option<String>)->Result<bool,String>{
+    let s=locked(&state)?;
+    let user=s.username()?;
+    let file=vis_skin_file(&s.data_root,user).ok_or("Nombre de cuenta VIS inválido")?;
+    let parent=file.parent().ok_or("Directorio de skin no disponible")?;
+    fs::create_dir_all(parent).map_err(|_|"No se pudo preparar el caché de skins VIS")?;
+    let assets=asset_dir(&s).canonicalize().map_err(|_|"Biblioteca de recursos VIS no disponible")?;
+    let parent=parent.canonicalize().map_err(|_|"Caché de skins VIS no disponible")?;
+    if !parent.starts_with(assets){return Err("Ubicación no permitida para skins VIS".into());}
+    if fs::symlink_metadata(&file).is_ok_and(|m|m.file_type().is_symlink()){
+        return Err("No se permite un enlace simbólico para la skin VIS".into());
+    }
+    if let Some(png)=png{
+        if png.len()>87500||!png.starts_with("data:image/png;base64,"){
+            return Err("La skin pública debe ser PNG base64 válido".into());
+        }
+        let encoded=png.strip_prefix("data:image/png;base64,").unwrap_or_default();
+        let bytes=STANDARD.decode(encoded).map_err(|_|"Skin VIS corrupta")?;
+        if !valid_vis_skin_png(&bytes){return Err("Skin VIS debe medir 64×64 o 64×32".into());}
+        let temp=parent.join(format!(".vis-skin-{}-{}.partial",user,std::process::id()));
+        let result=(||->Result<(),String>{
+            use std::io::Write;
+            let mut output=fs::OpenOptions::new().write(true).create_new(true).open(&temp)
+                .map_err(|_|"No se pudo crear un archivo temporal de skin VIS")?;
+            output.write_all(&bytes).map_err(|_|"No se pudo guardar la skin VIS")?;
+            output.sync_all().map_err(|_|"No se pudo terminar de guardar la skin VIS")?;
+            drop(output);
+            #[cfg(target_os="windows")]
+            if file.is_file(){fs::remove_file(&file).map_err(|_|"Skin VIS en uso")?;}
+            fs::rename(&temp,&file).map_err(|_|"No se pudo activar la skin VIS")?;
+            Ok(())
+        })();
+        if result.is_err(){let _=fs::remove_file(&temp);}
+        result?;
+    }else if file.is_file(){
+        fs::remove_file(&file).map_err(|_|"No se pudo quitar la skin VIS")?;
+    }
+    Ok(file.exists())
+}
+fn local_horizon_skin(s:&Backend,user:&str)->Option<PathBuf>{
+    // The Social skin cache belongs to the logged-in VIS identity, never
+    // to the owner of a shared installation.
+    if let Some(path)=vis_skin_file(&s.data_root,user){
+        if fs::symlink_metadata(&path).ok().is_some_and(|m|m.is_file()&&!m.file_type().is_symlink()&&m.len()<=65536){
+            return path.canonicalize().ok();
+        }
+    }
+    let chosen=s.storage.get(user)?.skin.as_str();
+    if chosen.is_empty(){return None;}
+    let file=PathBuf::from(chosen).canonicalize().ok()?;
+    if !file.starts_with(asset_dir(s).canonicalize().ok()?)||
+       !file.extension().is_some_and(|e|e.eq_ignore_ascii_case("png"))||
+       !fs::metadata(&file).ok().is_some_and(|m|m.is_file()&&m.len()<=65536){
+        return None;
+    }
+    Some(file)
+}
+
 // Minecraft Java / Fabric / Modrinth: direct service layer over the existing account and project state.
 // Admin policy is ALWAYS validated by Rust before a game process is spawned.
 fn checked_instance(s:&Backend,project_id:&str,name:&str,require_enabled:bool)->Result<(String,Instance),String>{
@@ -1960,7 +2040,7 @@ fn main() {
             social::social_recovery_start, social::social_recovery_verify_email,
             social::social_recovery_reset, social::social_change_cloud_password,
             social::social_rebind_device,
-            import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
+            import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, cache_vis_skin, save_brand_name,
             horizon_project_menu, portals_exchange, portals_games, portals_command, set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
