@@ -302,6 +302,136 @@ async fn mobile_recovery_reset(
         request("/v1/recovery/reset","POST",Some(&payload),None)
     }).await.map_err(|_|"Restablecimiento interrumpido")?
 }
+/// Narrow allowlist of VIS actions. The WebView never chooses arbitrary URLs,
+/// HTTP methods or authentication headers. Server always checks authorization.
+fn action_route(action:&str)->Result<(&'static str,&'static str,usize),String>{
+    let route=match action{
+        // VIS Portals contacts, presence and account state
+        "friends.request"=>("POST","/v1/friends/request",1024),
+        "friends.accept"=>("POST","/v1/friends/accept",1024),
+        "friends.alias"=>("POST","/v1/friends/alias",1024),
+        "presence.set"=>("POST","/v1/presence",1024),
+        "account.display"=>("POST","/v1/account/display",512),
+        "account.handle"=>("POST","/v1/account/handle",512),
+        "account.email.request"=>("POST","/v1/account/email/request",1024),
+        "account.mfa.status"=>("GET","/v1/account/mfa/status",0),
+        "account.mfa.setup"=>("POST","/v1/account/mfa/setup",512),
+        "account.mfa.confirm"=>("POST","/v1/account/mfa/confirm",512),
+        "account.mfa.verify"=>("POST","/v1/account/mfa/verify",512),
+        "account.mfa.rotate"=>("POST","/v1/account/mfa/rotate-codes",512),
+        "account.sessions"=>("GET","/v1/account/sessions",0),
+        "account.sessions.revoke"=>("POST","/v1/account/sessions/revoke",512),
+        "avatar.get"=>("POST","/v1/avatar/get",1024),
+        "avatar.upload"=>("POST","/v1/avatar/upload",34000),
+        "skin.get"=>("POST","/v1/skins/get",1024),
+        "skin.upload"=>("POST","/v1/skins/upload",90000),
+        "skin.delete"=>("POST","/v1/skins/delete",512),
+        // VIS Universe and community membership; staff/admin checked by D1
+        "projects.subscribe"=>("POST","/v1/projects/subscribe",512),
+        "projects.unsubscribe"=>("POST","/v1/projects/unsubscribe",512),
+        "projects.community"=>("POST","/v1/projects/community",512),
+        "projects.request_join"=>("POST","/v1/projects/request-join",1024),
+        "projects.manage"=>("POST","/v1/admin/projects/upsert",1024),
+        "projects.staff"=>("POST","/v1/admin/projects/staff",1024),
+        "community.members"=>("POST","/v1/admin/projects/community-members",1024),
+        "community.review"=>("POST","/v1/admin/projects/review-join",1024),
+        "community.policy"=>("POST","/v1/admin/projects/community-policy",1024),
+        "community.media"=>("POST","/v1/admin/projects/community-media",2048),
+        "accounts.global_admin"=>("POST","/v1/admin/accounts/global-admin",512),
+        "accounts.role"=>("POST","/v1/admin/accounts/role",512),
+        "accounts.disable"=>("POST","/v1/admin/accounts/disable",512),
+        _=>return Err("Esta operación no está habilitada en VIS Nexo Android".into())
+    };
+    Ok(route)
+}
+#[tauri::command]
+async fn mobile_action(
+    state:State<'_,Mutex<Session>>,
+    action:String,body:Option<Value>
+)->Result<Value,String>{
+    let (method,path,max_bytes)=action_route(&action)?;
+    let encoded=body.as_ref().map(|v|serde_json::to_vec(v)).transpose()
+        .map_err(|_|"Datos VIS inválidos")?;
+    if method=="GET" && body.is_some(){
+        return Err("Esta lectura no permite enviar datos".into());
+    }
+    if method=="POST" && !body.as_ref().is_some_and(Value::is_object){
+        return Err("Faltan datos JSON válidos".into());
+    }
+    if encoded.as_ref().is_some_and(|v|v.len()>max_bytes){
+        return Err("Solicitud demasiado grande para VIS Nexo Android".into());
+    }
+    let (token,generation)={
+        let s=state.lock().map_err(|_|"Sesión VIS ocupada")?;
+        (s.bearer.clone().ok_or("Iniciá sesión VIS Ceibo")?,s.epoch)
+    };
+    let reply=tauri::async_runtime::spawn_blocking(move||{
+        request(path,method,body.as_ref(),Some(&token))
+    }).await.map_err(|_|"Se interrumpió la operación VIS")??;
+    nonce_guard(&state.lock().map_err(|_|"Sesión VIS ocupada")?,generation)?;
+    Ok(reply)
+}
+#[tauri::command]
+async fn mobile_email_verify(code:String)->Result<Value,String>{
+    if code.len()!=43||!code.bytes().all(|b|
+        b.is_ascii_alphanumeric()||b==b'_'||b==b'-'){
+        return Err("Código de correo inválido".into());
+    }
+    tauri::async_runtime::spawn_blocking(move||
+        request("/v1/recovery/email/verify","POST",Some(&json!({"code":code})),None)
+    ).await.map_err(|_|"Verificación de correo interrumpida")?
+}
+/// Password change requires a fresh proof of the CURRENT password. Reuses
+/// the exact VIS Ceibo Argon2id challenge, with optional MFA completion.
+#[tauri::command]
+async fn mobile_password_change(
+    state:State<'_,Mutex<Session>>,
+    current_password:String,password:String,confirm:String,mfa_code:Option<String>
+)->Result<AuthView,String>{
+    if password!=confirm || !(10..=128).contains(&password.len())||
+       !(10..=128).contains(&current_password.len()){
+        return Err("Revisá tu contraseña anterior y la nueva (10–128 caracteres)".into());
+    }
+    let (username,generation)={
+        let s=state.lock().map_err(|_|"Sesión ocupada")?;
+        (s.username.clone().filter(|_|s.bearer.is_some())
+            .ok_or("Iniciá sesión en VIS Ceibo")?,s.epoch)
+    };
+    let result=tauri::async_runtime::spawn_blocking(move||{
+        let mut auth=password_login(&username,&current_password)?;
+        if auth.get("username").and_then(Value::as_str)!=Some(username.as_str()){
+            return Err("La contraseña no corresponde a tu cuenta VIS".into());
+        }
+        let token=if auth.get("mfa_required").and_then(Value::as_bool)==Some(true){
+            let ticket=auth.get("mfa_ticket").and_then(Value::as_str)
+                .ok_or("Falta el desafío MFA")?;
+            let code=mfa_code.as_deref().unwrap_or("").trim();
+            if code.is_empty(){return Err("Ingresá el código MFA para cambiar tu contraseña".into());}
+            let payload=if code.len()==6&&code.bytes().all(|b|b.is_ascii_digit()){
+                json!({"mfa_ticket":ticket,"code":code})
+            }else{
+                json!({"mfa_ticket":ticket,"recovery_code":code})
+            };
+            auth=request("/v1/accounts/login/mfa","POST",Some(&payload),None)?;
+            if auth.get("username").and_then(Value::as_str)!=Some(username.as_str()){
+                return Err("El segundo factor no corresponde a la cuenta VIS".into());
+            }
+            auth.get("token").and_then(Value::as_str)
+                .ok_or("No se completó el segundo factor")?.to_owned()
+        }else{
+            auth.get("token").and_then(Value::as_str)
+                .ok_or("No se pudo autenticar nuevamente")?.to_owned()
+        };
+        let payload=registration(&username,&password)?;
+        request("/v1/account/password/change","POST",Some(&payload),Some(&token))
+    }).await.map_err(|_|"Cambio de contraseña interrumpido")??;
+    let _=result;
+    let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
+    nonce_guard(&s,generation)?;
+    s.epoch=s.epoch.wrapping_add(1);s.username=None;s.bearer=None;s.pending=None;
+    Ok(auth_view(&s))
+}
+
 #[tauri::command]
 async fn mobile_logout(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{
     let bearer={
@@ -325,7 +455,8 @@ pub fn run(){
         .invoke_handler(tauri::generate_handler![
             mobile_status,mobile_health,mobile_login,mobile_register,
             mobile_mfa,mobile_cancel_mfa,mobile_read,mobile_community,
-            mobile_recovery_start,mobile_recovery_reset,mobile_logout
+            mobile_recovery_start,mobile_recovery_reset,mobile_logout,
+            mobile_action,mobile_email_verify,mobile_password_change
         ])
         .run(tauri::generate_context!())
         .expect("VIS Nexo Android no pudo iniciar");
