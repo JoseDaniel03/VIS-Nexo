@@ -66,13 +66,16 @@ checks={
     and 'fn persist_instances(' in native
     and 'mobile_instance_create' in native
     and 'mobile_instance_remove' in native
-    and 'No se pudieron preparar las carpetas Android' in native
+    and 'No se pudo preparar el perfil de instancia Rust' in native
     and 'launch_minecraft' not in native
     and 'launch_horizon' not in native,
-  "Java remains unavailable; McRust installs from the shared engine catalog":
-    'Minecraft Rust / Java' in ui
+  "Android offers only Horizon Rust 26.3 and installs from shared catalog":
+    'Minecraft Rust</strong>' in ui
     and 'mobile_mcrust_launch' in features
-    and 'mcrust::mobile_mcrust_launch' in native,
+    and 'mcrust::mobile_mcrust_launch' in native
+    and 'Minecraft Java Edition' not in features
+    and "selectable('engine'" not in features
+    and 'game_metadata_ok(&name,"horizon","26.3","vanilla",&project)' in native,
   "Android package has a distinct ID and content security policy":
     config["identifier"]=="com.visstudios.nexo.mobile"
     and config["app"]["withGlobalTauri"] is True
