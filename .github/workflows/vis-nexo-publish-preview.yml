@@ -1,4 +1,5 @@
 name: VIS Nexo 2.22.1 prerelease - Windows Linux Android
+# Re-run after Windows canonical-path unit-test fix (8.3 names versus Win32 final paths).
 on:
   workflow_dispatch:
   push:
