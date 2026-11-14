@@ -63,8 +63,21 @@ assert(features.friendControls(state.social.friends[0]).includes('Apodo'));
 assert(features.accountPanel().includes('Cerrar sesiones'));
 assert(features.adminPanel().includes('Superadministración'));
 assert(features.communityPanel().includes('Miembros'));
-assert(features.instancePanel().includes('Rust Survival'));
-assert(features.instancePanel().includes('Carpetas de mundos, mods'));
+const worlds=features.instancePanel();
+assert(worlds.includes('Rust Survival'));
+assert(worlds.includes('Horizon Rust 26.3'));
+assert(worlds.includes('Instalar / Jugar'));
+assert(!worlds.includes('Minecraft Java Edition'));
+assert(!worlds.includes('name="engine"'));
+assert(!worlds.includes('name="version"'));
+assert(!worlds.includes('name="loader"'));
+assert(!worlds.includes('name="project_id"'));
+assert(worlds.includes('los mundos reales se guardan en McRust'));
+state.instances.push({id:'c'.repeat(32),name:'Legacy Java',engine:'java',
+  version:'26.3',loader:'fabric',project_id:''});
+const compatible=features.instancePanel();
+assert(!compatible.includes('Legacy Java') && compatible.includes('Se conservaron 1 instancias antiguas'));
+state.instances.pop();
 
 
 await features.refreshSecurity();
@@ -85,13 +98,10 @@ await features.handleForm(form('project-manage',{id:'virgoland',title:'Virgoland
  summary:'Nueva temporada',visibility:'draft'}));
 assert(calls.some(x=>x.args.action==='projects.manage'&&x.args.body.visibility==='draft'));
 
-await features.handleForm(form('instance-create',{
-  name:'Survival móvil',engine:'horizon',loader:'fabric',
-  version:'26.3',project_id:'virgoland'
-}));
+await features.handleForm(form('instance-create',{name:'Survival móvil'}));
 assert(calls.some(x=>x.name==='mobile_instance_create'&&
-  x.args.engine==='horizon'&&x.args.loader==='vanilla'&&
-  x.args.projectId==='virgoland'), 'Horizon metadata must not inherit Java loader');
+  x.args.name==='Survival móvil'&&Object.keys(x.args).length===1),
+  'Android instance creation must submit only a name; native Rust owns fixed engine metadata');
 await features.handleAction({dataset:{action:'remove-instance',id:'a'.repeat(32)}});
 assert(calls.some(x=>x.name==='mobile_instance_remove'), 'unlinked instance action is native');
 await features.handleForm(form('project-staff',{
