@@ -514,7 +514,7 @@ fn current_android_user(state:&Mutex<Session>)->Result<String,String>{
 }
 fn game_metadata_ok(name:&str,engine:&str,version:&str,loader:&str,project:&str)->Result<(),String>{
     if name.trim().is_empty()||name.chars().count()>64||
-       name.chars().any(|c|c.is_control()){
+       name.chars().any(|c|c.is_control()||c=='/'||c=='\\'){
         return Err("Nombre de instancia inválido".into());
     }
     if !["java","horizon"].contains(&engine){
@@ -619,7 +619,7 @@ mod tests {
     fn mobile_instance_metadata_is_sandboxed(){
         assert!(game_metadata_ok("Survival","java","26.3","fabric","virgoland").is_ok());
         assert!(game_metadata_ok("Horizon","horizon","26.3","vanilla","").is_ok());
-        assert!(game_metadata_ok("../escape","java","26.3","fabric","").is_ok());
+        assert!(game_metadata_ok("../escape","java","26.3","fabric","").is_err());
         assert!(game_metadata_ok("Bad","horizon","26.3","fabric","").is_err());
         assert!(game_metadata_ok("Bad","java","../../secret","vanilla","").is_err());
         assert!(game_metadata_ok("Good","java","26.3","fabric","../escape").is_err());
