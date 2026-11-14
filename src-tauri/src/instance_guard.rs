@@ -72,6 +72,57 @@ pub fn managed_child(library:&Path,name:&str)->Result<PathBuf,String>{
     destination(&target)
 }
 
+/// Validate destructive deletion of an owned VIS instance. Legacy paths are
+/// accepted only when a real installation marker exists; arbitrary user
+/// folders (including the launcher data root) must NEVER be erased.
+pub fn deletion_target(path:&Path, name:&str, project_id:&str, launcher_root:&Path)->Result<PathBuf,String>{
+    let target=destination(path)?;
+    let data_root=destination(launcher_root)?;
+    if data_root.starts_with(&target) {
+        return Err("La ruta abarca datos del launcher o carpetas superiores; no se eliminará".into());
+    }
+    match fs::symlink_metadata(&target) {
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok(target),
+        Err(e)=>return Err(format!("No se pudo comprobar la instancia: {e}")),
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir()=>
+            return Err("La ruta de la instancia no es una carpeta real segura".into()),
+        Ok(_)=>{}
+    }
+    let marker=target.join(".vis/instance.json");
+    if marker.exists(){
+        private_paths(&target,&[".vis/instance.json"])?;
+        let raw=fs::read(&marker).map_err(|e|format!("No se pudo verificar la instalación VIS: {e}"))?;
+        if raw.len()>64*1024{return Err("Marcador VIS demasiado grande".into());}
+        let value:serde_json::Value=serde_json::from_slice(&raw)
+            .map_err(|_|"Marcador VIS inválido; no se borrarán archivos".to_owned())?;
+        if value["name"].as_str()!=Some(name)||value["project_id"].as_str()!=Some(project_id) {
+            return Err("El marcador VIS pertenece a otra instancia; se conservaron los archivos".into());
+        }
+        if let Some(saved)=value["game_dir"].as_str().filter(|s|!s.is_empty()){
+            if destination(Path::new(saved))?!=target {
+                return Err("La carpeta no coincide con el marcador de instalación VIS".into());
+            }
+        }
+        return Ok(target);
+    }
+    // Old pre-instance.json installations: still require a VIS-specific marker
+    // and an explicitly saved instance in the authenticated user's library.
+    for legacy in [".vslauncher/install.json",".vis/horizon.json"] {
+        let mark=target.join(legacy);
+        if mark.exists(){
+            private_paths(&target,&[legacy])?;
+            let meta=fs::symlink_metadata(&mark).map_err(|e|e.to_string())?;
+            if meta.is_file()&&meta.len()>0&&meta.len()<=64*1024 {
+                return Ok(target);
+            }
+        }
+    }
+    if fs::read_dir(&target).map_err(|e|e.to_string())?.next().is_none(){
+        return Ok(target);
+    }
+    Err("No hay marcador VIS verificable. Podés quitar la instancia sin borrar archivos o reparar su instalación antes de reintentar.".into())
+}
+
 /// Protect every parent of a game-owned path from symlink redirection.
 /// A symlink to the global .minecraft hidden inside .vis/runtime is still an
 /// external dependency, even if the instance root itself was checked.
@@ -111,6 +162,37 @@ pub fn independent(a:&Path,b:&Path)->Result<(),String>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn deletes_legacy_owned_folder_but_never_unknown_data(){
+        let base=std::env::temp_dir().join(format!("vis-delete-{}-{}",std::process::id(),"safe"));
+        let _=fs::remove_dir_all(&base);
+        let launcher=base.join("launcher-data");
+        let old=base.join("old-games").join("Horizon");
+        fs::create_dir_all(old.join(".vslauncher")).unwrap();
+        fs::create_dir_all(&launcher).unwrap();
+        fs::write(old.join(".vslauncher/install.json"),b"{\"version\":\"26.3\"}").unwrap();
+        assert_eq!(deletion_target(&old,"Horizon","project",&launcher).unwrap(),old);
+        let unknown=base.join("Downloads/data");
+        fs::create_dir_all(&unknown).unwrap();
+        fs::write(unknown.join("personal.txt"),b"keep me").unwrap();
+        assert!(deletion_target(&unknown,"Data","other",&launcher).is_err());
+        assert!(deletion_target(&base,"Root","other",&launcher).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+    #[test]
+    fn validates_new_marker_identity_before_erasing(){
+        let base=std::env::temp_dir().join(format!("vis-delete-marker-{}",std::process::id()));
+        let _=fs::remove_dir_all(&base);
+        let target=base.join("games/my-world");
+        let launcher=base.join("app-data");
+        fs::create_dir_all(target.join(".vis")).unwrap();
+        fs::create_dir_all(&launcher).unwrap();
+        fs::write(target.join(".vis/instance.json"),
+            br#"{"name":"My World","project_id":"my-project"}"#).unwrap();
+        assert!(deletion_target(&target,"My World","my-project",&launcher).is_ok());
+        assert!(deletion_target(&target,"Different","my-project",&launcher).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
     #[test]
     fn rejects_global_and_nested_instance_dirs(){
         let home=std::env::temp_dir().join(format!("vis-dest-{}",std::process::id()));
