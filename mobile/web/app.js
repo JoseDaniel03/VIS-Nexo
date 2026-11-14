@@ -2,7 +2,7 @@
    No credential, session token, MFA ticket or encrypted message is stored in JS.
    Android installs McRust from the verified shared PC/Android release. */
 import { createMobileFeatures } from './features.js';
-import { createDiagnosticDialog } from './error-dialog.js';
+import { createDiagnosticDialog,redactDiagnostic } from './error-dialog.js';
 'use strict';
 const mount=document.getElementById('root');
 const notify=document.getElementById('notifications');
@@ -20,7 +20,7 @@ const E=value=>escapeHtml(value);
 const diagnostics=createDiagnosticDialog(document);
 const features=createMobileFeatures({state,command,escape:E,toast,screen,refreshAll,reportError});
 function toast(text,error=false,context=null){
-  notify.textContent=String(text).slice(0,250);
+  notify.textContent=(error?redactDiagnostic(text):String(text)).slice(0,250);
   notify.className=error?'error':'';
   if(error){
     const info={platform:'Android ARM64',system:context?.system||'VIS Nexo Android',
