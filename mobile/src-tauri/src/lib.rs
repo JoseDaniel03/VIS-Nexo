@@ -171,10 +171,17 @@ fn mobile_status(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{
 #[tauri::command]
 async fn mobile_health()->Result<Value,String>{
     tauri::async_runtime::spawn_blocking(||{
-        let health=request("/health","GET",None,None)?;
-        let ready=health.get("ok").and_then(Value::as_bool).unwrap_or(false);
-        Ok(json!({"reachable":true,"ready":ready,
-            "schema":health.get("schema").and_then(Value::as_i64).unwrap_or(0)}))
+        // A live Worker returns 503 when D1 migrations are missing. Report
+        // this as a reachable service requiring setup, not a network outage.
+        let response=http()?.get(format!("{SERVER}/health")).send()
+            .map_err(|_|"No hay conexión HTTPS con VIS Ceibo")?;
+        let code=response.status().as_u16();
+        let health:Value=response.json()
+            .map_err(|_|"Respuesta de salud VIS no compatible")?;
+        let status=health.get("status").and_then(Value::as_str).unwrap_or("unknown");
+        let schema=health.get("schema").and_then(Value::as_i64).unwrap_or(0);
+        Ok(json!({"reachable":true,"ready":code==200&&status=="ready"&&schema>=13,
+            "http_status":code,"status":status,"schema":schema}))
     }).await.map_err(|_|"No se pudo verificar la conexión")?
 }
 #[tauri::command]
