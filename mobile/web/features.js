@@ -206,6 +206,42 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       '<button class="danger" type="submit">Aplicar cambio</button></form></section>'
       :'');
   }
+  function instancePanel(){
+    const list=Array.isArray(state.instances)?state.instances:[];
+    return '<section class="mobile-panel"><div class="section-title">Nueva instancia local</div>'+
+      '<p class="muted">Prepará los datos y carpetas para Java o Rust Horizon. Instalar y ejecutar el motor Android no está implementado todavía.</p>'+
+      '<form data-feature="instance-create" class="inline-form">'+
+      formInput('name','Nombre de instancia','text',64)+
+      '<label>Motor de juego</label>'+
+      selectable('engine','java',[['java','Minecraft Java Edition'],['horizon','Minecraft Rust Horizon']])+
+      '<label>Versión Minecraft</label>'+
+      formInput('version','Versión (ej. 26.3)','text',48)+
+      '<label>Loader (Horizon requiere Vanilla)</label>'+
+      selectable('loader','vanilla',[['vanilla','Vanilla'],['fabric','Fabric'],['quilt','Quilt'],['neoforge','NeoForge'],['forge','Forge']])+
+      '<input name="project_id" maxlength="48" aria-label="ID del proyecto opcional" placeholder="ID VIS Universe (opcional)">'+
+      '<button class="primary" type="submit">Crear carpetas e instancia</button></form></section>'+
+      '<section class="mobile-panel"><div class="section-title">Mis instancias · '+list.length+'</div>'+
+      (list.length?list.map(i=>
+        '<article class="instance-card"><div class="small-row"><strong>'+
+        E(i.name)+'</strong><span class="tag">'+E(i.engine==='horizon'?'RUST':'JAVA')+'</span></div>'+
+        '<div class="muted">Versión '+E(i.version)+' · '+E(i.loader)+
+        (i.project_id?' · '+E(i.project_id):'')+'</div>'+
+        '<div class="small-row"><span class="tiny-note">Carpetas de mundos, mods, configuraciones y backups preparadas en el teléfono.</span>'+
+        button('remove-instance','Quitar de lista','data-id="'+safeAttr(i.id)+'"')+'</div>'+
+        '<p class="muted">Motor Android pendiente: no puede iniciarse todavía.</p></article>'
+      ).join(''):'<p class="muted">No creaste ninguna instancia Android.</p>')+
+      '</section>';
+  }
+  async function refreshInstances(){
+    if(!state.auth?.signed_in)return;
+    const username=state.auth.username;
+    try{
+      const entries=await command('mobile_instances');
+      if(!state.auth?.signed_in||state.auth.username!==username)return;
+      state.instances=Array.isArray(entries)?entries:[];
+      if(state.view==='instances')screen();
+    }catch(e){toast('Instancias locales: '+String(e),true);}
+  }
   async function nativeAction(action,body){
     // GET routes accept no body at all. Tauri's Option<Value> is None when
     // the property is omitted; {} would incorrectly be treated as POST data.
@@ -326,6 +362,16 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
           summary:value('summary'),visibility:value('visibility')};
         await nativeAction('projects.manage',project);
         message='Proyecto guardado';
+      }else if(name==='instance-create'){
+        const engine=value('engine');
+        const loader=engine==='horizon'?'vanilla':value('loader');
+        await command('mobile_instance_create',{
+          name:value('name'),engine,loader,version:value('version'),
+          projectId:value('project_id')||null
+        });
+        await refreshInstances();
+        toast('Carpetas de instancia preparadas para Android');
+        return true;
       }else if(name==='project-staff'){
         await nativeAction('projects.staff',{
           project_id:value('project_id'),username:value('username'),
@@ -355,7 +401,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const act=button.dataset.action;
     const supported=new Set([
       'friend-accept','friend-alias','project-sub','request-review','setup-mfa','rotate-codes',
-      'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics'
+      'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics','remove-instance'
     ]);
     if(!supported.has(act))return false;
     if(uiBusy)return true;
@@ -407,6 +453,10 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         state.auth=await command('mobile_logout');
         clear();state.social=null;state.account=null;state.projects=null;state.community=null;screen();
         toast('Sesiones revocadas');
+      }else if(act==='remove-instance'){
+        if(!window.confirm('¿Quitar esta instancia del launcher Android? Sus carpetas y datos NO se borrarán.'))return true;
+        await command('mobile_instance_remove',{id:button.dataset.id});
+        await refreshInstances();toast('Instancia quitada de la lista. Archivos conservados.');
       }else if(act==='view-cosmetics'){
         await refreshCosmetics();
         toast('Avatar y skin sincronizados');
@@ -448,6 +498,6 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     finally{uiBusy=false}
   }
   return {friendControls,friendsPanel,projectControls,communityPanel,
-    accountPanel,adminPanel,canEditProjects,refreshSecurity,refreshCosmetics,
+    accountPanel,adminPanel,instancePanel,canEditProjects,refreshSecurity,refreshCosmetics,refreshInstances,
     clear,handleForm,handleAction,handleFile};
 }
