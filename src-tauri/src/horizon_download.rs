@@ -415,14 +415,32 @@ fn fork_digest(asset:&ForkAsset)->Result<String,String>{
     }
     Ok(sha.to_ascii_lowercase())
 }
+// Shared contract parser: desktop and mobile apply exactly the same compatibility checks.
+#[path = "../../mobile/src-tauri/src/mcrust_catalog.rs"]
+mod shared_mcrust_catalog;
+fn shared_contract(http:&Client,release:&ForkRelease,archive:&str,archive_sha:&str)->Result<(),String>{
+    let manifest=fork_asset(release,"vis-mcrust-release.json")?;
+    if manifest.size==0 || manifest.size>128*1024 || manifest.browser_download_url!=format!("https://github.com/{VIS_FORK}/releases/download/{}/vis-mcrust-release.json",release.tag_name){return Err("Manifiesto compartido inválido".into());}
+    let expected=fork_digest(manifest)?;
+    let response=http.get(&manifest.browser_download_url).send().and_then(|r|r.error_for_status()).map_err(|e|e.to_string())?;
+    let mut raw=Vec::new();response.take(128*1024+1).read_to_end(&mut raw).map_err(|e|e.to_string())?;
+    if raw.len()as u64!=manifest.size || format!("{:x}",Sha256::digest(&raw))!=expected {return Err("La integridad del manifiesto compartido no coincide".into());}
+    let contract:shared_mcrust_catalog::Contract=serde_json::from_slice(&raw).map_err(|_|"Contrato del motor inválido")?;
+    contract.validate(&release.tag_name)?;
+    let target=contract.targets.values().find(|t|t.asset==archive).ok_or("Falta esta plataforma en el motor compartido")?;
+    let asset=fork_asset(release,archive)?;
+    if target.sha256!=archive_sha || target.size!=asset.size {return Err("El build de PC no coincide con el motor Android".into());}
+    Ok(())
+}
 fn fork_release<'a>(releases:&'a [ForkRelease],asset_name:&str)->Result<&'a ForkRelease,String>{
     releases.iter().find(|r| !r.draft && fork_tag_valid(&r.tag_name) &&
+        r.assets.iter().any(|a|a.name=="vis-mcrust-release.json") &&
         r.assets.iter().any(|a|a.name==asset_name &&
             a.browser_download_url==format!(
                 "https://github.com/{VIS_FORK}/releases/download/{}/{}",
                 r.tag_name,asset_name) &&
             a.size>0 && a.size<=MAX_ARCHIVE && fork_digest(a).is_ok()))
-        .ok_or_else(||"El fork todavía no publicó el motor Horizon para este sistema. Comprobá GitHub Actions del fork.".to_string())
+        .ok_or_else(||"El fork todavía no publicó el motor compartido de PC y Android. Comprobá GitHub Actions del fork.".to_string())
 }
 fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
     let raw=fs::read(build.join("vis-horizon-source.json"))
@@ -517,6 +535,7 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     let tag=release.tag_name.clone();
     let asset=fork_asset(release,archive)?;
     let sha=fork_digest(asset)?;
+    shared_contract(&http,release,archive,&sha)?;
     let expected_url=format!(
         "https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}"
     );
