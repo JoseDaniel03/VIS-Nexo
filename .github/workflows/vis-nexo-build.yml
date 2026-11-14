@@ -3,18 +3,13 @@ concurrency:
   group: vis-nexo-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 # This workflow creates unsigned portable Linux/Windows binaries.
-# Manual dispatch remains the default. The narrowly scoped preview request
-# below runs only for this explicit build request on the security PR branch.
+# It must run only when explicitly requested; no automatic push releases.
 on:
   workflow_dispatch:
-  push:
-    branches: [security/vis-shield-world-cloud-projects-20261113]
-    paths: [.github/preview-build-requests/**]
 permissions:
   contents: read
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'build(preview):')
     strategy:
       fail-fast: false
       matrix:
