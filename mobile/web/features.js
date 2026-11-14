@@ -209,7 +209,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
   function instancePanel(){
     const list=Array.isArray(state.instances)?state.instances:[];
     return '<section class="mobile-panel"><div class="section-title">Nueva instancia local</div>'+
-      '<p class="muted">Prepará tus instancias. La prueba de Horizon 26.3 usa el APK VIS McRust Preview ARM64 instalado por separado. Java todavía no puede ejecutarse.</p>'+
+      '<p class="muted">Prepará tus instancias. Nexo descarga e instala McRust Android desde la misma versión del motor que PC. Android pide confirmar la instalación. Java todavía no puede ejecutarse.</p>'+
       '<form data-feature="instance-create" class="inline-form">'+
       formInput('name','Nombre de instancia','text',64)+
       '<label>Motor de juego</label>'+
@@ -409,6 +409,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     try{
       const name=button.dataset.name;
       if(act==='play-mcrust'){
+        toast('Comprobando y preparando McRust…');
         const result=await command('mobile_mcrust_launch',{id:button.dataset.id});
         toast(result.status==='started'?'McRust está abriendo la instancia.':result.status==='permission_required'?'Permití que Nexo instale McRust y volvé a tocar Jugar.':'Confirmá la instalación de McRust y después tocá Jugar.');
       }else if(act==='friend-accept'){
