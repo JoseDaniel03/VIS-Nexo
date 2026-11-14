@@ -1,6 +1,7 @@
 /* VIS Nexo Mobile Preview — native Rust bridge only.
    No credential, session token, MFA ticket or encrypted message is stored in JS.
    The Android preview does NOT launch Java/Horizon. */
+import { createMobileFeatures } from './features.js';
 'use strict';
 const mount=document.getElementById('root');
 const notify=document.getElementById('notifications');
@@ -15,6 +16,7 @@ const escapeHtml=text=>String(text??'').replace(/[&<>"']/g,ch=>({
 }[ch]));
 const symbol={home:'◈',friends:'♧',projects:'▦',account:'◇'};
 const E=value=>escapeHtml(value);
+const features=createMobileFeatures({state,command,escape:E,toast,screen,refreshAll});
 function toast(text,error=false){
   notify.textContent=String(text).slice(0,250);
   notify.className=error?'error':'';
@@ -117,14 +119,14 @@ function friends(){
   const list=Array.isArray(data?.friends)?data.friends:[];
   const requests=Array.isArray(data?.incoming_requests)?data.incoming_requests:[];
   return '<div class="section-label">VIS / PORTALS</div><h1>Amigos</h1>'+
-    '<p class="intro">Presencia sincronizada con VIS Social. Los chats cifrados E2EE no se descifran en esta preview.</p>'+
-    '<button class="outline full" data-action="refresh">Actualizar presencia</button>'+
+    '<p class="intro">Presencia, solicitudes, estados personalizados y gestión de contactos. El chat E2EE multidispositivo necesita sincronización segura de claves.</p>'+
+    '<button class="outline full" data-action="refresh">Actualizar presencia</button>'+features.friendsPanel()+
     '<div class="section-title"><span>Contactos</span><small>'+list.length+' vinculados</small></div>'+
     (list.length?'<div class="friends">'+list.map(f=>
       '<div class="friend"><div class="avatar">'+E((f.display_name||f.username||'?').slice(0,1).toUpperCase())+'</div>'+
       '<div><strong>'+E(f.alias||f.display_name||f.public_handle||f.username)+'</strong>'+
       '<small>@'+E(f.public_handle||f.username)+'</small>'+
-      (f.current_game?'<small class="activity">Jugando: '+E(f.current_game)+'</small>':'')+
+      (f.current_game?'<small class="activity">Jugando: '+E(f.current_game)+'</small>':'')+features.friendControls(f)+
       '</div><span class="presence '+(f.presence==='online'?'online':'')+'"></span></div>').join('')+'</div>':
       '<div class="empty">No hay contactos sincronizados todavía.</div>')+
     (requests.length?'<div class="section-title">Invitaciones recibidas</div>'+
@@ -139,10 +141,9 @@ function projects(){
      '<article class="project"><div class="project-cover">◈</div><div>'+
      '<strong>'+E(p.title||p.id)+'</strong><p>'+E((p.summary||'Proyecto VIS').slice(0,160))+'</p>'+
      '<span class="tag">'+E(p.subscribed?'SEGUÍS ESTE PROYECTO':'DESCUBRIR')+'</span></div>'+
-     '<button type="button" data-action="community" data-id="'+E(p.id)+'" aria-label="Ver comunidad del proyecto">Ver miembros</button></article>'
+     '<button type="button" data-action="community" data-id="'+E(p.id)+'" aria-label="Ver comunidad del proyecto">Ver comunidad</button>'+features.projectControls(p)+'</article>'
     ).join('')+'</div>':'<div class="empty">Todavía no hay proyectos disponibles.</div>')+
-    (state.community?'<section class="community"><div class="section-title">Comunidad del proyecto</div>'+
-      '<pre>'+E(JSON.stringify(state.community,null,2).slice(0,3600))+'</pre></section>':'');
+    features.communityPanel()+features.adminPanel();
 }
 function account(){
   const a=state.account?.account||{};
@@ -156,7 +157,7 @@ function account(){
     '<div><span>Rol</span><strong>'+E(a.role||'Usuario')+'</strong></div>'+
     '<div><span>Cloud</span><strong>Autenticación activa</strong></div></div>'+
     '<p class="muted">La sesión solo existe en la memoria nativa de esta app. Al reiniciarla, deberás autenticarte nuevamente.</p>'+
-    '<button class="outline full" data-action="refresh">Actualizar perfil</button>'+
+    features.accountPanel()+'<button class="outline full" data-action="refresh">Actualizar perfil</button>'+
     '<button class="danger full" data-action="logout">Cerrar sesión VIS Ceibo</button>';
 }
 function screen(){
@@ -218,7 +219,12 @@ async function performAuth(form){
   }
 }
 document.addEventListener('submit',async e=>{
-  if(e.target.id!=='auth-form')return;
+  if(e.target.id!=='auth-form'){
+    if(e.target.dataset.feature){
+      e.preventDefault();await features.handleForm(e.target);
+    }
+    return;
+  }
   e.preventDefault();
   if(state.busy)return;
   state.busy=true;
@@ -234,9 +240,12 @@ document.addEventListener('submit',async e=>{
 document.addEventListener('click',async e=>{
   const button=e.target.closest('button[data-action]');
   if(!button||state.busy)return;
+  if(await features.handleAction(button))return;
   const act=button.dataset.action;
   if(act==='tab'){
-    state.view=button.dataset.tab||'home';state.community=null;screen();return;
+    state.view=button.dataset.tab||'home';state.community=null;screen();
+    if(state.view==='account')void features.refreshSecurity();
+    return;
   }
   if(act==='form-login'||act==='form-forgot'||act==='form-register'){
     state.form=act.slice(5);screen();return;
@@ -252,17 +261,23 @@ document.addEventListener('click',async e=>{
     try{
       state.auth=await command('mobile_logout');
       state.social=null;state.projects=null;state.account=null;state.community=null;
+      features.clear();
       state.view='home';toast('Sesión cerrada.');
     }catch(error){toast(error,true)}
     finally{state.busy=false;screen();}
   }
   if(act==='community'){
     state.busy=true;
-    try{state.community=await command('mobile_community',{projectId:button.dataset.id});
+    try{
+      state.communityId=button.dataset.id;
+      state.community=await command('mobile_community',{projectId:button.dataset.id});
       toast('Comunidad sincronizada');}
     catch(error){toast(error,true)}
     finally{state.busy=false;screen();}
   }
+});
+document.addEventListener('change',e=>{
+  if(e.target?.dataset?.featureFile)void features.handleFile(e.target);
 });
 (async()=>{
   try{state.auth=await command('mobile_status');}
