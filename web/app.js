@@ -2084,7 +2084,7 @@ root.addEventListener('submit',async event=>{
      else{
        const login=await command('social_cloud_login',{identifier:username,password});
        if(!login){
-         authMode='mfa';render();return;
+         authMode='mfa';authBusy=false;render();return;
        }
        db=login;
      }
