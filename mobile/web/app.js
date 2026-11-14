@@ -1,3 +1,4 @@
+import {refreshServices} from './service-refresh.js';
 /* VIS Nexo Mobile Preview — native Rust bridge only.
    No credential, session token, MFA ticket or encrypted message is stored in JS.
    Android installs McRust from the verified shared PC/Android release. */
@@ -45,7 +46,7 @@ async function command(name,args={}){
 function header(){
   return '<header class="top"><div class="brand-mark">V<span>N</span></div>'+
     '<div class="brand-text"><strong>VIS NEXO</strong><small>ANDROID PREVIEW / CEIBO</small></div>'+
-    '<div class="server-dot '+(state.network?.reachable?'online':'')+'" aria-label="Conexión"></div></header>';
+    '<div class="server-dot '+(state.network?.ready?'online':'')+'" aria-label="Conexión"></div></header>';
 }
 function footer(){
   const active=state.view;
@@ -197,27 +198,10 @@ function screen(){
     }[state.view]||home)()+'</main>'+footer();
   }
 }
-async function refreshAll(){
-  if(state.busy)return;
-  state.busy=true;
-  try{
-    state.network=await command('mobile_health').catch(()=>({reachable:false}));
-    if(state.auth.signed_in){
-      const values=await Promise.allSettled([
-        command('mobile_read',{kind:'account'}),
-        command('mobile_read',{kind:'social'}),
-        command('mobile_read',{kind:'projects'})
-      ]);
-      const keys=['account','social','projects'];
-      values.forEach((v,i)=>{
-        state[keys[i]]=v.status==='fulfilled'?v.value:null;
-      });
-      if(values.every(v=>v.status==='rejected'))toast('No se pudieron consultar los servicios VIS',true);
-      else toast('Conexión y datos de VIS actualizados');
-    }else toast(state.network.reachable?'VIS Ceibo respondió por HTTPS':'Servidor VIS Ceibo no disponible',!state.network.reachable);
-  }catch(e){toast(String(e),true);}
-  finally{state.busy=false;screen();}
+async function refreshAll({notify:showNotification=false}={}){
+  return refreshServices({state,command,render:screen,notify:toast,announce:showNotification});
 }
+
 async function performAuth(form){
   const fd=new FormData(form),step=form.dataset.step;
   const read=key=>String(fd.get(key)||'').trim();
@@ -287,7 +271,7 @@ document.addEventListener('click',async e=>{
     catch(error){toast(error,true)}
     screen();return;
   }
-  if(act==='refresh'){void refreshAll();return;}
+  if(act==='refresh'){void refreshAll({notify:true});return;}
   if(act==='logout'){
     state.busy=true;
     try{

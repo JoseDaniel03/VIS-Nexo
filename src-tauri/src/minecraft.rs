@@ -1270,7 +1270,7 @@ fn mod_install_order(versions:&[Value])->Result<Vec<usize>,String>{
 
 pub fn install_modrinth(data_root:&Path,username:&str,ins:&Instance,project_id:&str,kind:&str)->Result<Vec<String>,String>{
  if !["mod","resourcepack","shader"].contains(&kind){return Err("Tipo de contenido inválido".into())}
- if kind=="mod"&&ins.loader!="fabric"{return Err("Esta instalación de mods requiere Fabric".into())}
+ if kind=="mod"&&(ins.engine!="java"||ins.loader!="fabric"){return Err("Esta instalación de mods requiere Fabric".into())}
  let c=client()?;let dir=instance_dir(data_root,username,ins)?;
  crate::instance_guard::private_paths(&dir,&["mods","resourcepacks","shaderpacks",".vslauncher"])?;
  let folder=match kind{"mod"=>"mods","resourcepack"=>"resourcepacks",_=>"shaderpacks"};
@@ -1355,7 +1355,7 @@ pub fn install_modrinth(data_root:&Path,username:&str,ins:&Instance,project_id:&
  Ok(planned.into_iter().map(|(name,_,_)|name).collect())
 }
 pub fn import_local(data_root:&Path,username:&str,ins:&Instance,source:&Path,kind:&str)->Result<InstalledFile,String>{
- let folder=match kind{"mod" if ins.loader=="fabric"=>"mods","resourcepack"=>"resourcepacks","shader"=>"shaderpacks",_=>return Err("Tipo de recurso no compatible con esta instancia".into())};
+ let folder=match kind{"mod" if ins.engine=="java"&&ins.loader=="fabric"=>"mods","resourcepack"=>"resourcepacks","shader"=>"shaderpacks",_=>return Err("Tipo de recurso no compatible con esta instancia".into())};
  let name=source.file_name().and_then(|s|s.to_str()).ok_or("Archivo sin nombre")?;safe_file_name(name)?;
  if !(if kind=="mod"{name.ends_with(".jar")}else{name.ends_with(".zip")}){return Err("Formato de archivo incompatible".into())}
  let metadata=fs::metadata(source).map_err(|e|e.to_string())?;if metadata.len()>150*1024*1024{return Err("Archivo mayor a 150 MB".into())}
@@ -1379,7 +1379,7 @@ pub fn list_local(data_root:&Path,username:&str,ins:&Instance)->Result<Vec<Insta
 pub fn toggle_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&str)->Result<String,String>{
  safe_file_name(name)?;
  let (folder,extension)=match kind{
-  "mod" if ins.loader=="fabric"=>("mods",".jar"),
+  "mod" if ins.engine=="java"&&ins.loader=="fabric"=>("mods",".jar"),
   "resourcepack"=>("resourcepacks",".zip"),
   "shader"=>("shaderpacks",".zip"),
   _=>return Err("Este recurso no se puede activar en esta instancia".into()),

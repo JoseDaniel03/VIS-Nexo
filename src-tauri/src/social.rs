@@ -540,7 +540,7 @@ pub(crate) async fn social_request(
     const GET: &[&str] = &["/v1/state", "/v1/account", "/v1/projects",
         "/v1/account/mfa/status", "/v1/account/sessions", "/v1/worlds/inbox"];
     const POST: &[&str] = &[
-        "/v1/keys", "/v1/presence", "/v1/avatar/upload", "/v1/avatar/get",
+        "/v1/mods/search", "/v1/keys", "/v1/presence", "/v1/avatar/upload", "/v1/avatar/get",
         "/v1/skins/upload", "/v1/skins/get", "/v1/skins/delete", "/v1/account/display", "/v1/account/handle",
         "/v1/accounts/upgrade", "/v1/account/email/request",
         "/v1/account/mfa/setup", "/v1/account/mfa/confirm",

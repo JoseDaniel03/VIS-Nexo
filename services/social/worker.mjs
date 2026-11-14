@@ -1,3 +1,4 @@
+import {curseforgeSearch} from "./mod-catalog.mjs";
 import { serverVoice, serverVoicePositions } from "./server-voice.mjs";
 import { worldInvites } from "./world-invites.mjs";
 // VIS Social, authenticated Cloudflare Worker. The launcher PIN never leaves the PC.
@@ -1302,6 +1303,11 @@ export default {
         await ceiboMfa.requireStepup(db,user,true);
       if (method === "POST" && path === "/v1/realtime/ticket")return await createRealtimeTicket(request,db,user,env);
       if(method==="POST"&&["room","poll","signal","leave"].some(action=>path===`/v1/voice/${action}`))return await serverVoice(path,request,db,user,{parseBody,bad,reply,now,rateLimit,env});
+      if(method==="POST"&&path==="/v1/mods/search"){
+        await rateLimit(db,request,"mods-search",60);
+        const result=await curseforgeSearch(await parseBody(request),env);
+        return reply(result.body,result.status);
+      }
       if (method === "GET" && path === "/v1/state") return await currentState(db, user);
       if (method === "POST" && path === "/v1/accounts/upgrade") return await upgradeCloudLogin(request,db,user);
       if (method === "GET" && path === "/v1/account") return await accountInfo(db,user);

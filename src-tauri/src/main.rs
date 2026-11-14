@@ -10,6 +10,7 @@ mod world_cloud;
 mod instance_health;
 mod server_list;
 mod project_mods;
+mod mod_catalog;
 mod maintenance;
 mod cloud;
 mod team_pack;
@@ -1835,6 +1836,22 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms
     Ok(result)
 }
 #[tauri::command]
+async fn mods_catalog_search(state:State<'_,Mutex<Backend>>,session:State<'_,Mutex<social::SocialSession>>,query:String,provider:String,target:mod_catalog::Target)->Result<Value,String>{
+    {locked(&state)?.username()?;}
+    target.validate()?;
+    if provider=="curseforge" {
+        return social::social_request(state,session,"/v1/mods/search".into(),"POST".into(),Some(json!({"provider":provider,"query":query,"version":target.minecraft,"engine":target.engine}))).await;
+    }
+    tauri::async_runtime::spawn_blocking(move||mod_catalog::search(&provider,&query,&target)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn mods_assess_local(state:State<'_,Mutex<Backend>>,project_id:String,name:String,path:String)->Result<mod_catalog::Assessment,String>{
+    let instance={let s=locked(&state)?;let(_,instance)=checked_instance(&s,&project_id,&name,false)?;instance};
+    let platform=if cfg!(target_os="windows"){"windows-x64"}else{"linux-x86_64"};
+    let target=mod_catalog::Target{engine:instance.engine,loader:instance.loader,minecraft:instance.version,platform:platform.into()};
+    tauri::async_runtime::spawn_blocking(move||mod_catalog::inspect(Path::new(&path),target)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
 async fn search_modrinth(state:State<'_,Mutex<Backend>>,query:String,version:String,kind:String)->Result<Vec<minecraft::ModHit>,String>{
     {locked(&state)?.username()?;}
     tauri::async_runtime::spawn_blocking(move||minecraft::search_modrinth(&query,&version,&kind))
@@ -2042,7 +2059,7 @@ fn main() {
             social::social_rebind_device,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, cache_vis_skin, save_brand_name,
             horizon_project_menu, portals_exchange, portals_games, portals_command, set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
-            export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
+            export_worlds_instance, import_worlds_instance, launch_minecraft, mods_catalog_search, mods_assess_local, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project
         ])

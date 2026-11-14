@@ -44,6 +44,7 @@ jobs:
           VIS_CEIBO_RESEND_API_KEY: ${{ secrets.VIS_CEIBO_RESEND_API_KEY }}
           VIS_CEIBO_MFA_ENCRYPTION_KEY: ${{ secrets.VIS_CEIBO_MFA_ENCRYPTION_KEY }}
           VIS_CEIBO_FROM_EMAIL: ${{ vars.VIS_CEIBO_FROM_EMAIL }}
+          VIS_CURSEFORGE_API_KEY: ${{ secrets.VIS_CURSEFORGE_API_KEY }}
         shell: bash
         run: |
           test -n "$VIS_CEIBO_RESEND_API_KEY" || { echo 'Missing VIS_CEIBO_RESEND_API_KEY'; exit 1; }
@@ -63,6 +64,7 @@ jobs:
           VIS_CEIBO_RESEND_API_KEY: ${{ secrets.VIS_CEIBO_RESEND_API_KEY }}
           VIS_CEIBO_MFA_ENCRYPTION_KEY: ${{ secrets.VIS_CEIBO_MFA_ENCRYPTION_KEY }}
           VIS_CEIBO_FROM_EMAIL: ${{ vars.VIS_CEIBO_FROM_EMAIL }}
+          VIS_CURSEFORGE_API_KEY: ${{ secrets.VIS_CURSEFORGE_API_KEY }}
         shell: bash
         working-directory: services/social
         run: |
@@ -70,6 +72,9 @@ jobs:
           printf '%s' "$VIS_CEIBO_RESEND_API_KEY" | npx --yes wrangler@4 secret put RESEND_API_KEY
           printf '%s' "$VIS_CEIBO_MFA_ENCRYPTION_KEY" | npx --yes wrangler@4 secret put CEIBO_MFA_ENCRYPTION_KEY
           printf '%s' "$VIS_CEIBO_FROM_EMAIL" | npx --yes wrangler@4 secret put CEIBO_FROM_EMAIL
+          if [[ -n "$VIS_CURSEFORGE_API_KEY" ]]; then
+            printf '%s' "$VIS_CURSEFORGE_API_KEY" | npx --yes wrangler@4 secret put CURSEFORGE_API_KEY
+          fi
       - name: Deploy isolated VIS Social Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
