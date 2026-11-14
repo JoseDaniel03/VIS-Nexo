@@ -754,6 +754,28 @@ assert(!recoveryDeliveries.some(d=>JSON.stringify(d).includes(oldSalt)),
  'email must never contain password verifier salts');
 assert.equal((await call('/v1/account/mfa/verify',{code:'000000'},newLogin.data.token)).status,409,
  'MFA verifies only after enrollment');
+
+// Password changes require a recent password-based login even if a bearer token
+// still exists, and must revoke all the user's other sessions.
+const rotatedKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const rotatedSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const rotatedPublic=to64(await crypto.subtle.exportKey('raw',rotatedKey.publicKey));
+const rotatePayload={
+ password_salt:rotatedSalt,password_public_key:rotatedPublic,
+ registration_signature:to64(await sign(rotatedKey.privateKey,
+   'VIS-CLOUD-REGISTER-V2\nrecover_me\n'+rotatedSalt))
+};
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=created_at-601 "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='recover_me')")
+  .run();
+assert.equal((await call('/v1/account/password/change',rotatePayload,newLogin.data.token)).status,403,
+ 'old authenticated sessions may not rotate credentials');
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=unixepoch() "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='recover_me')").run();
+assert.equal((await call('/v1/account/password/change',rotatePayload,newLogin.data.token)).status,200);
+assert.equal((await call('/v1/state',undefined,newLogin.data.token)).status,401,
+ 'password rotation must revoke the old bearer session');
+
 console.log('VIS Ceibo email, recovery, MFA and session tests passed');
 
 console.log('VIS Social authentication, encrypted delivery and D1 migrations passed');
