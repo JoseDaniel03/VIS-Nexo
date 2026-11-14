@@ -200,7 +200,9 @@ export function createCeiboRecovery({reply,bad,now,hash,randomToken,parseBody,ra
   }
   async function passwordChange(request,db,user,env){
     await rateLimit(db,request,"ceibo-password-change:"+user.id,5);
-    if(user.auth_method!=="password")bad(403,"Iniciá sesión con contraseña VIS para modificarla");
+    if(user.auth_method!=="password"||!user.auth_created_at||
+       now()-user.auth_created_at>5*60)
+      bad(403,"Para cambiar la contraseña confirmá primero tu contraseña actual");
     await requireStepup(db,user);
     const data=await parseBody(request,1100),{salt,pub,text}=cloudVerifier(data,user.username);
     if(!await verifySignature(pub,data.registration_signature,text))bad(401,"Credencial inválida");
