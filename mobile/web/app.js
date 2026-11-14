@@ -9,12 +9,12 @@ const invoke=window.__TAURI__?.core?.invoke;
 const state={
   auth:{signed_in:false,mfa_required:false,username:null},
   view:'home',form:'login',busy:false,network:null,
-  social:null,projects:null,account:null,community:null,communityId:null
+  social:null,projects:null,account:null,community:null,communityId:null,instances:null
 };
 const escapeHtml=text=>String(text??'').replace(/[&<>"']/g,ch=>({
   '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }[ch]));
-const symbol={home:'◈',friends:'♧',projects:'▦',account:'◇'};
+const symbol={home:'◈',friends:'♧',projects:'▦',instances:'▣',account:'◇'};
 const E=value=>escapeHtml(value);
 const features=createMobileFeatures({state,command,escape:E,toast,screen,refreshAll});
 function toast(text,error=false){
@@ -33,7 +33,7 @@ function header(){
 function footer(){
   const active=state.view;
   return '<nav class="bottom-nav" aria-label="Secciones">'+
-    Object.entries({home:'Inicio',friends:'Amigos',projects:'Universo',account:'Cuenta'}).map(([key,label])=>
+    Object.entries({home:'Inicio',friends:'Amigos',projects:'Universo',instances:'Mundos',account:'Cuenta'}).map(([key,label])=>
       '<button type="button" data-action="tab" data-tab="'+key+'" '+(active===key?'class="selected" aria-current="page"':'')+'><span>'+
         symbol[key]+'</span>'+label+'</button>').join('')+'</nav>';
 }
@@ -114,7 +114,8 @@ function home(){
    statusArea()+
    '<div class="section-title"><span>Acceso rápido</span></div>'+
    '<div class="tiles"><button data-action="tab" data-tab="friends"><b>♧</b><strong>VIS Portals</strong><small>Amigos y estados</small></button>'+
-   '<button data-action="tab" data-tab="projects"><b>▦</b><strong>VIS Universe</strong><small>Proyectos vinculados</small></button></div>'+
+   '<button data-action="tab" data-tab="projects"><b>▦</b><strong>VIS Universe</strong><small>Proyectos vinculados</small></button>'+
+   '<button data-action="tab" data-tab="instances"><b>▣</b><strong>VIS Worlds</strong><small>Instancias para Android</small></button></div>'+
    '<div class="locked-feature"><div class="lock-icon">▣</div><div><strong>Minecraft Rust / Java</strong>'+
    '<p>Preparado para el futuro port Android. La ejecución e instalación están deshabilitadas en esta preview.</p></div><span class="tag">PRÓXIMAMENTE</span></div>'+
    '<button class="outline full" data-action="refresh">Comprobar conexión con VIS</button>';
@@ -171,7 +172,7 @@ function screen(){
     mount.innerHTML=header()+authPanel();
   }else{
     mount.innerHTML=header()+'<main class="content">'+({
-      home, friends, projects, account
+      home, friends, projects, account, instances:()=>features.instancePanel()
     }[state.view]||home)()+'</main>'+footer();
   }
 }
@@ -250,6 +251,7 @@ document.addEventListener('click',async e=>{
   if(act==='tab'){
     state.view=button.dataset.tab||'home';state.community=null;screen();
     if(state.view==='account')void features.refreshSecurity();
+    if(state.view==='instances')void features.refreshInstances();
     return;
   }
   if(act==='form-login'||act==='form-forgot'||act==='form-register'){
@@ -265,7 +267,7 @@ document.addEventListener('click',async e=>{
     state.busy=true;
     try{
       state.auth=await command('mobile_logout');
-      state.social=null;state.projects=null;state.account=null;state.community=null;
+      state.social=null;state.projects=null;state.account=null;state.community=null;state.instances=null;
       features.clear();
       state.view='home';toast('Sesión cerrada.');
     }catch(error){toast(error,true)}
