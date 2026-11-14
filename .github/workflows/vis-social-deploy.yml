@@ -80,8 +80,8 @@ jobs:
           base="${VIS_SOCIAL_HEALTH_URL:-https://vis-social.defreitascarranza-845.workers.dev}"
           for attempt in $(seq 1 15); do
             if curl --fail --silent --show-error "${base%/}/health" > /tmp/vis-social-health.json &&
-              node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/vis-social-health.json','utf8'));if(d.service!=='vis-social'||d.status!=='ready'||d.schema!==12)process.exit(1)"; then
-              echo "VIS Social production health: ready, schema 12"
+              node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/vis-social-health.json','utf8'));if(d.service!=='vis-social'||d.status!=='ready'||d.schema!==13)process.exit(1)"; then
+              echo "VIS Social production health: ready, schema 13"
               exit 0
             fi
             # Cloudflare edge rollout can briefly answer with the prior schema.
