@@ -195,16 +195,16 @@ async function performAuth(form){
   const read=key=>String(fd.get(key)||'').trim();
   if(step==='login'){
     state.auth=await command('mobile_login',{identifier:read('identifier'),password:String(fd.get('password')||'')});
-    if(state.auth.signed_in)await refreshAll();
+
   }else if(step==='register'){
     state.auth=await command('mobile_register',{
       username:read('identifier'),password:String(fd.get('password')||''),
       confirm:String(fd.get('confirm')||'')
     });
-    if(state.auth.signed_in)await refreshAll();
+
   }else if(step==='mfa'){
     state.auth=await command('mobile_mfa',{code:read('code')});
-    if(state.auth.signed_in)await refreshAll();
+
   }else if(step==='forgot'){
     await command('mobile_recovery_start',{kind:read('kind'),identity:read('identity')});
     toast('Si la cuenta tiene correo verificado, recibirás instrucciones.');
@@ -226,7 +226,10 @@ document.addEventListener('submit',async e=>{
   if(button)button.disabled=true;
   try{await performAuth(e.target);}
   catch(error){toast(error,true)}
-  finally{state.busy=false;screen();}
+  finally{
+    state.busy=false;screen();
+    if(state.auth.signed_in)void refreshAll();
+  }
 });
 document.addEventListener('click',async e=>{
   const button=e.target.closest('button[data-action]');
