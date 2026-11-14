@@ -520,18 +520,10 @@ fn game_metadata_ok(name:&str,engine:&str,version:&str,loader:&str,project:&str)
        name.chars().any(|c|c.is_control()||c=='/'||c=='\\'){
         return Err("Nombre de instancia inválido".into());
     }
-    if !["java","horizon"].contains(&engine){
-        return Err("Seleccioná Java o Rust Horizon".into());
-    }
-    if !(1..=48).contains(&version.len())||!version.bytes().all(|c|
-        c.is_ascii_alphanumeric()||c==b'.'||c==b'-'||c==b'_'){
-        return Err("La versión de juego no es válida".into());
-    }
-    if !["vanilla","fabric","quilt","neoforge","forge"].contains(&loader){
-        return Err("Loader no compatible".into());
-    }
-    if engine=="horizon"&&loader!="vanilla"{
-        return Err("Los loaders de Java no son compatibles con Horizon Rust".into());
+    // Android creates only the shared Horizon Rust 26.3 Vanilla engine.
+    // Reject Java or alternate loaders even if the WebView is manipulated.
+    if engine!="horizon"||version!="26.3"||loader!="vanilla"{
+        return Err("Android admite únicamente Horizon Rust 26.3 Vanilla".into());
     }
     if !project.is_empty()&&(project.len()>48||!project.bytes().all(|c|
         c.is_ascii_lowercase()||c.is_ascii_digit()||c==b'-'||c==b'_')){
@@ -547,11 +539,12 @@ fn mobile_instances(state:State<'_,Mutex<Session>>,app:AppHandle)->Result<Vec<Mo
 #[tauri::command]
 fn mobile_instance_create(
     state:State<'_,Mutex<Session>>,app:AppHandle,
-    name:String,engine:String,version:String,loader:String,project_id:Option<String>
+    name:String
 )->Result<MobileInstance,String>{
     let user=current_android_user(&state)?;
-    let project=project_id.unwrap_or_default();
-    game_metadata_ok(&name,&engine,&version,&loader,&project)?;
+    // Do not accept engine, loader, version or free-text project IDs from Android UI.
+    let project=String::new();
+    game_metadata_ok(&name,"horizon","26.3","vanilla",&project)?;
     let path=instances_file(&app,&user)?;
     let mut items=read_instances(&path)?;
     if items.len()>=128{return Err("El máximo es 128 instancias Android".into());}
@@ -563,14 +556,15 @@ fn mobile_instance_create(
     let created_at=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default().as_secs();
     let instance=MobileInstance{
-        id:id.clone(),name:name.trim().into(),engine,version,loader,
+        id:id.clone(),name:name.trim().into(),
+        engine:"horizon".into(),version:"26.3".into(),loader:"vanilla".into(),
         project_id:project,created_at
     };
+    // Nexo stores the instance profile; McRust owns its actual world data.
+    // Avoid placeholder mods/saves/pack folders in the launcher sandbox.
     let root=instance_root(&app,&user)?.join(&id);
-    for component in ["worlds","mods","config","resourcepacks","backups"]{
-        fs::create_dir_all(root.join(component))
-            .map_err(|_|"No se pudieron preparar las carpetas Android")?;
-    }
+    fs::create_dir_all(&root)
+        .map_err(|_|"No se pudo preparar el perfil de instancia Rust")?;
     items.push(instance.clone());
     persist_instances(&path,&items)?;
     Ok(instance)
@@ -621,13 +615,13 @@ mod tests {
     }
     #[test]
     fn mobile_instance_metadata_is_sandboxed(){
-        assert!(game_metadata_ok("Survival","java","26.3","fabric","virgoland").is_ok());
         assert!(game_metadata_ok("Horizon","horizon","26.3","vanilla","").is_ok());
-        assert!(game_metadata_ok("../escape","java","26.3","fabric","").is_err());
+        assert!(game_metadata_ok("Survival","java","26.3","fabric","virgoland").is_err());
+        assert!(game_metadata_ok("../escape","horizon","26.3","vanilla","").is_err());
         assert!(game_metadata_ok("Bad","horizon","26.3","fabric","").is_err());
-        assert!(game_metadata_ok("Bad","java","../../secret","vanilla","").is_err());
-        assert!(game_metadata_ok("Good","java","26.3","fabric","../escape").is_err());
-        assert!(game_metadata_ok("Bad\nName","java","26.3","vanilla","").is_err());
+        assert!(game_metadata_ok("Bad","horizon","26.2","vanilla","").is_err());
+        assert!(game_metadata_ok("Good","horizon","26.3","vanilla","../escape").is_err());
+        assert!(game_metadata_ok("Bad\nName","horizon","26.3","vanilla","").is_err());
     }
     #[test]
     fn session_never_exposes_bearer_or_ticket(){
