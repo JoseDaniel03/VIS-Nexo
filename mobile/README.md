@@ -1,10 +1,10 @@
 # VIS Nexo Android — launcher + instalador del motor McRust compartido
 
-**Estado (14/11/2026): implementación en PR, todavía sin una release completa de PC/Android ni prueba física.** El código de esta rama reemplaza el antiguo handoff experimental con un instalador que usa el manifiesto `vis-mcrust-release.json` del fork `JoseDaniel03/horizon-VISNEXO`. Solo acepta paquetes provenientes del **mismo commit de motor** que Windows/Linux; nunca descarga el viejo `com.visstudios.mcrust.preview`.
+**Estado (14/11/2026): motor compartido publicado para PC y Android, pendiente la validación en teléfono físico.** El código de esta rama reemplaza el antiguo handoff experimental con un instalador que usa el manifiesto `vis-mcrust-release.json` del fork `JoseDaniel03/horizon-VISNEXO`. Solo acepta paquetes provenientes del **mismo commit de motor** que Windows/Linux; nunca descarga el viejo `com.visstudios.mcrust.preview`.
 
-**Flujo previsto:** iniciá sesión VIS Ceibo, creá una instancia `Horizon / 26.3 / Vanilla` en Mundos y tocá **Jugar McRust**. Nexo verificará el catálogo GitHub, la huella SHA-256 del APK, y solicitará permiso y confirmación Android para instalar `com.visstudios.mcrust`. Al tocar Jugar nuevamente abrirá esa instancia. Los mundos se guardan dentro del sandbox privado de la app McRust, separados por usuario e instancia; la carpeta de metadatos del launcher no es donde se guardan las partidas.
+**Flujo previsto:** iniciá sesión VIS Ceibo, ingresá solo el nombre de la instancia en Mundos y tocá **Instalar / Jugar**. Android fija automáticamente `Horizon / 26.3 / Vanilla`. Nexo verificará el catálogo GitHub, la huella SHA-256 del APK, y solicitará permiso y confirmación Android para instalar `com.visstudios.mcrust`. Al tocar Jugar nuevamente abrirá esa instancia. Los mundos se guardan dentro del sandbox privado de la app McRust, separados por usuario e instancia; la carpeta de metadatos del launcher no es donde se guardan las partidas.
 
-**Bloqueo actual:** todavía no hay un release del fork con Windows, Linux y Android firmados bajo el mismo manifiesto. Mientras falte ese release, el launcher muestra un error descriptivo y no intenta usar otro motor. Para publicarlo hay que fusionar el PR del fork, configurar los cuatro secretos de firma Android persistente y pasar el workflow de las tres plataformas. Las acciones de cargo-check no prueban el APK ni el inicio real.
+**Publicación actual:** el fork ya publica `visgame-4ab9e7f88e86` con Windows, Linux, Android firmado y el manifiesto común. El launcher verifica el catálogo y los hashes. **Pendiente:** probar de extremo a extremo permisos Android, instalación, NativeActivity, mundo y servidor en un teléfono real. Una compilación aprobada no equivale a gameplay probado.
 
 **Identidad:** el juego Android recibe solo nombre offline, propietario, ID de instancia y SHA de motor. No recibe contraseñas, tokens o rutas. VIS Ceibo **no equivale** a autenticación oficial Minecraft Premium; todavía falta OAuth Microsoft/Minecraft en Android para servidores Java con `online-mode=true`. Tampoco están listos Java Edition Android, chat E2EE entre dispositivos, voicechat ni sincronización de partidas PC↔Android.
 
@@ -28,10 +28,11 @@ Más detalles y criterios de aceptación: [integración PC/Android](../docs/ANDR
 - Usuarios autorizados: metadatos de proyectos, miembros y equipos,
   permisos de superadministración (roles, admin global, deshabilitar cuentas).
   **Todas las decisiones se autorizan en Cloudflare**, no por la UI móvil.
-- VIS Worlds: creación y listado de instancias locales Java/Horizon,
-  elección de versión y loader, vinculación opcional a proyecto VIS Universe,
-  carpetas sandboxed de mundos, mods, configuración, packs y backups. Quitar
-  una instancia de la lista **conserva todas sus carpetas**.
+- VIS Worlds: creación de perfiles **solo Horizon Rust 26.3 Vanilla**,
+  con versión y motor fijados por el backend nativo y un único campo de nombre.
+  Se prepara el perfil local mínimo y se conserva el almacenamiento anterior;
+  los mundos reales se guardan en el sandbox privado de McRust.
+  Quitar un perfil de la lista **no elimina sus datos**.
 - UI touch-first con formularios, avatar/skin y botones accesibles;
   scripts ES modules; pruebas de contrato nativas y de la interfaz.
 
@@ -39,9 +40,9 @@ Más detalles y criterios de aceptación: [integración PC/Android](../docs/ANDR
 operativas cuando el Worker real despliega el esquema D1 0013 y cuando Resend
 está configurado con un dominio verificado. La APK no despliega los servicios.
 
-**La creación de instancias prepara metadatos y carpetas.** Para Horizon 26.3 Vanilla, el botón Jugar ejecuta el instalador y el handoff del motor compartido, siempre que exista un release válido del fork. Java sigue sin motor Android. Eliminar una instancia de la lista no elimina `worlds/` ni `backups/`.
+**La creación de instancias solo prepara metadatos y un directorio local mínimo.** El botón Instalar / Jugar ejecuta la descarga, validación e instalación del APK Android compartido. No se presentan opciones Java ni loaders alternativos. Los perfiles Java anteriores se preservan, aunque se ocultan del listado móvil. Eliminar un perfil del launcher no desinstala el juego ni borra mundos.
 
-**Todavía pendiente:** validar en teléfono físico la ejecución del port Horizon Android compartido, autenticar Minecraft Premium en Android, instalar Java, respaldar/importar mundos del juego, copiar partidas entre PC/Android, chat E2EE multidispositivo, voz, notificaciones push, sesiones persistentes y passkeys/WebAuthn. No afirmar que se puede jugar hasta verificar instalación de APK, recursos, mundo y conexión a servidor.
+**Todavía pendiente:** validar en teléfono físico la ejecución del port Horizon Android compartido, autenticar Minecraft Premium en Android, respaldar/importar mundos del juego, copiar partidas entre PC/Android, chat E2EE multidispositivo, voz, notificaciones push, sesiones persistentes y passkeys/WebAuthn. No afirmar que se puede jugar hasta verificar instalación de APK, recursos, mundo y conexión a servidor.
 
 ### Chat E2EE multidispositivo
 El escritorio VIS Portals utiliza una sola clave ECDH P-256 privada por cuenta,
