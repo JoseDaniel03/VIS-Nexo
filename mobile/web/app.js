@@ -95,12 +95,17 @@ function authPanel(){
 function statusArea(){
   const reachable=state.network?.reachable;
   const schema=state.network?.schema;
+  const ready=state.network?.ready===true;
   return '<div class="health-card"><div><strong>VIS SERVICES</strong><span>'+
-    (state.network===null?'Sin comprobar':reachable?'Conexión HTTPS establecida':'Sin conexión')+
-    '</span></div><div class="pill '+(reachable?'success':'')+'">'+
-    (reachable?'CONECTADO':'PENDIENTE')+'</div></div>'+
-    (reachable?'<p class="muted" role="note">D1 schema informado: '+E(schema)+
-      '. El acceso con MFA necesita que Ceibo Recovery esté desplegado en el servidor.</p>':'');
+    (state.network===null?'Sin comprobar':ready?'VIS Ceibo operativo':
+      reachable?'Servidor conectado · requiere configuración':'Sin conexión HTTPS')+
+    '</span></div><div class="pill '+(ready?'success':'')+'">'+
+    (ready?'OPERATIVO':reachable?'MIGRACIÓN':'PENDIENTE')+'</div></div>'+
+    (reachable?'<p class="muted" role="note">Cloudflare HTTP '+E(state.network.http_status)+
+      ' · Esquema D1 '+E(schema)+
+      (ready?' · Ceibo Recovery y MFA disponibles en el servidor.':
+      ' · Revisá las migraciones D1 0012/0013 y configuración de Cloudflare.')+
+      '</p>':'');
 }
 function home(){
   return '<div class="section-label">VIS / CONTROL CENTER</div>'+
