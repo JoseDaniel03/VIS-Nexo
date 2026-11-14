@@ -1952,6 +1952,7 @@ fn main() {
             microsoft::microsoft_set_cape, microsoft::microsoft_hide_cape,
             microsoft::microsoft_use_skin, microsoft::microsoft_use_saved_skin,
             microsoft::microsoft_upload_skin,
+            microsoft::microsoft_publish_vis_skin,
             social::social_identity_info,
             social::social_cloud_register, social::social_cloud_login,
             social::social_cloud_mfa_finish, social::social_cancel_pending_mfa,
