@@ -119,6 +119,7 @@ async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std:
                 let status = android::operate(env, activity, &payload, &apk, &target, skin.as_deref())?;
                 match status.as_str() {
                     "unsupported_android" => Err("McRust necesita Android 9 o superior (API 28) y ARM64".into()),
+                    "newer_installed" => Err("McRust instalado es más nuevo que el canal publicado. Actualizá el catálogo o usá el canal correspondiente; Android no permite instalar esta versión anterior encima.".into()),
                     "signature_mismatch" => Err("La firma de McRust instalado es distinta de la publicación. Respaldá sus mundos antes de reemplazarlo.".into()),
                     _ => Ok(status)
                 }

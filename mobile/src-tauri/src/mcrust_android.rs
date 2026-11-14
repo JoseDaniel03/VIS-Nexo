@@ -25,6 +25,7 @@ pub fn operate(env:&mut JNIEnv<'_>, activity:&JObject<'_>, payload:&str, apk:&Pa
                         let bytes = env.call_method(signature, "toByteArray", "()[B", &[])?.l()?;
                         let bytes = env.convert_byte_array(jni::objects::JByteArray::from(bytes))?;
                         if format!("{:x}", Sha256::digest(bytes)) != target.certificate_sha256 { return Ok("signature_mismatch".into()); }
+                        if version > target.version_code { return Ok("newer_installed".into()); }
                         ready = version == target.version_code;
                     }
                     if !ready {
