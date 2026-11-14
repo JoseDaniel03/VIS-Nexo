@@ -1112,9 +1112,10 @@ function profilePage(){
  const hiddenRows=hidden.map(i=>'<div class="request-row"><span>'+esc(i.name)+' · '+esc(i.source_owner)+'</span>'+
    '<button type="button" class="outline-btn" data-action="show-shared-instance" data-id="'+attr(i.name)+
    '" data-project="'+attr(i.project_id)+'" data-source="'+attr(i.source_owner)+'">Restaurar</button></div>').join('');
- const gameRows=skins.slice(0,3).map(i=>'<div class="vis-profile-game"><span>'+I('game',17)+
+ const gameRows=skins.slice(0,3).map(i=>'<div class="vis-profile-game"><span>'+
+   (publicSkin?.head?'<img class="vis-game-profile-head" src="'+attr(publicSkin.head)+'" alt="Skin VIS"/>':I('game',17))+
    ' '+esc(i.name)+'</span><small>'+esc(i.engine==='horizon'?'Horizon Rust':'Java / '+(i.loader||'Vanilla'))+
-   ' · '+esc(i.version)+'</small></div>').join('');
+   ' · '+esc(i.version)+' · Skin VIS'+(publicSkin?.skin?' disponible':' no publicada')+'</small></div>').join('');
  return '<div class="content-inner profile-page profile-v21">'+
   '<header class="profile-page-head"><div><span class="page-eyebrow">CUENTA Y APARIENCIA</span>'+
   '<h1>Mi perfil</h1><p>Todo lo importante de tu identidad y tus juegos, en un solo lugar.</p></div>'+
@@ -1153,7 +1154,7 @@ function profilePage(){
    '</section>'+
    '<section class="surface-card profile-skin-card">'+
     '<div class="card-heading">'+I('game',20)+' Mi skin en VIS</div>'+
-    '<p class="muted">La skin se guarda en VIS Nexo. Con Microsoft Premium también podés publicarla en el perfil oficial de Minecraft Java; elegí el modelo antes de importar.</p>'+
+    '<p class="muted">Una sola skin VIS para tus perfiles Java y Horizon Rust en el launcher. Si la subís a Minecraft Premium también se verá dentro de Java; mostrarla dentro de McRust todavía requiere integrar su renderizador de texturas.</p>'+
     '<div class="profile-skin-visual">'+
       (localSkin?'<img class="profile-skin-sheet" src="'+attr(localSkin)+'" alt="Textura PNG local de Minecraft"/>':
        '<div class="profile-skin-placeholder">'+I('game',32)+'<span>Sin skin local</span></div>')+
@@ -1259,7 +1260,9 @@ function selectedMcInstance(){
      ||(libraryMode==='user'?personalInstances():officialInstances()).find(i=>!i.source_owner)||null;
 }
 function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const allow=i.project_id===PERSONAL_PROJECT_ID || isExecutionEnabled(p);
- return `<article class="instance-card">${bulkInstanceMode&&!isGuest()?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" data-source="${attr(i.source_owner||'')}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · ${i.share_game_data!==false?'mundos y servidores compartidos':'datos separados por cuenta'}</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
+ const ownHead=db.user?.username?socialSkins.get(db.user.username)?.head:'';
+ const skinCard=ownHead?'<img class="vis-instance-skin-head" alt="Skin VIS de tu cuenta" src="'+attr(ownHead)+'"/>':I('game',27);
+ return `<article class="instance-card">${bulkInstanceMode&&!isGuest()?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" data-source="${attr(i.source_owner||'')}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual" title="Skin de tu cuenta VIS (vista previa del launcher)">${skinCard}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · ${i.share_game_data!==false?'mundos y servidores compartidos':'datos separados por cuenta'}</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
  <div class="mc-instance-actions">${isGuest()||i.source_owner?'':`<button class="outline-btn" data-action="manage-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('settings',16)} Mods y archivos</button>
  <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?'Reparar':'Instalar'}</button>`}
  ${!isGuest()?`<button class="outline-btn" data-action="instance-data-tools" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}">${I('database',16)} Datos</button>`:''}
