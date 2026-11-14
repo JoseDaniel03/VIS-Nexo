@@ -10,6 +10,33 @@
 
 Más detalles y criterios de aceptación: [integración PC/Android](../docs/ANDROID-PC-INTEGRATION.md).
 
+## Identidad compartida VIS / Minecraft
+
+- **VIS Ceibo** autentica la cuenta del launcher. Sus cuentas, roles, presencia, amigos,
+  Universe, apodos y skins se consultan por HTTPS con permisos del Worker VIS Social.
+- La pantalla **Cuenta** consulta automáticamente el avatar WebP y la skin PNG de VIS.
+  Esto **no implica que la skin esté aplicada dentro del renderizador de McRust**:
+  el port Android aún debe implementar la textura local de cada jugador y las
+  reglas de distribución de cosméticos VIS a otros usuarios autorizados.
+- **Microsoft Premium (Android)**: se inicia por código de dispositivo desde Cuenta.
+  La aplicación ejecuta Microsoft OAuth -> Xbox Live -> XSTS -> Minecraft Profile
+  en el proceso nativo Rust; el WebView solo recibe código temporal, estado,
+  nombre y UUID públicos. Los tokens no se guardan en disco, no se transfieren
+  a VIS Social ni van en el Intent que abre McRust. La sesión se desvincula
+  al cerrar VIS Ceibo y expira automáticamente.
+- **Nombre en McRust**: cuando el perfil Microsoft esté verificado, Nexo utiliza
+  el nombre oficial como etiqueta local; de lo contrario utiliza el @handle
+  VIS válido para Minecraft, o un alias corto determinista derivado de la cuenta.
+  Esto NO convierte una etiqueta en autenticación premium para servidores online-mode.
+- **Pendiente para la integración real**: canal de sesión premium protegido,
+  skin VIS renderizada en juego, estados/eventos de Portals durante la partida,
+  acceso a SD desde el sandbox de McRust y compatibilidad probada en teléfono.
+  No transferir contraseñas ni tokens OAuth por Intent o archivos públicos.
+- **Diagnóstico Android**: la API de instalación de Nexo informa en qué paso
+  falló (permisos, FileProvider, firma, Activity) sin mostrar excepciones JNI
+  con datos privados. Un error reportado por un usuario todavía necesita
+  verificación con el teléfono real.
+
 ## Funciones sociales heredadas
 
 ## Qué funciona (Android companion v0.2.0)
@@ -42,7 +69,7 @@ está configurado con un dominio verificado. La APK no despliega los servicios.
 
 **La creación de instancias solo prepara metadatos y un directorio local mínimo.** El botón Instalar / Jugar ejecuta la descarga, validación e instalación del APK Android compartido. No se presentan opciones Java ni loaders alternativos. Los perfiles Java anteriores se preservan, aunque se ocultan del listado móvil. Eliminar un perfil del launcher no desinstala el juego ni borra mundos.
 
-**Todavía pendiente:** validar en teléfono físico la ejecución del port Horizon Android compartido, autenticar Minecraft Premium en Android, respaldar/importar mundos del juego, copiar partidas entre PC/Android, chat E2EE multidispositivo, voz, notificaciones push, sesiones persistentes y passkeys/WebAuthn. No afirmar que se puede jugar hasta verificar instalación de APK, recursos, mundo y conexión a servidor.
+**Todavía pendiente:** validar en teléfono físico la ejecución del port Horizon Android compartido, pasar una sesión Minecraft Premium verificada al juego de manera segura, respaldar/importar mundos del juego, copiar partidas entre PC/Android, chat E2EE multidispositivo, voz, notificaciones push, sesiones persistentes y passkeys/WebAuthn. No afirmar que se puede jugar hasta verificar instalación de APK, recursos, mundo y conexión a servidor.
 
 ### Chat E2EE multidispositivo
 El escritorio VIS Portals utiliza una sola clave ECDH P-256 privada por cuenta,
