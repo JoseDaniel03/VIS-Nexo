@@ -61,6 +61,14 @@ checks={
     and 'localStorage.' not in features
     and 'sessionStorage.' not in features
     and 'indexedDB.open(' not in features,
+  "Android instances are sandboxed metadata, never runnable game engines":
+    'fn instance_root(' in native and 'app.path().app_data_dir()' in native
+    and 'fn persist_instances(' in native
+    and 'mobile_instance_create' in native
+    and 'mobile_instance_remove' in native
+    and 'No se pudieron preparar las carpetas Android' in native
+    and 'launch_minecraft' not in native
+    and 'launch_horizon' not in native,
   "No game start UI while Android port does not exist":
     'Minecraft Rust / Java' in ui
     and 'deshabilitadas en esta preview' in ui,
