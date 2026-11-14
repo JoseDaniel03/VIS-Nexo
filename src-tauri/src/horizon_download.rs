@@ -220,7 +220,7 @@ fn unpack_zip(archive_path:&Path,target:&Path)->Result<(),String>{
         if item.unix_mode().is_some_and(|mode|mode & 0o170000 == 0o120000){
             return Err("ZIP Horizon contiene un enlace simbólico".into())
         }
-        let member_name=item.name().to_owned();
+        let member_name=item.name().map_err(|e|e.to_string())?.into_owned();
         let path=Path::new(&member_name);let relative=safe_rel(path)?;
         let bytes=if item.is_dir(){0}else{item.size()};
         extraction_limit(&mut size,&mut count,bytes)?;
@@ -388,6 +388,8 @@ struct ForkAsset {
 struct ForkRelease {
     tag_name:String,
     draft:bool,
+    #[serde(default)]
+    prerelease:bool,
     assets:Vec<ForkAsset>,
 }
 fn fork_asset_name()->Result<&'static str,String>{
@@ -415,14 +417,57 @@ fn fork_digest(asset:&ForkAsset)->Result<String,String>{
     }
     Ok(sha.to_ascii_lowercase())
 }
+// Shared contract parser: desktop and mobile apply exactly the same compatibility checks.
+#[path = "../../mobile/src-tauri/src/mcrust_catalog.rs"]
+mod shared_mcrust_catalog;
+fn shared_contract(http:&Client,release:&ForkRelease,archive:&str,archive_sha:&str)->Result<(),String>{
+    let manifest=fork_asset(release,"vis-mcrust-release.json")?;
+    if manifest.size==0 || manifest.size>128*1024 || manifest.browser_download_url!=format!("https://github.com/{VIS_FORK}/releases/download/{}/vis-mcrust-release.json",release.tag_name){return Err("Manifiesto compartido inválido".into());}
+    let expected=fork_digest(manifest)?;
+    let response=http.get(&manifest.browser_download_url).send().and_then(|r|r.error_for_status()).map_err(|e|e.to_string())?;
+    let mut raw=Vec::new();response.take(128*1024+1).read_to_end(&mut raw).map_err(|e|e.to_string())?;
+    if raw.len()as u64!=manifest.size || format!("{:x}",Sha256::digest(&raw))!=expected {return Err("La integridad del manifiesto compartido no coincide".into());}
+    let contract:shared_mcrust_catalog::Contract=serde_json::from_slice(&raw).map_err(|_|"Contrato del motor inválido")?;
+    contract.validate(&release.tag_name)?;
+    fork_assets_match_contract(release,&contract)?;
+    let target=contract.targets.values().find(|t|t.asset==archive)
+        .ok_or("Falta esta plataforma en el motor compartido")?;
+    if target.sha256!=archive_sha {
+        return Err("El build de PC no coincide con el motor Android".into());
+    }
+    Ok(())
+}
+// A release must contain exactly the three artifacts declared by the shared
+// manifest. Checking only the desktop archive would allow a broken/mismatched
+// Android APK to be advertised as the same engine.
+fn fork_assets_match_contract(
+    release:&ForkRelease,contract:&shared_mcrust_catalog::Contract
+)->Result<(),String>{
+    for target in contract.targets.values(){
+        let matches=release.assets.iter().filter(|a|a.name==target.asset).collect::<Vec<_>>();
+        if matches.len()!=1{
+            return Err(format!("El release no contiene exactamente un artefacto {}",target.asset));
+        }
+        let asset=matches[0];
+        let expected_url=format!(
+            "https://github.com/{VIS_FORK}/releases/download/{}/{}",
+            release.tag_name,target.asset);
+        if asset.browser_download_url!=expected_url ||
+            asset.size!=target.size || fork_digest(asset)?!=target.sha256.to_ascii_lowercase(){
+            return Err(format!("El artefacto {} difiere del motor compartido",target.asset));
+        }
+    }
+    Ok(())
+}
 fn fork_release<'a>(releases:&'a [ForkRelease],asset_name:&str)->Result<&'a ForkRelease,String>{
-    releases.iter().find(|r| !r.draft && fork_tag_valid(&r.tag_name) &&
+    releases.iter().find(|r| !r.draft && !r.prerelease && fork_tag_valid(&r.tag_name) &&
+        r.assets.iter().any(|a|a.name=="vis-mcrust-release.json") &&
         r.assets.iter().any(|a|a.name==asset_name &&
             a.browser_download_url==format!(
                 "https://github.com/{VIS_FORK}/releases/download/{}/{}",
                 r.tag_name,asset_name) &&
             a.size>0 && a.size<=MAX_ARCHIVE && fork_digest(a).is_ok()))
-        .ok_or_else(||"El fork todavía no publicó el motor Horizon para este sistema. Comprobá GitHub Actions del fork.".to_string())
+        .ok_or_else(||"El fork todavía no publicó el motor compartido de PC y Android. Comprobá GitHub Actions del fork.".to_string())
 }
 fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
     let raw=fs::read(build.join("vis-horizon-source.json"))
@@ -517,6 +562,7 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     let tag=release.tag_name.clone();
     let asset=fork_asset(release,archive)?;
     let sha=fork_digest(asset)?;
+    shared_contract(&http,release,archive,&sha)?;
     let expected_url=format!(
         "https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}"
     );
@@ -585,7 +631,7 @@ mod tests{
             size:25_000_000,
             digest:Some(format!("sha256:{}", "b".repeat(64)))
         };
-        let release=ForkRelease{tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![good]};
+        let release=ForkRelease{tag_name:"visgame-123456789abc".into(),draft:false,prerelease:false,assets:vec![good]};
         assert!(fork_release(&[release],"missing").is_err());
         assert!(fork_tag_valid("visgame-123456789abc"));
         assert!(!fork_tag_valid("visgame-../../bad"));
@@ -593,15 +639,55 @@ mod tests{
             "https://attacker.invalid/game.tar.gz".into(),size:25000,
             digest:Some(format!("sha256:{}", "b".repeat(64)))};
         assert!(fork_release(&[ForkRelease{
-            tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![bad.clone()]
+            tag_name:"visgame-123456789abc".into(),draft:false,prerelease:false,assets:vec![bad.clone()]
         }],name).is_err());
         bad.browser_download_url=format!(
             "https://github.com/{VIS_FORK}/releases/download/visgame-123456789abc/{name}"
         );
         bad.digest=None;
         assert!(fork_release(&[ForkRelease{
-            tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![bad]
+            tag_name:"visgame-123456789abc".into(),draft:false,prerelease:false,assets:vec![bad]
         }],name).is_err());
+    }
+    #[test] fn shared_release_requires_three_matching_assets(){
+        let tag="visgame-123456789abc";
+        let mut targets=std::collections::BTreeMap::new();
+        let mut assets=Vec::new();
+        for (platform,name) in [
+            ("linux-x86_64","vis-horizon-linux-x86_64.tar.gz"),
+            ("windows-x64","vis-horizon-windows-x64.zip"),
+            ("android-arm64","vis-horizon-android-arm64.apk")
+        ] {
+            targets.insert(platform.into(),shared_mcrust_catalog::Target{
+                asset:name.into(),sha256:"a".repeat(64),size:5000,
+                package:"com.visstudios.mcrust".into(),version_code:1001,
+                certificate_sha256:"b".repeat(64)
+            });
+            assets.push(ForkAsset{name:name.into(),size:5000,digest:Some(format!("sha256:{}", "a".repeat(64))),
+                browser_download_url:format!("https://github.com/{VIS_FORK}/releases/download/{tag}/{name}")});
+        }
+        let contract=shared_mcrust_catalog::Contract{
+            schema:1,source_repo:format!("https://github.com/{VIS_FORK}.git"),
+            engine_commit:"123456789abc0000000000000000000000000000".into(),
+            minecraft:"26.3".into(),protocol:777,data_version:5023,
+            resource_pack:[97,1],data_pack:[121,0],targets
+        };
+        let mut release=ForkRelease{tag_name:tag.into(),draft:false,prerelease:false,assets};
+        contract.validate(tag).unwrap();
+        assert!(fork_assets_match_contract(&release,&contract).is_ok());
+        release.assets.pop();
+        assert!(fork_assets_match_contract(&release,&contract).is_err());
+        release.assets.push(ForkAsset{
+            name:"vis-horizon-android-arm64.apk".into(),size:5000,
+            digest:Some(format!("sha256:{}", "c".repeat(64))),
+            browser_download_url:format!("https://github.com/{VIS_FORK}/releases/download/{tag}/vis-horizon-android-arm64.apk")
+        });
+        assert!(fork_assets_match_contract(&release,&contract).is_err());
+        release.assets.last_mut().unwrap().digest=Some(format!("sha256:{}", "a".repeat(64)));
+        release.assets.push(release.assets.last().unwrap().clone());
+        assert!(fork_assets_match_contract(&release,&contract).is_err());
+        release.prerelease=true;
+        assert!(fork_release(&[release],"vis-horizon-android-arm64.apk").is_err());
     }
     #[test] fn fork_metadata_rejects_tampering_and_wrong_commit(){
         let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();

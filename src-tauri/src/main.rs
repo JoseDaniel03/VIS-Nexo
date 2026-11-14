@@ -6,6 +6,7 @@ mod microsoft;
 mod instance_guard;
 mod instance_lock;
 mod instance_backup;
+mod world_cloud;
 mod instance_health;
 mod server_list;
 mod project_mods;
@@ -15,6 +16,7 @@ mod team_pack;
 mod updates;
 mod ombu;
 mod horizon;
+mod portals;
 mod horizon_download;
 mod download_manager;
 mod social;
@@ -761,6 +763,54 @@ fn game_location_for_operation(
  }
  resolve_player_game_dir(s,project_id,name,source_owner)
 }
+
+#[tauri::command]
+async fn world_cloud_status(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String
+)->Result<Vec<world_cloud::WorldCloudStatus>,String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::status(&game))
+        .await.map_err(|_|"Consulta de mundos interrumpida".to_string())?
+}
+#[tauri::command]
+fn link_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    world:String,folder:String,provider:String
+)->Result<(),String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    world_cloud::link(&game,&world,&folder,&provider)
+}
+#[tauri::command]
+fn unlink_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,world:String
+)->Result<(),String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    world_cloud::unlink(&game,&world)
+}
+#[tauri::command]
+async fn backup_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,world:String
+)->Result<world_cloud::CloudBackup,String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::backup(&game,&world))
+        .await.map_err(|_|"Copia del mundo interrumpida".to_string())?
+}
+#[tauri::command]
+async fn restore_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    world:String,confirmation:String
+)->Result<String,String>{
+    if confirmation!="RESTAURAR"{return Err("Confirmación de restauración inválida".into());}
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::restore_as_copy(&game,&world))
+        .await.map_err(|_|"Restauración de mundo interrumpida".to_string())?
+}
+
 #[tauri::command]
 async fn instance_backups(
  state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
@@ -979,15 +1029,8 @@ fn delete_instance(
         // Destructive deletion is only possible for directories created by
         // VIS's new Instancias/<name> layout. Legacy arbitrary paths are
         // deliberately restricted to unlinking the library entry.
-        let dir=minecraft::instance_dir(&s.data_root,&username,&current)?;
-        let parent=dir.parent().ok_or("La instancia no tiene carpeta padre")?;
-        if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
-            return Err("Por seguridad, los archivos de las instalaciones antiguas solo pueden eliminarse manualmente. Podés quitar la instancia de VIS conservando los mundos.".into());
-        }
-        let library=parent.parent().ok_or("Biblioteca de instancia inválida")?;
-        if instance_guard::managed_child(library,&name)?!=dir{
-            return Err("La carpeta no coincide con la instancia administrada por VIS".into());
-        }
+        let folder=minecraft::instance_dir(&s.data_root,&username,&current)?;
+        let dir=instance_guard::deletion_target(&folder,&current.name,&current.project_id,&s.data_root)?;
         for account in &s.storage.data.accounts{
             for other in s.storage.prefs(&account.username).instances{
                 if account.username==username && other.project_id==project_id && other.name==name {continue;}
@@ -997,16 +1040,6 @@ fn delete_instance(
             }
         }
         if dir.exists(){
-            let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
-            if meta.file_type().is_symlink()||!meta.is_dir(){
-                return Err("La carpeta de la instancia no es un directorio seguro".into());
-            }
-            let has_marker=dir.join(".vis/instance.json").is_file()
-                ||dir.join(".vslauncher/install.json").is_file()
-                ||dir.join(".vis/horizon.json").is_file();
-            if !has_marker && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
-                return Err("La carpeta contiene datos sin marca de instalación VIS. Solo puede quitarse de la biblioteca; no se borrarán archivos desconocidos.".into());
-            }
             // Use the same per-game guard as Java/Horizon and backup/restore.
             // Never delete a directory that another VIS process is writing to.
             let _deletion_guard=minecraft::acquire_game_run(&dir)?;
@@ -1018,8 +1051,8 @@ fn delete_instance(
     Ok(s.snapshot())
 }
 /// Explicit two-step bulk removal. Unlinking never touches Minecraft files.
-/// Physical removal is separately opted-in and allowed only for safely
-/// recognized VIS-managed Instancias/<name> directories after full preflight.
+/// Physical removal accepts only verified VIS installations, including older
+/// paths, after checking every selected folder and all other profiles.
 #[derive(Deserialize)]
 struct InstanceDeleteKey { project_id:String, name:String, #[serde(default)] source_owner:String }
 #[tauri::command]
@@ -1069,15 +1102,8 @@ fn delete_instances_batch(
     let mut folders=Vec::new();
     if erase_files {
         for instance in &chosen {
-            let dir=minecraft::instance_dir(&s.data_root,&owner,instance)?;
-            let parent=dir.parent().ok_or("Carpeta de instancia inválida")?;
-            if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
-                return Err("La eliminación física solo permite instancias nuevas de VIS bajo Instancias/<nombre>. Desmarcá borrar archivos para conservar las instalaciones antiguas.".into());
-            }
-            let library=parent.parent().ok_or("Biblioteca inválida")?;
-            if instance_guard::managed_child(library,&instance.name)?!=dir {
-                return Err("La carpeta seleccionada no corresponde con una instancia VIS administrada".into());
-            }
+            let source=minecraft::instance_dir(&s.data_root,&owner,instance)?;
+            let dir=instance_guard::deletion_target(&source,&instance.name,&instance.project_id,&s.data_root)?;
             // A saved game may be owned/referenced by another local account.
             for account in &s.storage.data.accounts {
                 for other in s.storage.prefs(&account.username).instances {
@@ -1085,18 +1111,6 @@ fn delete_instances_batch(
                         && other.name==instance.name {continue;}
                     let other_dir=minecraft::instance_dir(&s.data_root,&account.username,&other)?;
                     instance_guard::independent(&dir,&other_dir)?;
-                }
-            }
-            if dir.exists() {
-                let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
-                if meta.file_type().is_symlink()||!meta.is_dir(){
-                    return Err("La carpeta no es un directorio seguro".into());
-                }
-                let marked=dir.join(".vis/instance.json").is_file()
-                    ||dir.join(".vslauncher/install.json").is_file()
-                    ||dir.join(".vis/horizon.json").is_file();
-                if !marked && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
-                    return Err("Una carpeta contiene archivos sin marca VIS. No se eliminarán; usá quitar de la biblioteca.".into());
                 }
             }
             folders.push(dir);
@@ -1357,6 +1371,32 @@ async fn fabric_loaders(version:String)->Result<Vec<String>,String>{
     tauri::async_runtime::spawn_blocking(move||minecraft::get_fabric_loaders(&version)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
+fn horizon_project_menu(state:State<'_,Mutex<Backend>>,project_id:String,name:String,config:Option<serde_json::Value>)->Result<(),String>{
+    let s=locked(&state)?;
+    // Editing Horizon's server/menu layout is developer-only, including on personal instances.
+    s.admin()?;
+    let(owner,instance)=checked_instance(&s,&project_id,&name,true)?;
+    if instance.engine!="horizon"{return Err("La instancia no es Horizon".into());}
+    let folder=minecraft::instance_dir(&s.data_root,&owner,&instance)?.join(".vis");
+    if folder.exists()&&fs::symlink_metadata(&folder).map_err(|e|e.to_string())?.file_type().is_symlink(){return Err("Carpeta de configuración inválida".into());}
+    fs::create_dir_all(&folder).map_err(|e|e.to_string())?;
+    let path=folder.join("menu.json");
+    if let Some(value)=config {
+        let server=value["server"].as_str().ok_or("Falta el servidor")?;
+        if server.is_empty()||server.len()>255||!server.bytes().all(|b|b.is_ascii_alphanumeric()||b".-_:[]".contains(&b)){return Err("Dirección de servidor inválida".into());}
+        let buttons=value["buttons"].as_array().ok_or("Faltan botones")?;
+        if buttons.is_empty()||buttons.len()>12||value.to_string().len()>16384{return Err("Menú demasiado grande".into());}
+        if !buttons.iter().any(|b|b["action"]=="play"){return Err("Falta el botón Jugar".into());}
+        for button in buttons {
+            if !["play","settings","quit","friends"].contains(&button["action"].as_str().unwrap_or("")){return Err("Acción de botón inválida".into());}
+            let label=button["label"].as_str().ok_or("Falta la etiqueta")?;if label.chars().count()>40||label.chars().any(char::is_control){return Err("Etiqueta inválida".into());}
+            if button["width"].as_f64().unwrap_or(0.0)<0.1{return Err("El botón es demasiado angosto".into());}
+            for key in ["x","y","width"] {let n=button[key].as_f64().ok_or("Posición inválida")?;if !(0.0..=1.0).contains(&n){return Err("Usá posiciones relativas entre 0 y 1".into());}}
+        }
+        atomic_json(&path,&value)
+    }else{if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;}Ok(())}
+}
+#[tauri::command]
 fn horizon_source_build()->Result<String,String>{
     horizon::bundled_source_path()
 }
@@ -1457,15 +1497,42 @@ async fn launch_horizon(
         let effective=session_path.as_ref()
             .map(|p|p.to_string_lossy().into_owned())
             .unwrap_or(session_file);
+        let game_dir=if let Some(player)=visitor.as_ref() {
+            minecraft::shared_game_directory(&root,&owner,&instance,player)?
+        }else{dir.clone()};
         let outcome=if let Some(player)=visitor {
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
             horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir)
         }else{horizon::launch(&app,&dir,&instance,&effective)};
+        if let Ok(ref launched)=outcome {
+            portals::register(active,launched.pid,instance.name.clone(),instance.project_id.clone(),game_dir.join(".vis/portals.json"));
+        }
         if let Some(path)=session_path{let _=fs::remove_file(path);}
         outcome
     }).await.map_err(|e|e.to_string())?
 }
 
+#[tauri::command]
+fn portals_games(state:State<'_,Mutex<Backend>>)->Result<Vec<portals::Game>,String>{
+    let s=locked(&state)?;
+    Ok(portals::list(s.username()?))
+}
+#[tauri::command]
+async fn portals_command(state:State<'_,Mutex<Backend>>,pid:u32,action:String,code:Option<String>)->Result<serde_json::Value,String>{
+    let owner={let s=locked(&state)?;s.username()?.to_owned()};
+    let task_owner=owner.clone();
+    let result=tauri::async_runtime::spawn_blocking(move||portals::command(&task_owner,pid,&action,code.as_deref())).await.map_err(|e|e.to_string())??;
+    {let s=locked(&state)?;if s.username()?!=owner{return Err("Cambió la cuenta activa".into());}}
+    Ok(result)
+}
+
+#[tauri::command]
+async fn portals_exchange(state:State<'_,Mutex<Backend>>,pid:u32,snapshot:serde_json::Value)->Result<serde_json::Value,String>{
+    let owner={let s=locked(&state)?;s.username()?.to_owned()};let active=owner.clone();
+    let result=tauri::async_runtime::spawn_blocking(move||portals::exchange(&owner,pid,snapshot)).await.map_err(|e|e.to_string())??;
+    {let s=locked(&state)?;if s.username()?!=active{return Err("Cambió la cuenta activa".into());}}
+    Ok(result)
+}
 #[tauri::command]
 fn download_jobs(state:State<'_,Mutex<Backend>>)->Result<Vec<download_manager::DownloadJob>,String>{
     let s=locked(&state)?;
@@ -1876,7 +1943,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, world_cloud_status, link_world_cloud, unlink_world_cloud, backup_world_cloud, restore_world_cloud, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_realtime_ticket, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
@@ -1887,9 +1954,13 @@ fn main() {
             microsoft::microsoft_upload_skin,
             social::social_identity_info,
             social::social_cloud_register, social::social_cloud_login,
+            social::social_cloud_mfa_finish, social::social_cancel_pending_mfa,
             social::social_enable_cloud_password,
+            social::social_recovery_start, social::social_recovery_verify_email,
+            social::social_recovery_reset, social::social_change_cloud_password,
+            social::social_rebind_device,
             import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
-            set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
+            horizon_project_menu, portals_exchange, portals_games, portals_command, set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project
@@ -1897,3 +1968,5 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
 }
+
+

@@ -50,9 +50,10 @@ checks={
         "stopRealtime();" in ui
         and "sessionEpoch++" in ui
         and "if(epoch!==sessionEpoch||realtimeSocket!==ws)" in ui,
-    "Server schema 10 and no frontend bearer exposure":
-        "schema: ready ? 10 : 0" in worker
+    "Server schema 15 preserves realtime tickets and hides the bearer":
+        "schema: ready ? 15 : 0" in worker
         and "realtime_tickets" in worker
+        and "account_mfa_login_tickets" in worker
         and "reqwest::blocking::Client" in host,
     "One active native ticket request per session":
         "realtimeConnecting=true" in ui
@@ -79,3 +80,5 @@ checks={
 for title,ok in checks.items():print(("OK  " if ok else "FAIL"),title)
 if not all(checks.values()):raise SystemExit("VIS Portals realtime contracts failed")
 print(f"VIS Portals realtime checks: {sum(checks.values())}/{len(checks)}")
+
+

@@ -1,0 +1,142 @@
+name: VIS Nexo 2.22 integration preview (Windows + Linux)
+concurrency:
+  group: vis-integration-preview-${{ github.ref }}
+  cancel-in-progress: true
+# Requested integration preview: source, workspace version and lockfiles are aligned at 2.22.0.
+# Never publishes a release or deploys Cloudflare.
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/vis-portals-worlds]
+    paths:
+      - '.github/workflows/vis-nexo-integration-preview.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+            bundles: appimage
+          - os: windows-2022
+            name: windows
+            bundles: portable
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+      VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf libasound2-dev libudev-dev
+      - name: Install frontend build CLI
+        run: npm ci
+      - name: JavaScript and bridge verification
+        run: |
+          npm run validate
+          npm run check:release
+      - name: Cargo check and Rust unit tests
+        run: |
+          cargo check -p vslauncher-tauri --all-targets --locked
+          cargo test --workspace --bins --lib --locked
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        run: npm run build -- --bundles appimage --config src-tauri/tauri.unsigned.json
+      - name: Build Windows executable without an installer
+        if: runner.os == 'Windows'
+        run: npm run build -- --no-bundle --config src-tauri/tauri.unsigned.json
+      - name: Create portable Windows launcher (no installer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'target/release/vslauncher-tauri.exe',
+            'target/release/VIS Nexo.exe'
+          )
+          $binary = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $binary) { throw 'No se encontró el ejecutable nativo de VIS Nexo' }
+          $dir = Join-Path $env:RUNNER_TEMP 'VIS-Nexo-Portable'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item -LiteralPath $binary -Destination (Join-Path $dir 'VIS-Nexo.exe')
+          @'
+          VIS Nexo - versión portable para Windows x64
+          -----------------------------------------------
+          Ejecutá VIS-Nexo.exe sin instalar el launcher.
+          Windows 10/11 requiere Microsoft Edge WebView2 Runtime.
+          Minecraft Java y Horizon se descargan por instancia;
+          nunca se incluyen en este ZIP ni se instalan en AppData/.minecraft.
+          '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
+          Compress-Archive -Path (Join-Path $dir '*') -DestinationPath 'target/release/VIS-Nexo-Windows-Portable.zip' -Force
+      # Upload only distributable binaries. In particular, appimage/** also
+      # contains linuxdeploy's unpacked AppDir and nearly doubles artifact size.
+      - name: Validate Linux AppImage and generate SHA-256
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(target/release/bundle/appimage/*.AppImage)
+          if (( ${#packages[@]} != 1 )); then
+            printf 'Expected one final AppImage; found %s\n' "${#packages[@]}" >&2
+            exit 1
+          fi
+          cd target/release/bundle/appimage
+          sha256sum -- ./*.AppImage > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Validate Windows portable ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $portable = Get-Item 'target/release/VIS-Nexo-Windows-Portable.zip'
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($portable.FullName)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName })
+            if ($names.Count -ne 2 -or
+                'VIS-Nexo.exe' -notin $names -or
+                'LEEME.txt' -notin $names) {
+              throw "Portable archive has unexpected entries: $($names -join ', ')"
+            }
+            $exe = $zip.GetEntry('VIS-Nexo.exe')
+            if ($exe.Length -lt 100000) { throw 'Portable executable is unexpectedly small' }
+          } finally {
+            $zip.Dispose()
+          }
+          $hash = (Get-FileHash -LiteralPath $portable.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($portable.Name)" | Set-Content 'target/release/SHA256SUMS-Windows.txt' -Encoding utf8
+      - name: Upload Linux AppImage only
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-2-22-linux-preview
+          path: |
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows portable ZIP only
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-2-22-windows-preview
+          path: |
+            target/release/VIS-Nexo-Windows-Portable.zip
+            target/release/SHA256SUMS-Windows.txt
+          if-no-files-found: error
+          retention-days: 30

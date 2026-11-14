@@ -1,0 +1,11 @@
+{
+  "name": "vis-nexo-android-companion",
+  "private": true,
+  "version": "0.4.1",
+  "type": "module",
+  "description": "VIS Nexo Android with explicit native McRust preview handoff",
+  "scripts": {
+    "tauri": "tauri",
+    "check": "node --check web/app.js"
+  }
+}

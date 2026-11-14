@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VIS Nexo",
+  "version": "0.4.1",
+  "identifier": "com.visstudios.nexo.mobile",
+  "build": {
+    "frontendDist": "../web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "VIS Nexo",
+        "width": 390,
+        "height": 844,
+        "backgroundColor": "#110a27"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "../../src-tauri/icons/icon.png",
+      "../../src-tauri/icons/128x128.png"
+    ]
+  }
+}

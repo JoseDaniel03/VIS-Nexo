@@ -1,0 +1,315 @@
+name: VIS Nexo 2.22.2 prerelease - Windows Linux Android
+# Preview rebuild: serialize filesystem-locking tests to avoid cross-test race on CI.
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/vis-portals-worlds]
+    paths:
+      - '.github/workflows/vis-nexo-publish-preview.yml'
+concurrency:
+  group: vis-release-preview-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+            bundles: appimage
+          - os: windows-2022
+            name: windows
+            bundles: portable
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+      VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf libasound2-dev libudev-dev
+      - name: Install frontend build CLI
+        run: npm ci
+      - name: JavaScript and bridge verification
+        run: |
+          npm run validate
+          npm run check:release
+      - name: Cargo check and Rust unit tests
+        run: |
+          cargo check -p vslauncher-tauri --all-targets --locked
+          cargo test --workspace --bins --lib --locked -- --test-threads=1
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        run: npm run build -- --bundles appimage --config src-tauri/tauri.unsigned.json
+      - name: Build Windows executable without an installer
+        if: runner.os == 'Windows'
+        run: npm run build -- --no-bundle --config src-tauri/tauri.unsigned.json
+      - name: Create portable Windows launcher (no installer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'target/release/vslauncher-tauri.exe',
+            'target/release/VIS Nexo.exe'
+          )
+          $binary = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $binary) { throw 'No se encontró el ejecutable nativo de VIS Nexo' }
+          $dir = Join-Path $env:RUNNER_TEMP 'VIS-Nexo-Portable'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item -LiteralPath $binary -Destination (Join-Path $dir 'VIS-Nexo.exe')
+          @'
+          VIS Nexo - versión portable para Windows x64
+          -----------------------------------------------
+          Ejecutá VIS-Nexo.exe sin instalar el launcher.
+          Windows 10/11 requiere Microsoft Edge WebView2 Runtime.
+          Minecraft Java y Horizon se descargan por instancia;
+          nunca se incluyen en este ZIP ni se instalan en AppData/.minecraft.
+          '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
+          Compress-Archive -Path (Join-Path $dir '*') -DestinationPath 'target/release/VIS-Nexo-Windows-Portable.zip' -Force
+      # Upload only distributable binaries. In particular, appimage/** also
+      # contains linuxdeploy's unpacked AppDir and nearly doubles artifact size.
+      - name: Validate Linux AppImage and generate SHA-256
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(target/release/bundle/appimage/*.AppImage)
+          if (( ${#packages[@]} != 1 )); then
+            printf 'Expected one final AppImage; found %s\n' "${#packages[@]}" >&2
+            exit 1
+          fi
+          cd target/release/bundle/appimage
+          sha256sum -- ./*.AppImage > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Validate Windows portable ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $portable = Get-Item 'target/release/VIS-Nexo-Windows-Portable.zip'
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($portable.FullName)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName })
+            if ($names.Count -ne 2 -or
+                'VIS-Nexo.exe' -notin $names -or
+                'LEEME.txt' -notin $names) {
+              throw "Portable archive has unexpected entries: $($names -join ', ')"
+            }
+            $exe = $zip.GetEntry('VIS-Nexo.exe')
+            if ($exe.Length -lt 100000) { throw 'Portable executable is unexpectedly small' }
+          } finally {
+            $zip.Dispose()
+          }
+          $hash = (Get-FileHash -LiteralPath $portable.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($portable.Name)" | Set-Content 'target/release/SHA256SUMS-Windows.txt' -Encoding utf8
+      - name: Upload Linux AppImage only
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-2-22-linux-preview
+          path: |
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows portable ZIP only
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-2-22-windows-preview
+          path: |
+            target/release/VIS-Nexo-Windows-Portable.zip
+            target/release/SHA256SUMS-Windows.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  android-debug:
+    name: Android ARM64 debug APK — no game binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      CI: "true"
+      RUST_BACKTRACE: "1"
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - name: Checkout VIS Nexo feature branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK Platform and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          # ubuntu-24.04 ships Android SDK and cmdline-tools already.
+          # setup-android@v3 currently fails because Android removed 'tools'.
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          sdkmanager_bin="$(command -v sdkmanager || true)"
+          if [[ -z "$sdkmanager_bin" ]]; then
+            sdkmanager_bin="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)"
+          fi
+          test -x "$sdkmanager_bin"
+          yes | "$sdkmanager_bin" --licenses >/dev/null || true
+          "$sdkmanager_bin" "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}" "platform-tools"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${ANDROID_HOME}/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+      - name: Rust stable with Android ARM64 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Install pinned Tauri CLI from repository lockfile
+        run: npm ci
+      - name: Validate mobile JavaScript and native bridge boundaries
+        run: |
+          node --check mobile/web/app.js
+          node --check mobile/web/features.js
+          node tools/test_vis_android_features.mjs
+          python3 tools/check_android_companion.py
+          node tools/test_social_worker.mjs
+          node tools/test_server_voice.mjs
+          node tools/test_world_invites.mjs
+      - name: Initialize Android project non-interactively
+        working-directory: mobile
+        run: npm run tauri -- android init --ci
+      - name: Verify Android INTERNET permission and package isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="mobile/src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          test -f "$manifest"
+          # Tauri android init normally includes this; patch only if absent.
+          if ! grep -q 'android.permission.INTERNET' "$manifest"; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p=Path("mobile/src-tauri/gen/android/app/src/main/AndroidManifest.xml")
+          s=p.read_text()
+          assert '<manifest' in s and '</manifest>' in s
+          s=s.replace('</manifest>', '    <uses-permission android:name="android.permission.INTERNET" />\n</manifest>')
+          p.write_text(s)
+          PY
+          fi
+          grep -q 'android.permission.INTERNET' "$manifest"
+      - name: Configure Nexo-managed McRust installation
+        run: python3 tools/configure_android_installer.py
+      - name: Build signed-by-Android-debug-key ARM64 APK
+        working-directory: mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run tauri -- android build --debug --apk --target aarch64 --ci
+      - name: Inspect APK and generate SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p mobile-dist
+          mapfile -t apks < <(find mobile/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' | sort)
+          if (( ${#apks[@]} != 1 )); then
+            printf 'Expected one arm64 debug APK, found %s\n' "${#apks[@]}" >&2
+            printf '%s\n' "${apks[@]}"
+            exit 1
+          fi
+          cp "${apks[0]}" mobile-dist/VIS-Nexo-Android-ARM64-Debug.apk
+          test "$(stat -c '%s' mobile-dist/VIS-Nexo-Android-ARM64-Debug.apk)" -gt 1000000
+          ( cd mobile-dist && sha256sum VIS-Nexo-Android-ARM64-Debug.apk > SHA256SUMS && sha256sum -c SHA256SUMS )
+      - name: Upload Android test APK, not a release
+        uses: actions/upload-artifact@v4
+        with:
+          name: vis-nexo-android-arm64-preview
+          path: |
+            mobile-dist/VIS-Nexo-Android-ARM64-Debug.apk
+            mobile-dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-preview:
+    name: Publish pre-release only after all three builds succeed
+    needs: [build, android-debug]
+    if: github.ref == 'refs/heads/codex/vis-portals-worlds'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: vis-nexo-2-22-windows-preview
+          path: preview/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: vis-nexo-2-22-linux-preview
+          path: preview/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: vis-nexo-android-arm64-preview
+          path: preview/android
+      - name: Validate all bundles and prepare checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p release
+          test -s preview/windows/VIS-Nexo-Windows-Portable.zip
+          test -s preview/android/VIS-Nexo-Android-ARM64-Debug.apk
+          linux=(preview/linux/*.AppImage)
+          test "${#linux[@]}" -eq 1
+          cp preview/windows/VIS-Nexo-Windows-Portable.zip release/
+          cp preview/android/VIS-Nexo-Android-ARM64-Debug.apk release/
+          cp "${linux[0]}" release/
+          (cd release && sha256sum -- *.zip *.AppImage *.apk > SHA256SUMS && sha256sum -c SHA256SUMS)
+          cat > release/NOTAS.txt <<'NOTES'
+          VIS Nexo 2.22.2 (Windows/Linux) / Android 0.4.1
+          Vista previa de integración — NO release estable.
+          - Chat: el campo se limpia tras enviar con éxito.
+          - VIS Portals: controles técnicos y de compartir mundo fuera del panel global.
+          - Invitación a mundo: solo cuando hay una partida Horizon iniciada.
+          - Instancias: borrado completo de instalaciones VIS verificadas, también antiguas.
+          - Diseño: botones de Portals y chat adaptables a ventanas pequeñas.
+          - Windows ZIP portable y Linux AppImage: sin firma de editor.
+          - Android ARM64: APK de prueba, con firma DEBUG no estable. Respaldar
+            datos antes de desinstalar versiones anteriores.
+          - Minecraft Rust/Horizon NO viene incluido: Nexo lo instala por instancia
+            cuando el fork publique el manifiesto compartido de PC + Android.
+          - No se ha demostrado la ejecución Android ni el crossplay.
+          NOTES
+      - name: Publish GitHub pre-release with explicit preview label
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="vis-nexo-v2.22.2-preview"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Pre-release $tag already exists; refusing to overwrite an immutable preview."
+            exit 0
+          fi
+          gh release create "$tag"             release/*.AppImage             release/*.zip             release/*.apk             release/SHA256SUMS             release/NOTAS.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "VIS Nexo 2.22.2 + Android 0.4.1 (preview)"             --notes-file release/NOTAS.txt             --prerelease

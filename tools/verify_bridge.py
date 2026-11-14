@@ -25,6 +25,7 @@ registered={x.strip() for x in bridge.group(1).split(',') if x.strip()}
 registered_names={name.rsplit('::',1)[-1] for name in registered}
 assert registered_names==commands, f'Unregistered/unknown Rust commands: {registered_names ^ commands}'
 extra_ui=(p/'web/social-remote.js').read_text() if (p/'web/social-remote.js').exists() else ''
+extra_ui+='\n'+(p/'web/worlds-portals.js').read_text()+'\n'+(p/'web/game-portals.js').read_text()
 used=set(re.findall(r'''(?:command|apply)\(\s*["']([\w-]+)["']''',ui+'\n'+extra_ui))
 assert used<=registered_names, f'JS invokes without Rust implementation: {used-registered_names}'
 package=json.loads((p/'package.json').read_text())
@@ -38,3 +39,5 @@ assert conf['app']['withGlobalTauri'], 'Frontend depends on window.__TAURI__'
 assert not conf['app']['security'].get('dangerousDisableAssetCspModification',False)
 print(f'OK bridge: {len(registered_names)} registered Rust commands, {len(used)} JS command references')
 print(f'OK metadata: version {versions.pop()} consistent; application identifier preserved')
+
+

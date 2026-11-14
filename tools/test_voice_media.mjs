@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {createServerVoice} from '../web/server-voice.js';
+let captures=0,stopped=0;
+const track={enabled:true,stop(){stopped++;}};
+const stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+const calls=[];
+const runtime={navigator:{mediaDevices:{getUserMedia:async constraints=>{assert.equal(constraints.video,false);captures++;return stream;},enumerateDevices:async()=>[]}},RTCPeerConnection:class{}};
+const voice=createServerVoice(async(path,method,body)=>{calls.push(path);if(path.endsWith('/room'))return {id:'a',peers:[],iceServers:[],mode:'proximity',radius:48};return {};},()=>{},runtime);
+assert.equal(captures,0,'never request microphone before explicit join');
+await voice.join('project');
+assert.equal(captures,1);assert.equal(track.enabled,false,'push-to-talk defaults closed');
+voice.setPtt(true);assert.equal(track.enabled,true);
+voice.setMute(true);assert.equal(track.enabled,false);
+voice.setMute(false);voice.setPtt(false);assert.equal(track.enabled,false);
+voice.setMode('open');assert.equal(track.enabled,true);
+voice.setDeaf(true);assert.equal(track.enabled,false,'deafen also mutes capture');
+voice.setDeaf(false);assert.equal(track.enabled,true);
+await voice.leave();assert.equal(stopped,1);assert.equal(voice.status().connected,false);
+assert.ok(calls.includes('/v1/voice/leave'));
+let release;
+const delayed={...runtime,navigator:{mediaDevices:{...runtime.navigator.mediaDevices,getUserMedia:()=>new Promise(resolve=>release=resolve)}}};
+const pending=createServerVoice(async()=>({id:'a',peers:[],iceServers:[]}),()=>{},delayed);
+const joining=pending.join('project');await new Promise(resolve=>setTimeout(resolve,0));await pending.leave();release(stream);await joining;
+assert.equal(pending.status().connected,false,'late microphone permission cannot resurrect a disconnected session');
+console.log('Voice microphone consent, PTT, mute, deafen, cleanup and cancelled permission flow passed');
+
