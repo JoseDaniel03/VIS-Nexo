@@ -10,6 +10,11 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
   let avatarPreview='';
   let skinPreview='';
   const security={mfa:null,sessions:null};
+  const trustedDataImage=(raw,mime,max)=>{
+    const prefix='data:'+mime+';base64,';
+    return typeof raw==='string'&&raw.startsWith(prefix)&&raw.length<max
+      &&/^[A-Za-z0-9+/]*={0,2}$/.test(raw.slice(prefix.length))?raw:'';
+  };
   const selectable=(id,value,options)=>{
     return '<select id="'+id+'" name="'+id+'">'+options.map(([key,label])=>
       '<option value="'+E(key)+'"'+(key===value?' selected':'')+'>'+E(label)+'</option>').join('')+'</select>';
@@ -161,7 +166,10 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       '<p class="muted">Usá imágenes WebP para el avatar y PNG para las skins. Se publican en VIS Social, no en Minecraft directamente.</p>'+
       '<label>Avatar WebP</label><input class="file" type="file" accept="image/webp" data-feature-file="avatar">'+
       '<label>Skin PNG</label><input class="file" type="file" accept="image/png" data-feature-file="skin">'+
-      '<div class="small-row">'+button('remove-skin','Quitar skin VIS')+'</div></section>';
+      (avatarPreview?'<div class="mobile-image-row"><img class="avatar-preview" alt="Avatar VIS" src="'+E(avatarPreview)+'"></div>':'')+
+      (skinPreview?'<div class="mobile-image-row"><img class="skin-preview" alt="Skin VIS (textura)" src="'+E(skinPreview)+'"></div>':'')+
+      '<div class="small-row">'+button('view-cosmetics','Ver avatar y skin publicados')+
+        button('remove-skin','Quitar skin VIS')+'</div></section>';
   }
   function canEditProjects(){
     return state.social?.developer===true||state.account?.account?.developer===true;
@@ -175,7 +183,28 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       formInput('title','Nombre del proyecto','text',100)+
       '<textarea name="summary" maxlength="500" placeholder="Descripción" aria-label="Descripción"></textarea>'+
       selectable('visibility','draft',[['draft','Borrador'],['published','Publicado'],['archived','Archivado']])+
-      '<button class="primary" type="submit">Guardar proyecto</button></form></section>';
+      '<button class="primary" type="submit">Guardar proyecto</button></form>'+
+      '<form data-feature="project-staff" class="inline-form">'+
+      formInput('project_id','ID del proyecto','text',48)+
+      formInput('username','Usuario VIS','text',24)+
+      selectable('staff_role','editor',[['editor','Editor'],['manager','Responsable'],['none','Quitar permisos']])+
+      '<button class="outline" type="submit">Gestionar equipo</button></form></section>'+
+      (state.account?.account?.role==='super_admin'?
+      '<section class="mobile-panel"><div class="section-title">VIS Ceibo · Superadministración</div>'+
+      '<p class="muted">Se exige MFA reciente; los cambios de permisos los valida Cloudflare.</p>'+
+      '<form data-feature="admin-role" class="inline-form">'+
+      formInput('username','Usuario a gestionar','text',24)+
+      selectable('role','user',[['user','Usuario'],['moderator','Moderador'],['project_manager','Responsable proyectos']])+
+      '<button class="outline" type="submit">Asignar rol</button></form>'+
+      '<form data-feature="admin-global" class="inline-form">'+
+      formInput('username','Usuario administrador global','text',24)+
+      selectable('enabled','true',[['true','Habilitar'],['false','Revocar']])+
+      '<button class="outline" type="submit">Cambiar administrador global</button></form>'+
+      '<form data-feature="admin-disable" class="inline-form">'+
+      formInput('username','Usuario a habilitar/bloquear','text',24)+
+      selectable('disabled','true',[['true','Bloquear cuenta'],['false','Rehabilitar cuenta']])+
+      '<button class="danger" type="submit">Aplicar cambio</button></form></section>'
+      :'');
   }
   async function nativeAction(action,body){
     // GET routes accept no body at all. Tauri's Option<Value> is None when
@@ -206,6 +235,21 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     if(!state.auth.signed_in)return;
     security.mfa=results[0].status==='fulfilled'?results[0].value:null;
     security.sessions=results[1].status==='fulfilled'?results[1].value:null;
+    if(state.view==='account')screen();
+  }
+  async function refreshCosmetics(){
+    if(!state.auth?.signed_in)return;
+    const user=state.auth.username;
+    if(!allowedAccount.test(user||''))return;
+    const results=await Promise.allSettled([
+      nativeAction('avatar.get',{username:user}),
+      nativeAction('skin.get',{username:user})
+    ]);
+    if(!state.auth?.signed_in||state.auth.username!==user)return;
+    avatarPreview=trustedDataImage(
+      results[0].status==='fulfilled'?results[0].value.avatar:null,'image/webp',33000);
+    skinPreview=trustedDataImage(
+      results[1].status==='fulfilled'?results[1].value.skin:null,'image/png',90000);
     if(state.view==='account')screen();
   }
   function clear(){
@@ -282,6 +326,25 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
           summary:value('summary'),visibility:value('visibility')};
         await nativeAction('projects.manage',project);
         message='Proyecto guardado';
+      }else if(name==='project-staff'){
+        await nativeAction('projects.staff',{
+          project_id:value('project_id'),username:value('username'),
+          staff_role:value('staff_role')
+        });message='Equipo del proyecto actualizado';
+      }else if(name==='admin-role'){
+        if(!window.confirm('¿Modificar el rol de esta cuenta VIS?'))return true;
+        await nativeAction('accounts.role',{username:value('username'),role:value('role')});
+        message='Rol actualizado';
+      }else if(name==='admin-global'){
+        if(!window.confirm('¿Modificar permisos de administrador global?'))return true;
+        await nativeAction('accounts.global_admin',{
+          username:value('username'),enabled:value('enabled')==='true'
+        });message='Permiso global actualizado';
+      }else if(name==='admin-disable'){
+        if(!window.confirm('¿Cambiar el estado de esta cuenta?'))return true;
+        await nativeAction('accounts.disable',{
+          username:value('username'),disabled:value('disabled')==='true'
+        });message='Estado de cuenta actualizado';
       }else return false;
       await afterMutation(message,projectId);
     }catch(e){toast(String(e),true)}
@@ -292,7 +355,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const act=button.dataset.action;
     const supported=new Set([
       'friend-accept','friend-alias','project-sub','request-review','setup-mfa','rotate-codes',
-      'load-sessions','revoke-session','revoke-all','remove-skin'
+      'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics'
     ]);
     if(!supported.has(act))return false;
     if(uiBusy)return true;
@@ -344,9 +407,13 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         state.auth=await command('mobile_logout');
         clear();state.social=null;state.account=null;state.projects=null;state.community=null;screen();
         toast('Sesiones revocadas');
+      }else if(act==='view-cosmetics'){
+        await refreshCosmetics();
+        toast('Avatar y skin sincronizados');
       }else if(act==='remove-skin'){
         if(!window.confirm('¿Eliminar la skin VIS guardada en la nube?'))return true;
-        await nativeAction('skin.delete',{});toast('Skin eliminada');
+        await nativeAction('skin.delete',{});skinPreview='';
+        screen();toast('Skin eliminada');
       }
     }catch(e){toast(String(e),true)}
     finally{uiBusy=false}
@@ -375,10 +442,12 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       await nativeAction(avatar?'avatar.upload':'skin.upload',
         {mime:avatar?'image/webp':'image/png',data});
       toast(avatar?'Avatar actualizado':'Skin VIS publicada');
+      await refreshCosmetics();
       await refreshAll();
     }catch(e){toast(String(e),true)}
     finally{uiBusy=false}
   }
   return {friendControls,friendsPanel,projectControls,communityPanel,
-    accountPanel,adminPanel,canEditProjects,refreshSecurity,clear,handleForm,handleAction,handleFile};
+    accountPanel,adminPanel,canEditProjects,refreshSecurity,refreshCosmetics,
+    clear,handleForm,handleAction,handleFile};
 }
