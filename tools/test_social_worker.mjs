@@ -681,7 +681,18 @@ assert.equal((await call('/v1/accounts/upgrade',{
 },recoverAccount.token)).status,200);
 assert.equal((await call('/v1/account/email/request',{
   email:'Recover.Me@Example.org'
-},recoverAccount.token)).status,200);
+},recoverAccount.token)).status,403,
+  'a device bearer alone cannot install an account recovery mailbox');
+const bindChallenge=await call('/v1/accounts/login/challenge',{identifier:'recover_me'});
+const bindLogin=await call('/v1/accounts/login/verify',{
+  identifier:'recover_me',challenge_id:bindChallenge.data.challenge_id,
+  signature:to64(await sign(oldPasswordKey.privateKey,
+    'VIS-CLOUD-AUTH-V2\nrecover_me\n'+bindChallenge.data.challenge_id+'\n'+bindChallenge.data.nonce))
+});
+assert.equal(bindLogin.status,200);
+assert.equal((await call('/v1/account/email/request',{
+  email:'Recover.Me@Example.org'
+},bindLogin.data.token)).status,200);
 const emailCode=lastRecoveryCode();
 assert.equal((await call('/v1/recovery/email/verify',{code:emailCode})).data.verified,true);
 assert.equal((await call('/v1/recovery/email/verify',{code:emailCode})).status,400,
