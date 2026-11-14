@@ -127,3 +127,15 @@ button.link{background:transparent;border:0;color:#c5b0ff;font-size:12px;min-hei
 .mobile-panel .section-title:not(:first-child){margin-top:15px;padding-top:8px;border-top:1px solid #ffffff15}
 .mobile-panel+.mobile-panel{margin-top:4px}
 @media(max-width:375px){.friend-tools{padding-left:0}.mobile-panel{padding:13px}.mobile-panel .small-row button{flex:1 1 auto}}
+
+/* Shared Nexo crash/error diagnostics: modal is accessible and copyable. */
+.vis-error-dialog{position:fixed;inset:0;margin:auto;width:min(92vw,660px);max-height:85dvh;overflow:auto;z-index:9999;padding:22px;border:1px solid #a28bd2;border-radius:16px;background:#231a38;color:#f6efff;box-shadow:0 30px 100px #000b;min-width:0;color-scheme:dark}
+.vis-error-dialog::backdrop{background:#05040cbd;backdrop-filter:blur(5px)}
+.vis-error-heading strong{font-size:18px;display:block;line-height:1.4}
+.vis-error-heading p{font-size:13px;color:#c6b8d9;line-height:1.5;margin:10px 0 16px}
+.vis-error-report{display:block;width:100%;min-height:190px;max-height:43dvh;padding:14px;border:1px solid #665580;border-radius:11px;background:#0f0a1e;color:#e9e1f1;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow:auto;resize:vertical}
+.vis-error-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:16px}
+.vis-error-actions button{min-height:44px;padding:10px 15px;border-radius:9px;font-weight:650;cursor:pointer}
+.vis-error-copy{border:1px solid #ae8ce8;background:#6c43ac;color:white}
+.vis-error-close{border:1px solid #65577b;background:#332748;color:white}
+.vis-error-dialog :focus-visible{outline:2px solid #d0b1ff;outline-offset:3px}
