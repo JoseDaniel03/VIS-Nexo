@@ -1,5 +1,5 @@
 name: VIS Nexo 2.22.2 prerelease - Windows Linux Android
-# Preview rebuild: admin-only Horizon menu editor; align Cargo workspace version to 2.22.2.
+# Preview rebuild: serialize filesystem-locking tests to avoid cross-test race on CI.
 on:
   workflow_dispatch:
   push:
@@ -52,7 +52,7 @@ jobs:
       - name: Cargo check and Rust unit tests
         run: |
           cargo check -p vslauncher-tauri --all-targets --locked
-          cargo test --workspace --bins --lib --locked
+          cargo test --workspace --bins --lib --locked -- --test-threads=1
       - name: Build Linux AppImage
         if: runner.os == 'Linux'
         run: npm run build -- --bundles appimage --config src-tauri/tauri.unsigned.json
