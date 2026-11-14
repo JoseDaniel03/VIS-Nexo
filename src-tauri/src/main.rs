@@ -1411,7 +1411,7 @@ fn local_horizon_skin(s:&Backend,user:&str)->Option<PathBuf>{
     if chosen.is_empty(){return None;}
     let file=PathBuf::from(chosen).canonicalize().ok()?;
     if !file.starts_with(asset_dir(s).canonicalize().ok()?)||
-       !file.extension().is_some_and(|e|e.eq_ignore_ascii_case("png"))||
+       !file.extension().and_then(|e|e.to_str()).is_some_and(|e|e.eq_ignore_ascii_case("png"))||
        !fs::metadata(&file).ok().is_some_and(|m|m.is_file()&&m.len()<=65536){
         return None;
     }
