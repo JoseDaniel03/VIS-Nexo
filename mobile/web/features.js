@@ -177,8 +177,10 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       selectable('visibility','draft',[['draft','Borrador'],['published','Publicado'],['archived','Archivado']])+
       '<button class="primary" type="submit">Guardar proyecto</button></form></section>';
   }
-  async function nativeAction(action,body={}){
-    return command('mobile_action',{action,body});
+  async function nativeAction(action,body){
+    // GET routes accept no body at all. Tauri's Option<Value> is None when
+    // the property is omitted; {} would incorrectly be treated as POST data.
+    return command('mobile_action',body===undefined?{action}:{action,body});
   }
   async function afterMutation(message,projectId=null){
     toast(message);
