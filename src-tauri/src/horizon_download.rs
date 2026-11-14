@@ -724,10 +724,10 @@ mod tests{
     }
     #[test] fn nightly_title_is_bound_to_tag_and_commit(){
         let base=Release{tag_name:"nightly".into(),name:"Nightly 2026-11-10 · a1b2c3d".into(),
-            draft:false,prerelease:false,assets:vec![],published_at:None};
+            draft:false,assets:vec![],published_at:None};
         assert_eq!(signed_version(&base).unwrap(),"nightly-2026-11-10-a1b2c3d");
         let previous=Release{tag_name:"nightly-2026-11-09".into(),name:"Nightly 2026-11-10 · a1b2c3d".into(),
-            draft:false,prerelease:false,assets:vec![],published_at:None};
+            draft:false,assets:vec![],published_at:None};
         assert!(signed_version(&previous).is_none());
     }
     #[test] fn signed_manifest_must_name_exact_asset(){
