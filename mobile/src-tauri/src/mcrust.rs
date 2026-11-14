@@ -76,23 +76,33 @@ pub(crate) async fn mobile_mcrust_launch(
           .filter(|handle|minecraft_label(handle)).map(str::to_owned)
           .unwrap_or(fallback)
     };
+    // PNG skin is a public VIS cosmetic, not a credential. Fetch only for
+    // the authenticated account; send it separately from the 2-KiB identity
+    // handoff so Horizon can use its existing offline skin renderer.
+    let skin_owner=owner.clone();
+    let skin_bearer=bearer.clone();
+    let vis_skin=tauri::async_runtime::spawn_blocking(move||{
+        super::request("/v1/skins/get","POST",Some(&json!({"username":skin_owner})),Some(&skin_bearer))
+    }).await.ok().and_then(Result::ok)
+      .and_then(|response|response["skin"].as_str().map(str::to_owned))
+      .filter(|raw|raw.starts_with("data:image/png;base64,")&&raw.len()<=87500);
     let payload = json!({"schema":1,"owner":owner,"instance":id,
         "engine_commit":contract.engine_commit,"name":player_name,"server":""}).to_string();
     {
         let guard = state.lock().map_err(|_| "Sesión ocupada")?;
         nonce_guard(&guard, generation)?;
     }
-    let status = start_game(&app, payload, generation, apk, target).await?;
+    let status = start_game(&app, payload, generation, apk, target, vis_skin).await?;
     Ok(json!({"status":status,"package":mcrust_catalog::PACKAGE}))
 }
 
 #[cfg(not(target_os = "android"))]
-async fn start_game(_app: &AppHandle, _payload: String, _generation: u64, _apk: std::path::PathBuf, _target: mcrust_catalog::Target) -> Result<String, String> {
+async fn start_game(_app: &AppHandle, _payload: String, _generation: u64, _apk: std::path::PathBuf, _target: mcrust_catalog::Target, _skin: Option<String>) -> Result<String, String> {
     Err("Este inicio requiere un dispositivo Android".into())
 }
 
 #[cfg(target_os = "android")]
-async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std::path::PathBuf, target: mcrust_catalog::Target) -> Result<String, String> {
+async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std::path::PathBuf, target: mcrust_catalog::Target, skin: Option<String>) -> Result<String, String> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let session_app = app.clone();
     let window = app.get_webview_window("main").ok_or("Ventana Android no disponible")?;
@@ -105,7 +115,7 @@ async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std:
                 if session.bearer.is_none() { return Err("La sesión se cerró".into()); }
                 // Native Android returns a safe failure stage without logging
                 // JNI exception contents or the VIS launch payload.
-                let status = android::operate(env, activity, &payload, &apk, &target)?;
+                let status = android::operate(env, activity, &payload, &apk, &target, skin.as_deref())?;
                 match status.as_str() {
                     "signature_mismatch" => Err("La firma de McRust instalado es distinta de la publicación. Respaldá sus mundos antes de reemplazarlo.".into()),
                     _ => Ok(status)
