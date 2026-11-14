@@ -42,11 +42,17 @@ NO compilada para distribución. El fork Horizon permanece intacto.
 - El acceso a APIs administrativas de cuentas superadmin/globaladmin exige
   MFA habilitado y una verificación reciente (10 minutos). Cambiar correo,
   contraseña y revocar sesiones también exige segundo factor si está habilitado.
-- **Límite actual:** MFA protege operaciones privilegiadas, pero no bloquea aún
-  todo el acceso social/mensajería al iniciar sesión. Se necesita una pantalla
-  de desafío antes de habilitar el resto de rutas si se exige 2FA de login
-  completo. No presentar esta versión como autenticación de segundo factor
-  obligatoria en cada login.
+- **MFA obligatorio en el login cuando la cuenta tiene TOTP:** después de
+  validar contraseña Argon2id/Ed25519 o firma del dispositivo, el Worker no
+  emite bearer. Entrega un ticket aleatorio de 32 bytes (solo se almacena SHA-256
+  en D1), válido 5 minutos y máximo 5 intentos. La ruta
+  `/v1/accounts/login/mfa` acepta TOTP válido o código de emergencia y solo
+  entonces emite sesión. Tauri conserva el ticket en Rust, no en WebView.
+- Al habilitar MFA, se invalidan las demás sesiones y websockets activos.
+  Los bearer antiguos sin segundo factor quedan bloqueados desde el gateway.
+- La re-vinculación de dispositivos y cambio de contraseña exigen sesión de
+  contraseña reciente (máximo cinco minutos); el reset revoca también todos
+  los tickets MFA todavía pendientes.
 - No hay passkeys/WebAuthn integrados todavía.
 
 ## Sesiones y dispositivos
@@ -80,13 +86,23 @@ migración, un mensaje de chat o el propio repositorio. La workflow manual
 validará la presencia de los valores, aplicará D1 migration 0012 y configurará
 los secretos del Worker. Sin esos datos no se debe desplegar.
 
+## Passkeys / WebAuthn
+- **Pendiente, no implementado:** el flujo de passkeys requiere un dominio
+  HTTPS verificado (Relying Party ID), una interfaz de autenticación en
+  navegador vinculada a ese dominio y un intercambio seguro de resultados con
+  el cliente Tauri. No es seguro atribuir passkeys al origen `tauri://localhost`
+  ni guardar claves privadas WebAuthn en D1.
+- Hasta establecer el dominio y verificar Windows/Linux, esta versión usa
+  TOTP más códigos de recuperación como segundo factor obligatorio para
+  cuentas que lo habilitaron. No mostrar botones de passkey ficticios.
+
 **NO regenerar ni rotar `VIS_CEIBO_MFA_ENCRYPTION_KEY` sin migrar antes
 todos los secretos TOTP cifrados:** hacerlo invalidaría la verificación MFA
 de los usuarios existentes, incluidos administradores. Conservá respaldo
 cifrado en un gestor de secretos y prepará una migración de claves.
 
 ## API implementada
-Públicas (POST, nativas): `/v1/recovery/start`,
+Públicas (POST, nativas): `/v1/accounts/login/mfa`, `/v1/recovery/start`,
 `/v1/recovery/introspect`, `/v1/recovery/reset`,
 `/v1/recovery/email/verify`.
 Autenticadas: `/v1/account/email/request`,
@@ -95,9 +111,11 @@ Autenticadas: `/v1/account/email/request`,
 `/v1/account/password/change`, `/v1/account/devices/rebind`.
 
 ## Verificación antes del merge
-- Ejecutar `node tools/test_social_worker.mjs` y tests existentes.
+- Ejecutar `node tools/test_social_worker.mjs` y tests existentes (schema 13).
+- Validar tickets MFA de 5 intentos, acceso sin bearer previo, login por
+  dispositivo, TOTP de un uso y bloqueo de sesiones antiguas.
 - Comprobar npm audit, RustSec, CodeQL y `cargo check --all-targets --locked`.
-- Configurar secrets y dominio Resend en un entorno de pruebas de Cloudflare.
+- Configurar secrets y dominio Resend en un entorno de pruebas de Cloudflare, con migración D1 **0013**.
 - Probar cuentas normales y administradoras reales con dos dispositivos.
 - Revisar fallo de mailer, pérdida de dispositivo, correo antiguo no accesible,
   agotamiento/replay de códigos y revocación concurrente de sesiones.
