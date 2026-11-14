@@ -5,22 +5,46 @@ launcher Tauri de Windows/Linux. No compila ni modifica el fork
 `JoseDaniel03/horizon-VISNEXO`. Comparte el protocolo VIS Ceibo,
 Portals y Universe, **no el subsistema de Minecraft**.
 
-## Qué funciona
+## Qué funciona (Android companion v0.2.0)
 - Conexión HTTPS con el Worker de VIS Ceibo (endpoint `/health`).
-- Registro de cuenta, login Argon2id→Ed25519 y MFA de segundo paso (TOTP o
-  código de emergencia) mediante comandos Tauri ejecutados en Rust.
-- Tokens bearer, secretos de contraseña y tickets MFA solo en **memoria Rust**,
-  nunca expuestos al WebView ni guardados en localStorage.
-- Recuperación por correo verificado con código temporal cuando el servidor
-  esté desplegado y configurado con Resend.
-- Vista de identidad, correo verificado, amigos/presencia, catálogo de
-  proyectos y miembros de comunidades.
-- UI móvil responsive, menú táctil y botón de comprobación de conexión.
+- Registro, contraseña Argon2id→Ed25519, MFA TOTP y códigos de emergencia,
+  recuperación de cuenta, cambio de contraseña con prueba de la anterior.
+- Tokens bearer y tickets MFA **solo en memoria Rust**, no se exponen
+  al WebView ni se escriben en almacenamiento persistente.
+- Portals: amigos, solicitudes recibidas/enviadas, aceptación, apodos, estados
+  (online/ausente/ocupado/invisible/offline), estado personalizado y presencia.
+- Ceibo: correo verificado y cambio dual, nombre visible, @ID pública, inicio
+  y administración MFA, códigos de rescate, ver/revocar sesiones, avatar WebP,
+  skins PNG y borrado de skin.
+- Universe: catálogo, suscripciones, miembros, notas de ingreso, políticas
+  de admisión, solicitudes y moderación comunitaria, videos/enlaces.
+- Usuarios autorizados: metadatos de proyectos, miembros y equipos,
+  permisos de superadministración (roles, admin global, deshabilitar cuentas).
+  **Todas las decisiones se autorizan en Cloudflare**, no por la UI móvil.
+- UI touch-first con formularios, avatar/skin y botones accesibles;
+  scripts ES modules; pruebas de contrato nativas y de la interfaz.
 
-**No implementado en esta preview:** ejecutar, instalar o descargar Minecraft,
-Java, Horizon Rust, mods, chat E2EE de dos vías, voice chat, notificaciones push,
-persistencia de sesión, autenticación Microsoft ni passkeys/WebAuthn. No se leen
-ni modifican mundos de ninguna plataforma. No es todavía un launcher de juegos.
+**Servidor requerido:** las funciones MFA y recuperación por correo solo son
+operativas cuando el Worker real despliega el esquema D1 0013 y cuando Resend
+está configurado con un dominio verificado. La APK no despliega los servicios.
+
+**Todavía pendiente:** ejecutar/instalar Minecraft Java o Horizon Rust en
+Android (necesita portar el cliente y loaders), gestionar mundos y mods del
+teléfono, copiar respaldos de instancias de PC a Android, chats E2EE
+**multidispositivo**, llamadas/voicechat, notificaciones push de Android,
+persistencia de sesión, login Microsoft Premium y passkeys/WebAuthn. No se
+leen/modifican mundos. Es una **versión ampliada del launcher social móvil**,
+no un launcher de Minecraft funcional.
+
+### Chat E2EE multidispositivo
+El escritorio VIS Portals utiliza una sola clave ECDH P-256 privada por cuenta,
+guardada como CryptoKey no extraíble en IndexedDB y anclada con TOFU. D1 publica
+una clave de destinatario. Android no puede derivar esa clave de manera segura
+y no debe usar un servidor de mensajes en texto plano ni reemplazarla
+silenciosamente. Para sincronizar chats en varios dispositivos es necesario
+un protocolo de **identidades por dispositivo, fan-out de sobres cifrados,
+verificación de huellas/QR y migración de claves** en ambos clientes. Se deja
+fuera de esta APK para preservar el cifrado de los mensajes existentes.
 
 ## Limitaciones de conexión
 El servidor público configurado en Rust es
@@ -56,8 +80,10 @@ cd mobile
 ../node_modules/.bin/tauri android build --debug --apk --target aarch64 --ci
 ```
 
-CI: `.github/workflows/vis-android-preview.yml` genera un APK arm64 de
-prueba, publica un artefacto y adjunta SHA256SUMS. Este build no se fusiona
+CI: `.github/workflows/vis-android-preview.yml` ejecuta
+`tools/test_vis_android_features.mjs`, comprobaciones de límites de seguridad,
+y genera un APK arm64 de prueba con SHA256SUMS. Rust omite secciones de
+depuración DWARF para reducir el tamaño del paquete. El build no se fusiona
 automáticamente ni despliega Workers ni modifica los secretos Cloudflare.
 
 ## Plan de verificación real
