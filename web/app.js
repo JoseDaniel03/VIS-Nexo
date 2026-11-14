@@ -1,6 +1,6 @@
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 import { createSocialRemote } from './social-remote.js';
-import { createDiagnosticDialog } from './error-dialog.js';
+import { createDiagnosticDialog,redactDiagnostic } from './error-dialog.js';
 import { createWorldsPortals } from './worlds-portals.js';
 import {createServerVoice} from './server-voice.js';
 import {createGamePortals} from './game-portals.js';
@@ -228,7 +228,7 @@ const msMark=()=>'<span class="ms-icon" aria-hidden="true"><i></i><i></i><i></i>
 function message(text,bad=false,context=null){
  while(toastRegion.querySelectorAll('.toast').length>=3)toastRegion.querySelector('.toast')?.remove();
  const d=document.createElement('div');d.className=`toast ${bad?'bad':''}`;
- d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(text)}</span>`;
+ d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(bad?redactDiagnostic(text):text)}</span>`;
  toastRegion.append(d);
  if(bad){
    const info={platform:'Windows / Linux',system:context?.system||'VIS Nexo',stage:context?.stage||'Operación del launcher',
