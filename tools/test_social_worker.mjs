@@ -777,6 +777,100 @@ assert.equal((await call('/v1/account/password/change',rotatePayload,newLogin.da
 assert.equal((await call('/v1/state',undefined,newLogin.data.token)).status,401,
  'password rotation must revoke the old bearer session');
 
+
+// MFA is not merely a step-up privilege check: no bearer may be issued until
+// a second factor succeeds, for either cloud/password or device proofs.
+const gateKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const gatePub=to64(await crypto.subtle.exportKey('raw',gateKey.publicKey));
+const gateSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const gateSignup={
+ username:'mfa_gate',password_salt:gateSalt,password_public_key:gatePub,
+ registration_signature:to64(await sign(gateKey.privateKey,
+   'VIS-CLOUD-REGISTER-V2\nmfa_gate\n'+gateSalt))
+};
+const gateRegistered=await call('/v1/accounts/register',gateSignup);
+assert.equal(gateRegistered.status,200);
+async function firstFactorGate(){
+ const challenge=await call('/v1/accounts/login/challenge',{identifier:'mfa_gate'});
+ assert.equal(challenge.status,200);
+ return call('/v1/accounts/login/verify',{
+  identifier:'mfa_gate',challenge_id:challenge.data.challenge_id,
+  signature:to64(await sign(gateKey.privateKey,
+   'VIS-CLOUD-AUTH-V2\nmfa_gate\n'+challenge.data.challenge_id+
+   '\n'+challenge.data.nonce))
+ });
+}
+const preMfa=await firstFactorGate();
+assert.equal(preMfa.status,200);
+assert(preMfa.data.token,'before enrolling MFA, a password proof is sufficient');
+const mfaSetup=await call('/v1/account/mfa/setup',{},gateRegistered.data.token);
+assert.equal(mfaSetup.status,200,JSON.stringify(mfaSetup));
+const mfaConfirm=await call('/v1/account/mfa/confirm',{
+ code:otpFromSecret(mfaSetup.data.secret)
+},gateRegistered.data.token);
+assert.equal(mfaConfirm.status,200);
+assert.equal((await call('/v1/state',undefined,preMfa.data.token)).status,401,
+ 'enrolling MFA must revoke other existing bearers');
+const gated=await firstFactorGate();
+assert.equal(gated.status,200);
+assert.equal(gated.data.mfa_required,true);
+assert.match(gated.data.mfa_ticket,/^[A-Za-z0-9_-]{43}$/);
+assert.equal(gated.data.token,undefined,'no bearer or account access before MFA');
+assert.equal((await call('/v1/state',undefined,gated.data.mfa_ticket)).status,401,
+ 'the pre-MFA ticket is never an authenticated bearer');
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gated.data.mfa_ticket,recovery_code:'WRONG-FACTOR'
+})).status,401);
+const gateBackup=mfaConfirm.data.recovery_codes;
+const gateVerified=await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gated.data.mfa_ticket,recovery_code:gateBackup[0]
+});
+assert.equal(gateVerified.status,200,JSON.stringify(gateVerified));
+assert(gateVerified.data.token,'the bearer is granted only after MFA');
+assert.equal((await call('/v1/state',undefined,gateVerified.data.token)).status,200);
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gated.data.mfa_ticket,recovery_code:gateBackup[0]
+})).status,401,'consumed MFA tickets may not be reused');
+const locked=await firstFactorGate();
+for(let n=0;n<5;n++){
+ assert.equal((await call('/v1/accounts/login/mfa',{
+  mfa_ticket:locked.data.mfa_ticket,code:'000000'
+ })).status,401,'wrong TOTP is rejected without issuing a session');
+}
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:locked.data.mfa_ticket,recovery_code:gateBackup[1]
+})).status,401,'5 failed attempts exhaust a pre-MFA login challenge');
+const gateAgain=await firstFactorGate();
+// In the test fixture advance the one-use TOTP counter, without waiting 30s.
+DB.sqlite.prepare("UPDATE account_totp SET last_counter=last_counter-1 "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='mfa_gate')").run();
+const gateOtp=otpFromSecret(mfaSetup.data.secret);
+const gateByTotp=await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gateAgain.data.mfa_ticket,code:gateOtp
+});
+assert.equal(gateByTotp.status,200,JSON.stringify(gateByTotp));
+const reuseTotp=await firstFactorGate();
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:reuseTotp.data.mfa_ticket,code:gateOtp
+})).status,401,'a TOTP counter must be consumed only once');
+// A device-key login must be challenged as well, not be an alternative bypass.
+const mfaDevice=await account('mfa_device');
+const deviceCodes=await enrollMfa(mfaDevice);
+const deviceChallenge=await call('/v1/auth/challenge',{username:'mfa_device'});
+const deviceStage=await call('/v1/auth/session',{
+ username:'mfa_device',challenge_id:deviceChallenge.data.id,
+ signature:to64(await sign(mfaDevice.signing.privateKey,
+  authText('mfa_device',deviceChallenge.data)))
+});
+assert.equal(deviceStage.status,200);
+assert.equal(deviceStage.data.mfa_required,true);
+assert.equal(deviceStage.data.token,undefined,'device signature alone cannot bypass MFA');
+const deviceDone=await call('/v1/accounts/login/mfa',{
+ mfa_ticket:deviceStage.data.mfa_ticket,recovery_code:deviceCodes[0]
+});
+assert.equal(deviceDone.status,200,JSON.stringify(deviceDone));
+assert.equal((await call('/v1/state',undefined,deviceDone.data.token)).status,200);
+
 console.log('VIS Ceibo email, recovery, MFA and session tests passed');
 
 console.log('VIS Social authentication, encrypted delivery and D1 migrations passed');
