@@ -18,10 +18,26 @@ const DEFAULT_URL: &str = "https://vis-social.defreitascarranza-845.workers.dev"
 #[derive(Clone, Serialize, Deserialize)]
 struct DeviceKey { signing_secret: String }
 
+#[derive(Clone)]
+struct PendingMfaLogin { username:String, ticket:String }
 #[derive(Default)]
 pub(crate) struct SocialSession {
     username: Option<String>,
     bearer: Option<String>,
+    pending_mfa: Option<PendingMfaLogin>,
+}
+fn valid_pending_mfa(data:&Value)->Result<PendingMfaLogin,String>{
+    let username=data.get("username").and_then(Value::as_str)
+        .ok_or("El usuario MFA no fue confirmado por VIS Ceibo")?;
+    let ticket=data.get("mfa_ticket").and_then(Value::as_str)
+        .ok_or("VIS Ceibo no devolvió un desafío MFA")?;
+    if !(3..=24).contains(&username.len()) ||
+       !username.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_') ||
+       ticket.len()!=43 ||
+       !ticket.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-'){
+        return Err("El desafío de seguridad MFA recibido es inválido".into());
+    }
+    Ok(PendingMfaLogin{username:username.to_owned(),ticket:ticket.to_owned()})
 }
 
 fn base_url() -> Result<String, String> {
@@ -199,6 +215,7 @@ fn activate_cloud_user(
     let mut active = social.lock().map_err(|_| "Sesión VIS Social bloqueada")?;
     active.username = Some(username.to_owned());
     active.bearer = Some(token.to_owned());
+    active.pending_mfa=None;
     Ok(snapshot)
 }
 
@@ -231,7 +248,7 @@ pub(crate) async fn social_cloud_register(
 pub(crate) async fn social_cloud_login(
     backend: State<'_,Mutex<Backend>>, social: State<'_,Mutex<SocialSession>>,
     identifier: String, password: String
-) -> Result<crate::Snapshot,String> {
+) -> Result<Option<crate::Snapshot>,String> {
     // @handle is a friendly login address. The server still authenticates
     // against the original immutable username bound to the Ed25519 proof.
     let identifier=identifier.trim().trim_start_matches('@').to_owned();
@@ -266,7 +283,59 @@ pub(crate) async fn social_cloud_login(
             Some(&json!({"identifier":identifier,"challenge_id":id,
                 "signature":signature})),None)
     }).await.map_err(|_| "Inicio de sesión online interrumpido")??;
-    activate_cloud_user(&backend,&social,data)
+    if data.get("mfa_required").and_then(Value::as_bool)==Some(true){
+        let pending=valid_pending_mfa(&data)?;
+        let mut active=social.lock().map_err(|_|"Sesión MFA bloqueada")?;
+        active.pending_mfa=Some(pending);
+        active.bearer=None;
+        active.username=None;
+        return Ok(None);
+    }
+    activate_cloud_user(&backend,&social,data).map(Some)
+}
+
+#[tauri::command]
+pub(crate) async fn social_cloud_mfa_finish(
+    backend:State<'_,Mutex<Backend>>,social:State<'_,Mutex<SocialSession>>,
+    code:String
+)->Result<crate::Snapshot,String>{
+    if code.len()>36||code.trim().is_empty(){
+        return Err("Ingresá un código MFA válido".into());
+    }
+    let pending=social.lock().map_err(|_|"Sesión MFA bloqueada")?
+        .pending_mfa.clone().ok_or("No hay un desafío MFA pendiente")?;
+    // If there was a local account active while connecting VIS Social, MFA
+    // must not change that account into somebody else's identity.
+    {
+        let current=backend.lock().map_err(|_|"Perfil local bloqueado")?;
+        if let Some(active)=&current.active_user{
+            if active!=&pending.username{
+                return Err("El desafío MFA pertenece a otro usuario VIS".into());
+            }
+        }
+    }
+    let result=tauri::async_runtime::spawn_blocking(move||{
+        let code=code.trim();
+        let payload=if code.len()==6&&code.bytes().all(|b|b.is_ascii_digit()){
+            json!({"mfa_ticket":pending.ticket,"code":code})
+        }else{
+            json!({"mfa_ticket":pending.ticket,"recovery_code":code})
+        };
+        let data=request(&client()?,&base_url()?,"/v1/accounts/login/mfa",
+            "POST",Some(&payload),None)?;
+        if data.get("username").and_then(Value::as_str)!=Some(pending.username.as_str()){
+            return Err("El segundo factor no corresponde a la identidad VIS".into());
+        }
+        Ok::<Value,String>(data)
+    }).await.map_err(|_|"La comprobación MFA fue interrumpida".to_string())??;
+    activate_cloud_user(&backend,&social,result)
+}
+#[tauri::command]
+pub(crate) fn social_cancel_pending_mfa(
+    social:State<'_,Mutex<SocialSession>>
+)->Result<(),String>{
+    social.lock().map_err(|_|"Sesión MFA bloqueada")?.pending_mfa=None;
+    Ok(())
 }
 
 #[tauri::command]
