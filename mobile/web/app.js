@@ -2,6 +2,7 @@
    No credential, session token, MFA ticket or encrypted message is stored in JS.
    Android installs McRust from the verified shared PC/Android release. */
 import { createMobileFeatures } from './features.js';
+import { createDiagnosticDialog } from './error-dialog.js';
 'use strict';
 const mount=document.getElementById('root');
 const notify=document.getElementById('notifications');
@@ -16,10 +17,26 @@ const escapeHtml=text=>String(text??'').replace(/[&<>"']/g,ch=>({
 }[ch]));
 const symbol={home:'◈',friends:'♧',projects:'▦',instances:'▣',account:'◇'};
 const E=value=>escapeHtml(value);
-const features=createMobileFeatures({state,command,escape:E,toast,screen,refreshAll});
-function toast(text,error=false){
+const diagnostics=createDiagnosticDialog(document);
+const features=createMobileFeatures({state,command,escape:E,toast,screen,refreshAll,reportError});
+function toast(text,error=false,context=null){
   notify.textContent=String(text).slice(0,250);
   notify.className=error?'error':'';
+  if(error){
+    const info={platform:'Android ARM64',system:context?.system||'VIS Nexo Android',
+      stage:context?.stage||'Operación del launcher',
+      error:String(text),code:context?.code||'',release:context?.release||''};
+    const detail=document.createElement('button');
+    detail.type='button';detail.className='vis-error-detail-button';
+    detail.textContent='Ver y copiar diagnóstico';
+    detail.addEventListener('click',()=>diagnostics.open(info));
+    notify.append(detail);
+    if(context?.automatic)diagnostics.open(info);
+  }
+}
+function reportError(error,context={}){
+  const text=String(error||'Error desconocido');
+  toast(text,true,{...context,automatic:true});
 }
 async function command(name,args={}){
   if(!invoke)throw Error('Puente nativo Tauri no disponible. Instalá la APK, no abras este HTML en Chrome.');
