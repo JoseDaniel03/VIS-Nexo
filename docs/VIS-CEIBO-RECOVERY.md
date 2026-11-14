@@ -10,6 +10,13 @@ NO compilada para distribución. El fork Horizon permanece intacto.
 - Contraseñas VIS Cloud: el cliente Tauri obtiene una clave Ed25519 con
   Argon2id y un salt aleatorio (16 bytes); solo el verificador público se guarda
   en D1. El backend NUNCA recibe la contraseña en texto claro.
+- Vincular o cambiar el correo exige una sesión VIS autenticada por **contraseña
+  hace menos de cinco minutos**, y MFA reciente cuando está habilitado. Una
+  sesión de dispositivo o un bearer antiguo no pueden crear un canal de
+  recuperación nuevo.
+- Restablecer contraseña de **cualquier cuenta con MFA habilitado** exige
+  también un código de emergencia de un solo uso, además del correo verificado.
+  La supercuenta y los administradores lo exigen siempre.
 - Verificar el correo es voluntario inicialmente para no dejar sin acceso a
   cuentas antiguas mientras no esté configurado el proveedor. **Solo correos
   verificados permiten recuperación por email**.
