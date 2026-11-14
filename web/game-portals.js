@@ -1,15 +1,16 @@
 // One bridge shared by the native game panel and VIS Nexo's social session.
-export function createGamePortals(command,social,worlds,voice,view,onError,onSettings=()=>{}){
- let timer=null,busy=false,owner='',muted=false,deaf=false,lastError='',inflight=0;
+export function createGamePortals(command,social,worlds,voice,view,onError,onSettings=()=>{},onGameState=()=>{}){
+ let timer=null,busy=false,owner='',muted=false,deaf=false,lastError='',inflight=0,running=false;
+ function setRunning(value){if(running!==!!value){running=!!value;onGameState(running);}}
  function dispatch(task){if(inflight>=32)return;const identity=owner;inflight++;void Promise.resolve().then(()=>{if(view().user?.username===identity)return task();}).catch(error=>{lastError=String(error);onError(lastError);}).finally(()=>inflight--);}
  const failures=new Map(),queries=new Map();
  async function tick(){
   if(busy)return;busy=true;
   try{
    const state=view();
-   if(!state.user||!social.connected()){social.setGameActive(false);if(owner){owner='';await voice.leave();}return;}
+   if(!state.user||!social.connected()){social.setGameActive(false);setRunning(false);if(owner){owner='';await voice.leave();}return;}
    if(owner&&owner!==state.user.username){queries.clear();await voice.leave();}owner=state.user.username;
-   const games=await command('portals_games');social.setGameActive(games.length>0);
+   const games=await command('portals_games');setRunning(games.length>0);social.setGameActive(games.length>0);
    for(const game of games){
     if(Date.now()<(failures.get(game.pid)||0))continue;
     try{
@@ -25,6 +26,7 @@ export function createGamePortals(command,social,worlds,voice,view,onError,onSet
       if(event.type==='invite')dispatch(()=>worlds.invite(event.to,game.pid));
       if(event.type==='join')dispatch(()=>worlds.join(event.id,game.pid));
       if(event.type==='decline')dispatch(()=>social.declineWorld(event.id));
+      if(event.type==='stop')dispatch(()=>worlds.stop(game.pid));
       if(event.type==='presence')dispatch(()=>social.setPresence(event.value,event.custom_status||''));
       if(event.type==='voice'){
        if(event.action==='join')dispatch(()=>voice.join(game.project_id));
@@ -39,8 +41,8 @@ export function createGamePortals(command,social,worlds,voice,view,onError,onSet
     }catch(error){failures.set(game.pid,Date.now()+10000);onError(String(error));}
    }
    if(!games.length&&voice.status().connected)await voice.leave();
-  }catch(error){onError(String(error));}finally{busy=false;}
+  }catch(error){setRunning(false);onError(String(error));}finally{busy=false;}
  }
- return {start(){if(!timer)timer=setInterval(()=>void tick(),250);},async stop(){if(timer)clearInterval(timer);timer=null;await voice.leave();social.setGameActive(false);}};
+ return {start(){if(!timer)timer=setInterval(()=>void tick(),250);},async stop(){if(timer)clearInterval(timer);timer=null;await voice.leave();social.setGameActive(false);setRunning(false);}};
 }
 
