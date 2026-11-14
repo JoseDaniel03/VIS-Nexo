@@ -34,6 +34,10 @@ const command=async(name,args={})=>{
     ]};
     return {ok:true};
   }
+  if(name==='mobile_ms_begin')return {user_code:'TEST-1234',verification_uri:'https://www.microsoft.com/link',interval:5,expires_in:900};
+  if(name==='mobile_ms_status')return {status:'idle'};
+  if(name==='mobile_ms_poll')return {status:'connected',name:'VerifiedPlayer',uuid:'a'.repeat(32)};
+  if(name==='mobile_ms_disconnect')return {status:'idle'};
   if(name==='mobile_instances')return state.instances;
   if(name==='mobile_instance_create')return {id:'b'.repeat(32),name:args.name,engine:args.engine};
   if(name==='mobile_instance_remove')return 0;
@@ -61,6 +65,15 @@ assert(friend.includes('Solicitudes recibidas'));
 assert(friend.includes('Conectado'));
 assert(features.friendControls(state.social.friends[0]).includes('Apodo'));
 assert(features.accountPanel().includes('Cerrar sesiones'));
+assert(features.accountPanel().includes('Conectar con Microsoft'));
+await features.handleAction({dataset:{action:'ms-begin'}});
+assert(features.accountPanel().includes('TEST-1234'));
+assert(features.accountPanel().includes('microsoft.com/link'));
+await features.handleAction({dataset:{action:'ms-poll'}});
+assert(features.accountPanel().includes('VerifiedPlayer'));
+assert(!features.accountPanel().includes('TEST-1234'));
+await features.handleAction({dataset:{action:'ms-disconnect'}});
+assert(features.accountPanel().includes('Conectar con Microsoft'));
 assert(features.adminPanel().includes('Superadministración'));
 assert(features.communityPanel().includes('Miembros'));
 const worlds=features.instancePanel();
