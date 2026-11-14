@@ -1,7 +1,7 @@
 // VIS Nexo Android — Portals, Universe and Ceibo account management.
 // All authenticated requests go through the Rust allowlisted native bridge;
 // WebView sees no bearer tokens. Server owns all role/permission decisions.
-export function createMobileFeatures({state,command,escape,toast,screen,refreshAll}){
+export function createMobileFeatures({state,command,escape,toast,screen,refreshAll,reportError}){
   const E=escape;
   const allowedAccount=/^[a-z0-9_]{3,24}$/;
   const button=(action,text,extra='')=>'<button type="button" class="outline" data-action="'+action+'" '+extra+'>'+text+'</button>';
@@ -515,7 +515,11 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         await nativeAction('skin.delete',{});skinPreview='';
         screen();toast('Skin eliminada');
       }
-    }catch(e){toast(String(e),true)}
+    }catch(e){
+      if(act==='play-mcrust' && typeof reportError==='function'){
+        reportError(e,{system:'VIS McRust Android',stage:'Descarga, instalación o apertura de McRust'});
+      }else toast(String(e),true);
+    }
     finally{uiBusy=false}
     return true;
   }
