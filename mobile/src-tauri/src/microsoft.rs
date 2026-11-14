@@ -31,7 +31,14 @@ struct Verified{
 }
 #[derive(Default)]
 pub(crate) struct MicrosoftState{pending:Option<Pending>,verified:Option<Verified>}
-impl MicrosoftState {pub(crate) fn clear(&mut self){self.pending=None;self.verified=None;}}
+impl MicrosoftState {
+    pub(crate) fn clear(&mut self){self.pending=None;self.verified=None;}
+    pub(crate) fn verified_name(&self,owner:&str,epoch:u64)->Option<&str>{
+        self.verified.as_ref().filter(|v|
+            v.owner==owner && v.epoch==epoch && Instant::now()<v.expires
+        ).map(|v|v.name.as_str())
+    }
+}
 #[derive(Serialize)]
 pub(crate) struct DeviceDisplay{
     user_code:String,verification_uri:String,expires_in:u64,interval:u64,
