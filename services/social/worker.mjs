@@ -1225,7 +1225,7 @@ async function manageCommunityMedia(request,db,user) {
   return reply({ok:true,id:mediaId});
 }
 
-const ceiboMfa=createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit});
+const ceiboMfa=createCeiboMfa({reply,bad,now,hash,parseBody,rateLimit,revokeRealtime});
 const ceibo=createCeiboRecovery({
   reply,bad,now,hash,randomToken,parseBody,rateLimit,cloudVerifier,
   verifySignature,revokeRealtime,requireStepup:ceiboMfa.requireStepup,
