@@ -1287,7 +1287,7 @@ function bulkInstanceDeleteDialog(){
  '<div class="modal-body bulk-delete-body"><p>Revisá las instancias seleccionadas:</p>'+
  '<ul class="bulk-instance-summary">'+rows+'</ul>'+
  '<label class="toggle-line large"><span><b>Borrar también los mundos y archivos del disco</b>'+
- '<small>De forma predeterminada, los mundos se conservan. Si activás esta opción, el borrado es irreversible y solo se permite en Instancias/&lt;nombre&gt; administradas por VIS. Cerrá Minecraft antes.</small></span>'+
+ '<small>Si activás esta opción, se eliminarán mundos y archivos de carpetas propias con una instalación VIS verificable, incluso antiguas. No se borran carpetas compartidas ni ajenas. Cerrá Minecraft antes.</small></span>'+
  '<input type="checkbox" id="bulk-delete-files" '+(hasShared?'disabled':'')+'/></label>'+
  '<label class="bulk-confirm-label">Escribí <strong>CONFIRMAR</strong> para continuar'+
  '<input id="bulk-delete-confirm-input" type="text" spellcheck="false" autocomplete="off" placeholder="CONFIRMAR" maxlength="20" aria-label="Escribir CONFIRMAR" autofocus/></label>'+
@@ -1661,7 +1661,7 @@ async function projectInstallAndPlay(){
 }
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste de RAM es exclusivo de tu perfil VIS. Los mundos y servidores siguen la política compartida de esta instancia.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
 function confirmDialog(){return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="alertdialog" aria-modal="true"><header class="modal-head"><h2>Confirmar eliminación</h2><button class="icon-btn" data-action="close-modal">${I('x',18)}</button></header><div class="modal-body"><p>¿Querés quitar <strong>${esc(dialog.label)}</strong> de VIS Nexo? Por defecto <b>se conservan todos los mundos y archivos del disco</b>.</p>
- ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los archivos del disco</b><small>Irreversible. Disponible solo para instalaciones administradas por VIS en Instancias/&lt;nombre&gt;. Cerrá el juego antes.</small></span><input type="checkbox" id="delete-instance-files"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
+ ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los mundos y archivos del disco</b><small>Irreversible. Solo se borrarán carpetas propias con marcadores VIS verificables, incluidas versiones antiguas. Cerrá Minecraft antes.</small></span><input type="checkbox" id="delete-instance-files"></label><label class="bulk-confirm-label">Para borrar archivos escribí <strong>BORRAR</strong><input id="delete-instance-confirm" type="text" autocomplete="off" spellcheck="false" maxlength="12" placeholder="BORRAR" aria-label="Confirmación para borrar archivos"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
 
 function instanceWorldCloudSection(d){
  if(d.sourceOwner)return '<section><h3>'+I('cloud',17)+' Nube</h3><p class="muted">Las copias de nube se vinculan desde la cuenta propietaria de la instancia.</p></section>';
@@ -2989,6 +2989,8 @@ root.addEventListener('click',async event=>{
   if(dialog?.kind==='project'){const ok=await apply('delete_project',{projectId:dialog.projectId},'Proyecto eliminado');if(ok){dialog=null;selectedId='';page='home';render();}}
   else if(dialog?.kind==='instance'){
    const eraseFiles=document.getElementById('delete-instance-files')?.checked===true;
+   if(eraseFiles&&document.getElementById('delete-instance-confirm')?.value!=='BORRAR')
+     return message('Escribí BORRAR para confirmar el borrado de mundos y archivos.',true);
    const ok=await apply('delete_instance',{projectId:dialog.projectId,name:dialog.name,eraseFiles},
      eraseFiles?'Instancia y sus archivos VIS eliminados':'Instancia quitada de la biblioteca; los mundos siguen en el disco');
    if(ok){dialog=null;mcSelected=null;render();}
