@@ -72,6 +72,27 @@ pub(crate) async fn persist(app: &AppHandle, state: &Mutex<Session>) -> Result<(
     }
     Ok(())
 }
+// Do not leave a newly authenticated native account behind when saving failed:
+// the WebView would otherwise still display the previous account/login form.
+pub(crate) async fn finish_auth(
+    app: &AppHandle,
+    state: &Mutex<Session>,
+    view: AuthView,
+) -> Result<AuthView, String> {
+    if persist(app, state).await.is_err() {
+        {
+            let mut s = state.lock().map_err(|_| "Sesión ocupada")?;
+            let epoch = s.epoch.wrapping_add(1);
+            *s = Session {
+                epoch,
+                ..Session::default()
+            };
+        }
+        let _ = call(app, "clear", String::new()).await;
+        return Err("No se pudo confirmar el almacenamiento seguro de la sesión. Reintentá el acceso; podés dejar Mantener sesión desmarcado.".into());
+    }
+    Ok(view)
+}
 #[tauri::command]
 pub(crate) async fn mobile_restore(
     app: AppHandle,

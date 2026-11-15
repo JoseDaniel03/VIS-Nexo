@@ -205,8 +205,7 @@ async fn mobile_login(
     nonce_guard(&session,generation)?;
     session.remember=remember.unwrap_or(false);
     login_response(&mut session,value)?};
-    device::persist(&app,&state).await?;
-    Ok(view)
+    device::finish_auth(&app,&state,view).await
 }
 #[tauri::command]
 async fn mobile_register(
@@ -224,8 +223,7 @@ async fn mobile_register(
     nonce_guard(&session,generation)?;
     session.remember=remember.unwrap_or(false);
     login_response(&mut session,value)?};
-    device::persist(&app,&state).await?;
-    Ok(view)
+    device::finish_auth(&app,&state,view).await
 }
 #[tauri::command]
 async fn mobile_mfa(state:State<'_,Mutex<Session>>,app:AppHandle,code:String)->Result<AuthView,String>{
@@ -251,8 +249,7 @@ async fn mobile_mfa(state:State<'_,Mutex<Session>>,app:AppHandle,code:String)->R
     let view={let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
     nonce_guard(&s,generation)?;
     login_response(&mut s,value)?};
-    device::persist(&app,&state).await?;
-    Ok(view)
+    device::finish_auth(&app,&state,view).await
 }
 #[tauri::command]
 async fn mobile_cancel_mfa(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{

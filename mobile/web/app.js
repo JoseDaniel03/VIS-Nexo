@@ -310,4 +310,11 @@ document.addEventListener('change',e=>{
   screen();void refreshAll();
 })();
 
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)void command('mobile_device',{operation:'status'}).then(d=>{state.device=d;screen();}).catch(()=>{});});
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)return;
+  void command('mobile_device',{operation:'status'}).then(device=>{
+    const changed=device.prepared!==state.device?.prepared||device.installer_allowed!==state.device?.installer_allowed;
+    state.device=device;
+    if(changed&&(!device.prepared||(state.auth.signed_in&&state.view==='account')))screen();
+  }).catch(()=>{});
+});
