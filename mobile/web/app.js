@@ -110,7 +110,7 @@ function authPanel(){
     '<div class="form-card"><form id="auth-form" data-step="'+step+'">'+body+'</form></div>'+
     '<button type="button" data-action="device-settings">Permisos de Android</button><button type="button" data-action="device-updates">Buscar actualizaciones</button>'+
     '<div class="security-note">◈ Identidad y tokens protegidos por Rust · HTTPS hacia Cloudflare</div>'+
-    '<div class="preview-note">Minecraft Rust Horizon 26.3 es el único motor Android. Nexo verifica y solicita la instalación de McRust al jugar.</div>'+
+    '<div class="preview-note">Minecraft Rust VIS Nexo 26.3 es el único motor Android. Nexo verifica y solicita la instalación de McRust al jugar.</div>'+
   '</section>';
 }
 function statusArea(){
@@ -138,7 +138,7 @@ function home(){
    '<button data-action="tab" data-tab="projects"><b>▦</b><strong>VIS Universe</strong><small>Proyectos vinculados</small></button>'+
    '<button data-action="tab" data-tab="instances"><b>▣</b><strong>VIS Worlds</strong><small>Instancias para Android</small></button></div>'+
    '<div class="locked-feature"><div class="lock-icon">▣</div><div><strong>Minecraft Rust</strong>'+
-   '<p>Horizon 26.3 · Vanilla. Creá tu instancia en Mundos y Nexo descargará McRust Android desde la misma versión compartida con PC.</p></div><span class="tag">ANDROID</span></div>'+
+   '<p>VIS Nexo Rust 26.3 · Vanilla. Creá tu instancia en Mundos y Nexo descargará McRust Android desde la misma versión compartida con PC.</p></div><span class="tag">ANDROID</span></div>'+
    '<button class="outline full" data-action="refresh">Comprobar conexión con VIS</button>';
 }
 function friends(){

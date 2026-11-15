@@ -2,7 +2,7 @@ name: VIS Nexo requested PC test batch
 concurrency:
   group: vis-nexo-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-# Requested test batch: only editing this workflow on the integration branch triggers it.
+# Requested test batch (VIS Nexo branding, PC + Android): only editing this workflow on the integration branch triggers it.
 # No release or production deployment.
 on:
   workflow_dispatch:

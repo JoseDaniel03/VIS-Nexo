@@ -548,7 +548,7 @@ fn game_metadata_ok(name:&str,engine:&str,version:&str,loader:&str,project:&str)
     // Android creates only the shared Horizon Rust 26.3 Vanilla engine.
     // Reject Java or alternate loaders even if the WebView is manipulated.
     if engine!="horizon"||version!="26.3"||loader!="vanilla"{
-        return Err("Android admite únicamente Horizon Rust 26.3 Vanilla".into());
+        return Err("Android admite únicamente VIS Nexo Rust Rust 26.3 Vanilla".into());
     }
     if !project.is_empty()&&(project.len()>48||!project.bytes().all(|c|
         c.is_ascii_lowercase()||c.is_ascii_digit()||c==b'-'||c==b'_')){

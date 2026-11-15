@@ -7,7 +7,7 @@ export function createWorldsPortals(command,social,account,choose,onError){
   async function game(preferredPid){
     const games=await command('portals_games');
     if(preferredPid){const selected=games.find(g=>g.pid===preferredPid);if(!selected)throw Error('La partida ya no está disponible');return selected;}
-    if(!games.length)throw Error('Iniciá una instancia Horizon actualizada desde VIS Nexo. Abrí un mundo para invitar, o quedate en el menú para unirte.');
+    if(!games.length)throw Error('Iniciá una instancia VIS Nexo Rust actualizada desde VIS Nexo. Abrí un mundo para invitar, o quedate en el menú para unirte.');
     return games.length===1?games[0]:choose(games);
   }
   async function close(pid,room){

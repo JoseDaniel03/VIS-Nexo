@@ -36,7 +36,7 @@ fn supports(value:&Value, option:&str)->bool{
 }
 fn require_options(value:&Value,options:&[&str],exe:&str)->Result<(),String>{
     for option in options{
-        if !supports(value,option){return Err(format!("{exe} no admite {option}. Elegí un build compatible de Horizon"));}
+        if !supports(value,option){return Err(format!("{exe} no admite {option}. Elegí un build compatible de VIS Nexo Rust"));}
     }
     Ok(())
 }
@@ -77,31 +77,31 @@ fn source_build_complete(folder:&Path)->bool{
 }
 
 pub fn bundled_source_path()->Result<String,String>{
-    let folder=BUNDLED_SOURCE.get().ok_or("No se incluyó Horizon desde el repositorio. Compilá VIS con npm run build o npm run tauri dev")?;
+    let folder=BUNDLED_SOURCE.get().ok_or("No se incluyó VIS Nexo Rust desde el repositorio. Compilá VIS con npm run build o npm run tauri dev")?;
     verify_source_build(folder)?;
     Ok(folder.to_string_lossy().to_string())
 }
 
 fn verify_source_build(folder:&Path)->Result<(),String>{
     let manifest=fs::read(folder.join("vis-horizon-source.json"))
-        .map_err(|e|format!("Sin manifiesto de Horizon compilado: {e}"))?;
-    let value:Value=serde_json::from_slice(&manifest).map_err(|e|format!("Manifiesto Horizon inválido: {e}"))?;
+        .map_err(|e|format!("Sin manifiesto de VIS Nexo Rust compilado: {e}"))?;
+    let value:Value=serde_json::from_slice(&manifest).map_err(|e|format!("Manifiesto VIS Nexo Rust inválido: {e}"))?;
     if !matches!(value["source_repo"].as_str(),Some(
         "https://github.com/horizon-rust/horizon.git" |
         "https://github.com/JoseDaniel03/horizon-VISNEXO.git"
     )){
-        return Err("El motor no proviene de Horizon o de su fork VIS autorizado".into());
+        return Err("El motor no proviene de VIS Nexo Rust o de su fork VIS autorizado".into());
     }
     for stem in ["horizon-client","horizon-prepare"]{
         let name=if cfg!(windows){format!("{stem}.exe")}else{stem.into()};
         let expected=value["sha256"][name.as_str()].as_str().ok_or("Manifiesto sin huella SHA-256 del ejecutable")?;
         if !expected.eq_ignore_ascii_case(&hash_file_sha256(&folder.join(&name))?){
-            return Err(format!("El ejecutable de Horizon {name} cambió desde la compilación de VIS"));
+            return Err(format!("El ejecutable de VIS Nexo Rust {name} cambió desde la compilación de VIS"));
         }
     }
     let expected=value["sha256"]["research-lock.json"].as_str().ok_or("Manifiesto sin research-lock")?;
     if !expected.eq_ignore_ascii_case(&hash_file_sha256(&folder.join("research-lock.json"))?){
-        return Err("research-lock.json del juego Horizon se modificó".into())
+        return Err("research-lock.json del juego VIS Nexo Rust se modificó".into())
     }
     Ok(())
 }
@@ -115,7 +115,7 @@ fn hash_file_sha256(path:&Path)->Result<String,String>{
 
 fn build_folder(ins:&Instance)->Result<PathBuf,String>{
     if ins.horizon_build_dir.is_empty() || ins.horizon_build_dir==SOURCE_BUILD_ID {
-        let path=BUNDLED_SOURCE.get().ok_or("El juego Horizon no está compilado dentro de VIS Nexo. Volvé a generar el launcher con Horizon Source")?;
+        let path=BUNDLED_SOURCE.get().ok_or("El juego VIS Nexo Rust no está compilado dentro de VIS Nexo. Volvé a generar el launcher con VIS Nexo Rust Source")?;
         verify_source_build(path)?;
         return Ok(path.clone());
     }
@@ -123,7 +123,7 @@ fn build_folder(ins:&Instance)->Result<PathBuf,String>{
     // overwrite their worlds or silently substitute a different executable.
     let path=Path::new(&ins.horizon_build_dir);
     if !path.is_absolute(){return Err("Elegí una carpeta absoluta con horizon-client y horizon-prepare".into())}
-    let folder=fs::canonicalize(path).map_err(|e|format!("No se encontró el build de Horizon: {e}"))?;
+    let folder=fs::canonicalize(path).map_err(|e|format!("No se encontró el build de VIS Nexo Rust: {e}"))?;
     if !folder.is_dir()||!executable(&folder,"horizon-client").is_file()
         ||!executable(&folder,"horizon-prepare").is_file()
         ||!folder.join("research-lock.json").is_file(){
@@ -161,10 +161,10 @@ fn api(folder:&Path,exe:&str)->Result<Value,String>{
         stderr.take(4096).read_to_end(&mut error).map_err(|e|e.to_string())?;
     }
     if !status.success(){return Err(format!("{exe} no reconoce la Launch API: {}",String::from_utf8_lossy(&error).chars().take(400).collect::<String>()))}
-    if output.len()>1024*1024{return Err("Respuesta de Horizon demasiado grande".into())}
+    if output.len()>1024*1024{return Err("Respuesta de VIS Nexo Rust demasiado grande".into())}
     let value:Value=serde_json::from_slice(&output).map_err(|e|format!("Launch API inválida: {e}"))?;
     if !value["launch_api"].as_str().is_some_and(|s|s.starts_with("0.1.")){
-        return Err("VIS admite por ahora Horizon Launch API 0.1.x; actualizá el adaptador".into())
+        return Err("VIS admite por ahora VIS Nexo Rust Launch API 0.1.x; actualizá el adaptador".into())
     }
     Ok(value)
 }
@@ -266,7 +266,7 @@ pub fn diagnostics(dir:&Path,ins:&Instance)->Vec<HorizonCheck>{
     };
     let prep=match probe_apis(&folder,ins){
         Ok((client,prep))=>{
-            results.push(check("Launch API","ok",format!("Horizon {} · API {} · Minecraft {}",
+            results.push(check("Launch API","ok",format!("VIS Nexo Rust {} · API {} · Minecraft {}",
                 client["horizon"].as_str().unwrap_or("?"),client["launch_api"].as_str().unwrap_or("?"),ins.version)));
             prep
         },
@@ -290,10 +290,10 @@ pub fn diagnostics(dir:&Path,ins:&Instance)->Vec<HorizonCheck>{
         if is_mc{"Metadatos, JAR y assets encontrados".into()}else{format!("Falta Minecraft {} completo en {}",ins.version,mc.display())}));
     let jar=Path::new(&ins.horizon_server_jar);
     results.push(check("JAR del servidor oficial",if jar.is_absolute()&&jar.is_file(){"ok"}else{"missing"},
-        if jar.is_file(){"Archivo presente (Horizon comprobará sus hashes)"}else{"Elegí el server.jar oficial fijado por research-lock.json"}));
+        if jar.is_file(){"Archivo presente (VIS Nexo Rust comprobará sus hashes)"}else{"Elegí el server.jar oficial fijado por research-lock.json"}));
     let java=prep["java_major"].as_u64().unwrap_or(25);
     if ins.java_path.is_empty(){
-        results.push(check("Java para preparar","manual",format!("Horizon requiere JDK {java}. Se buscará JAVA_HOME/PATH o runtime oficial")));
+        results.push(check("Java para preparar","manual",format!("VIS Nexo Rust requiere JDK {java}. Se buscará JAVA_HOME/PATH o runtime oficial")));
     } else {
         let home=Path::new(&ins.java_path);
         let path=home.join("bin").join(if cfg!(target_os="windows"){"java.exe"}else{"java"});
@@ -302,7 +302,7 @@ pub fn diagnostics(dir:&Path,ins:&Instance)->Vec<HorizonCheck>{
     }
     let ready=inspect(dir,ins).is_ok_and(|p|p.resources_ready);
     results.push(check("Recursos preparados",if ready{"ok"}else{"missing"},
-        if ready{"Horizon --check aprobó el estado"}else{"Presioná Instalar/Reparar para preparar y verificar los recursos"}));
+        if ready{"VIS Nexo Rust --check aprobó el estado"}else{"Presioná Instalar/Reparar para preparar y verificar los recursos"}));
     results.push(check("Microsoft", "manual", "Requiere cuenta propietaria de Minecraft Java. El inicio de sesión en Ceibo aún está pendiente"));
     results
 }
@@ -342,7 +342,7 @@ pub(crate) fn copy_preparation_sources(source:&Path,target:&Path)->Result<(),Str
     for entry in fs::read_dir(source).map_err(|e|e.to_string())?{
         let entry=entry.map_err(|e|e.to_string())?;
         let kind=entry.file_type().map_err(|e|e.to_string())?;
-        if kind.is_symlink(){return Err("Enlace inesperado en los exportadores de Horizon".into())}
+        if kind.is_symlink(){return Err("Enlace inesperado en los exportadores de VIS Nexo Rust".into())}
         let dest=target.join(entry.file_name());
         if kind.is_dir(){copy_preparation_sources(&entry.path(),&dest)?;}
         else if kind.is_file(){fs::copy(entry.path(),dest).map_err(|e|e.to_string())?;}
@@ -354,7 +354,7 @@ pub(crate) fn copy_preparation_sources(source:&Path,target:&Path)->Result<(),Str
 pub fn install_instance_engine(dir:&Path,ins:&Instance)->Result<String,String>{
     let source=build_folder(ins)?;
     if !source.join("vis-horizon-source.json").is_file(){
-        return Err("Motor Horizon sin manifiesto de origen verificado".into());
+        return Err("Motor VIS Nexo Rust sin manifiesto de origen verificado".into());
     }
     verify_source_build(&source)?;
     // Fork packages are already verified and installed in the instance;
@@ -362,7 +362,7 @@ pub fn install_instance_engine(dir:&Path,ins:&Instance)->Result<String,String>{
     let local_root=dir.join(".vis/horizon-engine");
     if source.starts_with(&local_root) {
         if crate::horizon_download::verify_managed_build(&source)?!=true{
-            return Err("Motor Horizon de la instancia sin comprobante SHA-256".into());
+            return Err("Motor VIS Nexo Rust de la instancia sin comprobante SHA-256".into());
         }
         return Ok(source.to_string_lossy().into_owned());
     }
@@ -405,10 +405,10 @@ pub fn relocate_imported(dir:&Path,ins:&mut Instance)->Result<(),String>{
     if ins.engine!="horizon"{return Ok(());}
     let root=dir.join(".vis/horizon-engine");
     let old:Installed=serde_json::from_slice(
-        &fs::read(marker(dir)).map_err(|_|"Falta el manifiesto Horizon de la instancia")?
-    ).map_err(|_|"Manifiesto Horizon inválido")?;
+        &fs::read(marker(dir)).map_err(|_|"Falta el manifiesto VIS Nexo Rust de la instancia")?
+    ).map_err(|_|"Manifiesto VIS Nexo Rust inválido")?;
     if old.minecraft!=ins.version || old.lock_sha256.len()!=64 {
-        return Err("No coincide el manifiesto Horizon de la instancia".into());
+        return Err("No coincide el manifiesto VIS Nexo Rust de la instancia".into());
     }
     let mut matches=Vec::new();
     for entry in fs::read_dir(root).map_err(|e|e.to_string())?.take(16).flatten(){
@@ -419,7 +419,7 @@ pub fn relocate_imported(dir:&Path,ins:&mut Instance)->Result<(),String>{
             matches.push(candidate);
         }
     }
-    if matches.len()!=1{return Err("No se encontró un motor Horizon único y verificado dentro de la instancia".into());}
+    if matches.len()!=1{return Err("No se encontró un motor VIS Nexo Rust único y verificado dentro de la instancia".into());}
     let base=dir.join(".vis/minecraft-base");
     let client=base.join(".vis/runtime/versions").join(&ins.version)
         .join(format!("{}.jar",ins.version));
@@ -479,7 +479,7 @@ pub fn prepare(app:&AppHandle,dir:&Path,ins:&Instance)->Result<Probe,String>{
     // Optional JDK 25 path selected by the user, not the Java runtime in-game.
     if !ins.java_path.is_empty(){
         let home=Path::new(&ins.java_path);
-        if !home.is_absolute()||!home.is_dir(){return Err("Para Horizon, Ruta Java debe ser el directorio JDK 25".into())}
+        if !home.is_absolute()||!home.is_dir(){return Err("Para VIS Nexo Rust, Ruta Java debe ser el directorio JDK 25".into())}
         cmd.arg("--java-home").arg(home);
     }
     let log_path=dir.join(".vis").join("horizon-prepare.log");
@@ -500,8 +500,8 @@ pub fn prepare(app:&AppHandle,dir:&Path,ins:&Instance)->Result<Probe,String>{
                         }
                         if let Some(error)=v["error"].as_str(){last_error=error.chars().take(240).collect();}
                         let detail=v["message"].as_str().or_else(||v["error"].as_str())
-                            .unwrap_or("Preparando recursos Horizon").chars().take(180).collect();
-                        let _=app.emit("minecraft-progress",Progress{stage:"Horizon Rust Edition".into(),completed,total:100,detail});
+                            .unwrap_or("Preparando recursos VIS Nexo Rust").chars().take(180).collect();
+                        let _=app.emit("minecraft-progress",Progress{stage:"VIS Nexo Rust Rust Edition".into(),completed,total:100,detail});
                     }
                 },
                 Err(error)=>{read_error=Some(error.to_string());break;}
@@ -510,12 +510,12 @@ pub fn prepare(app:&AppHandle,dir:&Path,ins:&Instance)->Result<Probe,String>{
     }
     if read_error.is_some(){let _=child.kill();}
     let status=child.wait().map_err(|e|e.to_string())?;
-    if let Some(error)=read_error{return Err(format!("No se pudo leer progreso Horizon: {error}"));}
-    if !status.success(){return Err(format!("Horizon no pudo preparar recursos: {last_error}. Log: {}",log_path.display()))}
+    if let Some(error)=read_error{return Err(format!("No se pudo leer progreso VIS Nexo Rust: {error}"));}
+    if !status.success(){return Err(format!("VIS Nexo Rust no pudo preparar recursos: {last_error}. Log: {}",log_path.display()))}
     let verify=Command::new(executable(&folder,"horizon-prepare"))
         .current_dir(&folder).arg("--check").arg("--output").arg(resources(dir)).status()
         .map_err(|e|e.to_string())?;
-    if !verify.success(){return Err("Horizon no verificó sus recursos preparados".into())}
+    if !verify.success(){return Err("VIS Nexo Rust no verificó sus recursos preparados".into())}
     let record=Installed{build:prep["horizon"].as_str().unwrap_or("unknown").into(),minecraft:ins.version.clone(),
         build_dir:ins.horizon_build_dir.clone(),lock_sha256:lock_hash(&folder)?,
         launch_api:prep["launch_api"].as_str().unwrap_or("").into(),
@@ -558,7 +558,7 @@ pub fn launch_shared_with_skin(app:&AppHandle,dir:&Path,ins:&Instance,session_fi
 }
 fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,game_dir:&Path,offline_skin:Option<&Path>)->Result<LaunchResult,String>{
     let probe=inspect(dir,ins)?;
-    if !probe.resources_ready{return Err("Prepará y verificá los recursos de Horizon antes de jugar".into())}
+    if !probe.resources_ready{return Err("Prepará y verificá los recursos de VIS Nexo Rust antes de jugar".into())}
     // Java and Horizon now share game data per instance by default.
     crate::minecraft::prepare_player_directory(game_dir)?;
     crate::instance_backup::require_clean_restore_state(game_dir)?;
@@ -585,7 +585,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
         // Horizon must retain its game lock if VIS closes while Rust is running.
         crate::minecraft::inherit_game_lock(&mut cmd,&game_run);
         let mut child=cmd.stdin(Stdio::null()).stdout(log.try_clone().map_err(|e|e.to_string())?)
-            .stderr(log).spawn().map_err(|e|format!("Horizon no pudo iniciar: {e}"))?;
+            .stderr(log).spawn().map_err(|e|format!("VIS Nexo Rust no pudo iniciar: {e}"))?;
         let pid=child.id();let log_file=log_path.to_string_lossy().into_owned();
         let emitter=app.clone();let exit_log=log_file.clone();
         thread::spawn(move||{
@@ -639,12 +639,12 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     if ins.fullscreen{cmd.arg("--fullscreen");}
     crate::minecraft::inherit_game_lock(&mut cmd,&game_run);
     let mut child=cmd.stdin(Stdio::piped()).stdout(Stdio::from(log.try_clone().map_err(|e|e.to_string())?))
-        .stderr(Stdio::from(log)).spawn().map_err(|e|format!("Horizon no pudo iniciar: {e}"))?;
+        .stderr(Stdio::from(log)).spawn().map_err(|e|format!("VIS Nexo Rust no pudo iniciar: {e}"))?;
     if let Some(mut stdin)=child.stdin.take(){
         if let Err(err)=stdin.write_all(&secret.0){
             secret.0.fill(0);
             let _=child.kill();let _=child.wait();
-            return Err(format!("Sesión Horizon no se pudo entregar: {err}"));
+            return Err(format!("Sesión VIS Nexo Rust no se pudo entregar: {err}"));
         }
     }
     secret.0.fill(0);

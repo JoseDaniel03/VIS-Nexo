@@ -55,7 +55,7 @@ pub(crate) async fn mobile_mcrust_launch(
     let instance = read_instances(&instances_file(&app, &owner)?)?
         .into_iter().find(|i| i.id == id).ok_or("La instancia no pertenece a esta cuenta")?;
     if instance.engine != "horizon" || instance.version != "26.3" || instance.loader != "vanilla" {
-        return Err("McRust Android admite Horizon 26.3 Vanilla".into());
+        return Err("McRust Android admite VIS Nexo Rust 26.3 Vanilla".into());
     }
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let (contract, apk) = tauri::async_runtime::spawn_blocking(move || mcrust_catalog::obtain(&cache))
