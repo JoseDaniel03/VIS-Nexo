@@ -34,6 +34,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"
+      VIS_MCRUST_CHANNEL: preview
       VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
     steps:
       - uses: actions/checkout@v4
@@ -155,6 +156,7 @@ jobs:
     env:
       CI: "true"
       RUST_BACKTRACE: "1"
+      VIS_MCRUST_CHANNEL: preview
       NDK_VERSION: "27.2.12479018"
     steps:
       - name: Checkout VIS Nexo feature branch
@@ -302,6 +304,7 @@ jobs:
           Vista previa de integración — NO release estable.
           - PC: Actualizar / reparar busca el último motor Rust compartido verificado.
           - No se puede preparar una instancia mientras esté abierta.
+          - Esta preview de Nexo admite el canal de prueba firmado del motor.
           - Android: Instalar / Jugar descarga el APK del mismo catálogo que PC.
           - Las comprobaciones automáticas de servicios no muestran avisos repetidos.
           - Catálogo de mods: consulta/diagnóstico, sin conversión automática Fabric a Rust.

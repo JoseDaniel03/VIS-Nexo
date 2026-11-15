@@ -460,7 +460,7 @@ fn fork_assets_match_contract(
     Ok(())
 }
 fn fork_release<'a>(releases:&'a [ForkRelease],asset_name:&str)->Result<&'a ForkRelease,String>{
-    releases.iter().find(|r| !r.draft && !r.prerelease && fork_tag_valid(&r.tag_name) &&
+    releases.iter().find(|r| shared_mcrust_catalog::accepts_release(r.draft,r.prerelease) && fork_tag_valid(&r.tag_name) &&
         r.assets.iter().any(|a|a.name=="vis-mcrust-release.json") &&
         r.assets.iter().any(|a|a.name==asset_name &&
             a.browser_download_url==format!(

@@ -5,6 +5,11 @@ use std::{collections::BTreeMap,fs,io::{Read,Write},path::{Path,PathBuf},time::D
 const REPO:&str="JoseDaniel03/horizon-VISNEXO";
 pub const PACKAGE:&str="com.visstudios.mcrust";
 const APK:&str="vis-horizon-android-arm64.apk";
+/// Only the explicitly built preview launcher may select a prerelease engine.
+pub fn accepts_release(draft:bool,prerelease:bool)->bool {
+ !draft && (!prerelease || matches!(option_env!("VIS_MCRUST_CHANNEL"),Some("preview")))
+}
+
 #[derive(Clone,Deserialize,Serialize)]
 pub struct Target {pub asset:String,pub sha256:String,pub size:u64,#[serde(default)]pub package:String,#[serde(default)]pub version_code:i64,#[serde(default)]pub certificate_sha256:String}
 #[derive(Clone,Deserialize,Serialize)]
@@ -49,7 +54,7 @@ pub fn obtain(cache:&Path)->Result<(Contract,PathBuf),String>{
  if bytes.len()>2*1024*1024{return Err("Catálogo demasiado grande".into());}
  let releases:Vec<Release>=serde_json::from_slice(&bytes).map_err(|_|"Catálogo del motor inválido")?;
  for release in releases {
-  if release.draft||release.prerelease||!release.tag_name.starts_with("visgame-"){continue;}
+  if !accepts_release(release.draft,release.prerelease)||!release.tag_name.starts_with("visgame-"){continue;}
   let Some(manifest)=release.assets.iter().find(|a|a.name=="vis-mcrust-release.json")else{continue};
   let raw=verified_bytes(&http,manifest,&release.tag_name,"vis-mcrust-release.json",128*1024)?;
   let contract:Contract=serde_json::from_slice(&raw).map_err(|_|"Manifiesto compartido inválido")?;
@@ -82,6 +87,7 @@ fn valid_file(path:&Path,target:&Target)->Result<bool,String>{
 #[cfg(test)]
 mod tests {
  use super::*;
+ #[test] fn release_channel_never_accepts_drafts(){assert!(!accepts_release(true,false));assert!(!accepts_release(true,true));assert!(accepts_release(false,false));assert_eq!(accepts_release(false,true),matches!(option_env!("VIS_MCRUST_CHANNEL"),Some("preview")));}
  fn release()->Contract {let mut targets=BTreeMap::new();for (platform,name) in [("linux-x86_64","vis-horizon-linux-x86_64.tar.gz"),("windows-x64","vis-horizon-windows-x64.zip"),("android-arm64",APK)] {targets.insert(platform.into(),Target{asset:name.into(),sha256:"a".repeat(64),size:123,package:PACKAGE.into(),version_code:123,certificate_sha256:"b".repeat(64)});}Contract{schema:1,source_repo:format!("https://github.com/{REPO}.git"),engine_commit:"c".repeat(40),minecraft:"26.3".into(),protocol:777,data_version:5023,resource_pack:[97,1],data_pack:[121,0],targets}}
  #[test] fn all_platforms_share_exact_revision(){let c=release();assert!(c.validate("visgame-cccccccccccc").is_ok());assert!(c.validate("visgame-dddddddddddd").is_err());}
  #[test] fn same_version_different_protocol_rejected(){let mut c=release();c.protocol+=1;assert!(c.validate("visgame-cccccccccccc").is_err());}
