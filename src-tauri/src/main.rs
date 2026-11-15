@@ -1840,11 +1840,11 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms
     Ok(result)
 }
 #[tauri::command]
-async fn mods_catalog_search(state:State<'_,Mutex<Backend>>,session:State<'_,Mutex<social::SocialSession>>,query:String,provider:String,target:mod_catalog::Target)->Result<Value,String>{
+async fn mods_catalog_search(state:State<'_,Mutex<Backend>>,session:State<'_,Mutex<social::SocialSession>>,query:String,provider:String,target:mod_catalog::Target)->Result<serde_json::Value,String>{
     {locked(&state)?.username()?;}
     target.validate()?;
     if provider=="curseforge" {
-        return social::social_request(state,session,"/v1/mods/search".into(),"POST".into(),Some(json!({"provider":provider,"query":query,"version":target.minecraft,"engine":target.engine}))).await;
+        return social::social_request(state,session,"/v1/mods/search".into(),"POST".into(),Some(serde_json::json!({"provider":provider,"query":query,"version":target.minecraft,"engine":target.engine}))).await;
     }
     tauri::async_runtime::spawn_blocking(move||mod_catalog::search(&provider,&query,&target)).await.map_err(|e|e.to_string())?
 }

@@ -136,7 +136,7 @@ pub fn inspect(path: &Path, target: Target) -> Result<Assessment, String> {
     let mut names = BTreeSet::new();
     let mut expanded = 0u64;
     for i in 0..zip.len() {
-        let mut entry = zip.by_index(i).map_err(|_| "ZIP ilegible")?;
+        let entry = zip.by_index(i).map_err(|_| "ZIP ilegible")?;
         let name = entry.name().map_err(|_|"Nombre ZIP no válido")?.into_owned();
         if name.contains('\\')
             || entry.enclosed_name().is_none()
