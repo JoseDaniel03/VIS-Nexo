@@ -23,7 +23,7 @@ checks={
  'UI engine selector': 'mc-instance-engine' in ui and 'Minecraft Rust Edition — Horizon' in ui,
  'UI shared instance labels': 'Instalada por' in ui,
  'Horizon installer routed to adapter': 'horizon::prepare(&cloned_app' in main,
- 'Horizon launch routed to adapter': 'horizon::launch(&app' in main,
+ 'Horizon launch routed to adapter': 'horizon::launch_with_skin(&app' in main and 'horizon::launch_shared_with_skin(&app' in main,
 }
 for k,v in checks.items():print(('OK' if v else 'FAIL'),k)
 if not all(checks.values()):raise SystemExit(1)
