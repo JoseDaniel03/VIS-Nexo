@@ -1626,7 +1626,7 @@ fn cancel_download(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,id:u64)
     download_manager::cancel(&app,s.username()?,id)
 }
 #[tauri::command]
-async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Snapshot,String>{
+async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String,refresh_engine:Option<bool>)->Result<Snapshot,String>{
     let (username,instance,data_root,other_instances,curated_mods)={
         let s=locked(&state)?;
         let (u,i)=checked_instance(&s,&project_id,&name,true)?;
@@ -1649,6 +1649,8 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
         download_manager::checkpoint()?;
         if chosen.engine=="horizon" {
             let dir=minecraft::instance_dir(&data_root,&user,&chosen)?;
+            // Installation and resource preparation must not race a running world.
+            let _instance_guard=minecraft::acquire_game_run(&dir)?;
             // Lite launcher: no Horizon game in AppImage or Windows installer.
             // Fetch only when a player installs the Rust instance; the fork
             // publishes both platform binaries and does not contain Mojang IP.
@@ -1656,7 +1658,9 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
             // Reinstall the immutable fork engine if the old *path* vanished,
             // while preserving this instance's saves/configuration untouched.
             // Existing files with invalid hashes are never silently trusted.
-            if chosen.horizon_build_dir.is_empty()
+            // Explicit repair/update selects the latest verified three-platform
+            // release. Ordinary launches keep working with their pinned engine.
+            if refresh_engine.unwrap_or(false) || chosen.horizon_build_dir.is_empty()
                 || chosen.horizon_build_dir==horizon::SOURCE_BUILD_ID
                 || !Path::new(&chosen.horizon_build_dir).is_dir() {
                 let game=horizon_download::install_fork(&cloned_app,&dir,&chosen.version)?;
