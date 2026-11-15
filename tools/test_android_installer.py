@@ -22,6 +22,8 @@ class InstallerTests(unittest.TestCase):
             paths=ET.parse(root/'app/src/main/res/xml/vis_mcrust_paths.xml').getroot()
             self.assertEqual([(e.tag,e.get('path')) for e in paths],[('cache-path','mcrust/')])
             self.assertTrue((root/'app/src/main/java/com/visstudios/nexo/mobile/McRustFileProvider.kt').is_file())
+            bridge=root/'app/src/main/java/com/visstudios/nexo/mobile/NexoDevice.kt'
+            self.assertEqual(bridge.read_text(),(Path(__file__).resolve().parents[1]/'mobile/android/NexoDevice.kt').read_text())
 
     def test_repeated_setup_repairs_legacy_provider_without_duplicate_authorities(self):
         with tempfile.TemporaryDirectory() as temp:

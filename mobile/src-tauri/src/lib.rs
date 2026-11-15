@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use std::{sync::{Mutex, OnceLock}, time::Duration, path::{Path,PathBuf}, fs};
 use tauri::{State, Manager, AppHandle};
 
+mod device;
 mod mcrust;
 mod mcrust_catalog;
 mod microsoft;
@@ -23,6 +24,8 @@ struct Session {
     bearer: Option<String>,
     pending: Option<PendingMfa>,
     epoch: u64,
+    remember: bool,
+    microsoft_refresh:Option<String>,
 }
 #[derive(Clone)]
 struct PendingMfa { username: String, ticket: String }
@@ -30,6 +33,7 @@ struct PendingMfa { username: String, ticket: String }
 #[derive(Serialize)]
 struct AuthView {
     signed_in: bool,
+    remembered: bool,
     mfa_required: bool,
     username: Option<String>,
     message: &'static str,
@@ -37,6 +41,7 @@ struct AuthView {
 fn auth_view(s:&Session)->AuthView{
     AuthView {
         signed_in:s.bearer.is_some(),
+        remembered:s.remember,
         mfa_required:s.pending.is_some(),
         username:s.username.clone().or_else(||s.pending.as_ref().map(|p|p.username.clone())),
         message:if s.bearer.is_some(){"Sesión VIS Ceibo activa"}else if s.pending.is_some(){
@@ -141,7 +146,7 @@ fn password_login(identifier:&str,password:&str)->Result<Value,String>{
     })),None)
 }
 fn login_response(session:&mut Session,value:Value)->Result<AuthView,String>{
-    session.username=None;session.bearer=None;session.pending=None;
+    session.username=None;session.bearer=None;session.pending=None;session.microsoft_refresh=None;
     session.epoch=session.epoch.wrapping_add(1);
     let username=value.get("username").and_then(Value::as_str)
         .ok_or("El servidor no devolvió el usuario autenticado")?;
@@ -190,19 +195,24 @@ async fn mobile_health()->Result<Value,String>{
 }
 #[tauri::command]
 async fn mobile_login(
-    state:State<'_,Mutex<Session>>,identifier:String,password:String
+    state:State<'_,Mutex<Session>>,app:AppHandle,identifier:String,password:String,remember:Option<bool>
 )->Result<AuthView,String>{
+    let _auth=device::auth_gate().lock().await;
     let generation=state.lock().map_err(|_|"Sesión ocupada")?.epoch;
     let value=tauri::async_runtime::spawn_blocking(move||password_login(&identifier,&password))
         .await.map_err(|_|"Se interrumpió el inicio de sesión")??;
-    let mut session=state.lock().map_err(|_|"Sesión ocupada")?;
+    let view={let mut session=state.lock().map_err(|_|"Sesión ocupada")?;
     nonce_guard(&session,generation)?;
-    login_response(&mut session,value)
+    session.remember=remember.unwrap_or(false);
+    login_response(&mut session,value)?};
+    device::persist(&app,&state).await?;
+    Ok(view)
 }
 #[tauri::command]
 async fn mobile_register(
-    state:State<'_,Mutex<Session>>,username:String,password:String,confirm:String
+    state:State<'_,Mutex<Session>>,app:AppHandle,username:String,password:String,confirm:String,remember:Option<bool>
 )->Result<AuthView,String>{
+    let _auth=device::auth_gate().lock().await;
     if password!=confirm{return Err("Las contraseñas no coinciden".into())}
     let generation=state.lock().map_err(|_|"Sesión ocupada")?.epoch;
     let value=tauri::async_runtime::spawn_blocking(move||{
@@ -210,12 +220,16 @@ async fn mobile_register(
         let payload=registration(&username,&password)?;
         request("/v1/accounts/register","POST",Some(&payload),None)
     }).await.map_err(|_|"Registro interrumpido")??;
-    let mut session=state.lock().map_err(|_|"Sesión ocupada")?;
+    let view={let mut session=state.lock().map_err(|_|"Sesión ocupada")?;
     nonce_guard(&session,generation)?;
-    login_response(&mut session,value)
+    session.remember=remember.unwrap_or(false);
+    login_response(&mut session,value)?};
+    device::persist(&app,&state).await?;
+    Ok(view)
 }
 #[tauri::command]
-async fn mobile_mfa(state:State<'_,Mutex<Session>>,code:String)->Result<AuthView,String>{
+async fn mobile_mfa(state:State<'_,Mutex<Session>>,app:AppHandle,code:String)->Result<AuthView,String>{
+    let _auth=device::auth_gate().lock().await;
     if code.is_empty()||code.len()>36{return Err("Código MFA inválido".into());}
     let (pending,generation)={
         let s=state.lock().map_err(|_|"Sesión ocupada")?;
@@ -234,14 +248,17 @@ async fn mobile_mfa(state:State<'_,Mutex<Session>>,code:String)->Result<AuthView
         }
         Ok::<Value,String>(value)
     }).await.map_err(|_|"Verificación MFA interrumpida")??;
-    let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
+    let view={let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
     nonce_guard(&s,generation)?;
-    login_response(&mut s,value)
+    login_response(&mut s,value)?};
+    device::persist(&app,&state).await?;
+    Ok(view)
 }
 #[tauri::command]
-fn mobile_cancel_mfa(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{
+async fn mobile_cancel_mfa(state:State<'_,Mutex<Session>>)->Result<AuthView,String>{
+    let _auth=device::auth_gate().lock().await;
     let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
-    s.pending=None;s.epoch=s.epoch.wrapping_add(1);
+    s.pending=None;s.remember=false;s.epoch=s.epoch.wrapping_add(1);
     Ok(auth_view(&s))
 }
 #[tauri::command]
@@ -398,9 +415,10 @@ async fn mobile_email_verify(code:String)->Result<Value,String>{
 /// the exact VIS Ceibo Argon2id challenge, with optional MFA completion.
 #[tauri::command]
 async fn mobile_password_change(
-    state:State<'_,Mutex<Session>>,
+    state:State<'_,Mutex<Session>>,app:AppHandle,
     current_password:String,password:String,confirm:String,mfa_code:Option<String>
 )->Result<AuthView,String>{
+    let _auth=device::auth_gate().lock().await;
     if password!=confirm || !(10..=128).contains(&password.len())||
        !(10..=128).contains(&current_password.len()){
         return Err("Revisá tu contraseña anterior y la nueva (10–128 caracteres)".into());
@@ -439,26 +457,31 @@ async fn mobile_password_change(
         request("/v1/account/password/change","POST",Some(&payload),Some(&token))
     }).await.map_err(|_|"Cambio de contraseña interrumpido")??;
     let _=result;
-    let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
+    let view={let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
     nonce_guard(&s,generation)?;
-    s.epoch=s.epoch.wrapping_add(1);s.username=None;s.bearer=None;s.pending=None;
-    Ok(auth_view(&s))
+    s.epoch=s.epoch.wrapping_add(1);s.username=None;s.bearer=None;s.pending=None;s.microsoft_refresh=None;s.remember=false;
+    auth_view(&s)};
+    device::call(&app,"clear",String::new()).await?;
+    Ok(view)
 }
 
 #[tauri::command]
-async fn mobile_logout(state:State<'_,Mutex<Session>>,ms:State<'_,Mutex<microsoft::MicrosoftState>>)->Result<AuthView,String>{
+async fn mobile_logout(app:AppHandle,state:State<'_,Mutex<Session>>,ms:State<'_,Mutex<microsoft::MicrosoftState>>)->Result<AuthView,String>{
+    let _auth=device::auth_gate().lock().await;
     ms.lock().map_err(|_|"Microsoft ocupado")?.clear();
     let bearer={
         let mut s=state.lock().map_err(|_|"Sesión ocupada")?;
         s.epoch=s.epoch.wrapping_add(1);
-        s.username=None;s.pending=None;
+        s.username=None;s.pending=None;s.microsoft_refresh=None;s.remember=false;
         s.bearer.take()
     };
+    let cleared=device::call(&app,"clear",String::new()).await;
     if let Some(token)=bearer{
         let _=tauri::async_runtime::spawn_blocking(move||
             request("/v1/auth/logout","POST",Some(&json!({})),Some(&token))
         ).await;
     }
+    cleared?;
     mobile_status(state)
 }
 
@@ -472,8 +495,11 @@ struct MobileInstance {
     version:String,
     loader:String,
     project_id:String,
-    created_at:u64
+    created_at:u64,
+    #[serde(default="default_storage")]
+    storage:String
 }
+fn default_storage()->String{"internal".into()}
 fn instance_root(app:&AppHandle,user:&str)->Result<PathBuf,String>{
     validate_username(user)?;
     let root=app.path().app_data_dir()
@@ -539,12 +565,15 @@ fn mobile_instances(state:State<'_,Mutex<Session>>,app:AppHandle)->Result<Vec<Mo
     read_instances(&instances_file(&app,&user)?)
 }
 #[tauri::command]
-fn mobile_instance_create(
+async fn mobile_instance_create(
     state:State<'_,Mutex<Session>>,app:AppHandle,
-    name:String
+    name:String,storage:Option<String>
 )->Result<MobileInstance,String>{
+    let _auth=device::auth_gate().lock().await;
     let user=current_android_user(&state)?;
     // Do not accept engine, loader, version or free-text project IDs from Android UI.
+    let storage=storage.unwrap_or_else(default_storage);
+    if !matches!(storage.as_str(),"internal"|"external"){return Err("Almacenamiento inválido".into());}
     let project=String::new();
     game_metadata_ok(&name,"horizon","26.3","vanilla",&project)?;
     let path=instances_file(&app,&user)?;
@@ -560,7 +589,7 @@ fn mobile_instance_create(
     let instance=MobileInstance{
         id:id.clone(),name:name.trim().into(),
         engine:"horizon".into(),version:"26.3".into(),loader:"vanilla".into(),
-        project_id:project,created_at
+        project_id:project,created_at,storage
     };
     // Nexo stores the instance profile; McRust owns its actual world data.
     // Avoid placeholder mods/saves/pack folders in the launcher sandbox.
@@ -572,9 +601,10 @@ fn mobile_instance_create(
     Ok(instance)
 }
 #[tauri::command]
-fn mobile_instance_remove(
+async fn mobile_instance_remove(
     state:State<'_,Mutex<Session>>,app:AppHandle,id:String
 )->Result<usize,String>{
+    let _auth=device::auth_gate().lock().await;
     if id.len()!=32||!id.bytes().all(|b|b.is_ascii_hexdigit()){
         return Err("Identificador de instancia incorrecto".into());
     }
@@ -584,8 +614,13 @@ fn mobile_instance_remove(
     let initial=items.len();
     items.retain(|i|i.id!=id);
     if items.len()==initial{return Err("Instancia inexistente".into());}
-    // Deliberately keep instance folders: worlds/backups must NOT be removed
-    // just because a launcher metadata entry was unlinked.
+    let generation=state.lock().map_err(|_|"Sesión ocupada")?.epoch;
+    device::call(&app,"game-delete",json!({"owner":user,"instance":id}).to_string()).await
+      .map_err(|_|"No se pudo borrar la instancia. Actualizá McRust, cerrá el juego y verificá su almacenamiento; la entrada se conserva.".to_string())?;
+    let session=state.lock().map_err(|_|"Sesión ocupada")?;
+    nonce_guard(&session,generation)?;
+    let folder=instance_root(&app,&user)?.join(&id);
+    if folder.exists(){fs::remove_dir_all(&folder).map_err(|_|"McRust borró los mundos, pero falta limpiar el perfil local. Reintentá.")?;}
     persist_instances(&path,&items)?;
     Ok(items.len())
 }
@@ -597,13 +632,14 @@ pub fn run(){
         .manage(Mutex::new(microsoft::MicrosoftState::default()))
         .invoke_handler(tauri::generate_handler![
             mobile_status,mobile_health,mobile_login,mobile_register,
+            device::mobile_device,device::mobile_restore,
             mobile_mfa,mobile_cancel_mfa,mobile_read,mobile_community,
             mobile_recovery_start,mobile_recovery_reset,mobile_logout,
             mobile_action,mobile_email_verify,mobile_password_change,
             mobile_instances,mobile_instance_create,mobile_instance_remove,
             mcrust::mobile_mcrust_launch,
             microsoft::mobile_ms_begin,microsoft::mobile_ms_poll,
-            microsoft::mobile_ms_status,microsoft::mobile_ms_disconnect
+            microsoft::mobile_ms_status,microsoft::mobile_ms_disconnect,microsoft::mobile_ms_restore
         ])
         .run(tauri::generate_context!())
         .expect("VIS Nexo Android no pudo iniciar");
@@ -631,7 +667,7 @@ mod tests {
     #[test]
     fn session_never_exposes_bearer_or_ticket(){
         let s=Session{username:None,bearer:None,pending:Some(PendingMfa{
-            username:"prueba".into(),ticket:"secret".into()}),epoch:2};
+            username:"prueba".into(),ticket:"secret".into()}),epoch:2,remember:false,microsoft_refresh:Some("refresh-secret".into())};
         let wire=serde_json::to_string(&auth_view(&s)).unwrap();
         assert!(wire.contains("mfa_required"));
         assert!(!wire.contains("secret"));

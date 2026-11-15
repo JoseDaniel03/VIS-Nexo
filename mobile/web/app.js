@@ -1,3 +1,4 @@
+import {devicePanel} from './device.js';
 import {refreshServices} from './service-refresh.js';
 /* VIS Nexo Mobile Preview — native Rust bridge only.
    No credential, session token, MFA ticket or encrypted message is stored in JS.
@@ -10,7 +11,7 @@ const notify=document.getElementById('notifications');
 const invoke=window.__TAURI__?.core?.invoke;
 const state={
   auth:{signed_in:false,mfa_required:false,username:null},
-  view:'home',form:'login',busy:false,network:null,
+  view:'home',form:'login',busy:false,network:null,device:null,
   social:null,projects:null,account:null,community:null,communityId:null,instances:null
 };
 const escapeHtml=text=>String(text??'').replace(/[&<>"']/g,ch=>({
@@ -96,6 +97,7 @@ function authPanel(){
       input('identifier',step==='register'?'Nombre de usuario':'@usuario o ID pública','text','username','minlength="3" maxlength="24"')+
       input('password','Contraseña VIS','password',step==='register'?'new-password':'current-password','minlength="10" maxlength="128"')+
       (step==='register'?input('confirm','Confirmar contraseña','password','new-password','minlength="10" maxlength="128"'):'')+'</div>'+
+      '<label><input type="checkbox" name="remember"> Mantener mi sesión iniciada en este teléfono</label>'+
       '<button class="primary" type="submit">'+(step==='register'?'Crear cuenta VIS':'Entrar a VIS Nexo')+'</button>'+
       '<div class="form-links">'+
         '<button type="button" class="link" data-action="'+(step==='register'?'form-login':'form-register')+'">'+
@@ -106,6 +108,7 @@ function authPanel(){
     '<div class="hero-label">IDENTIDAD / VIS CEIBO</div>'+
     '<h1>'+title+'</h1><p class="hint">'+sub+'</p>'+
     '<div class="form-card"><form id="auth-form" data-step="'+step+'">'+body+'</form></div>'+
+    '<button type="button" data-action="device-settings">Permisos de Android</button><button type="button" data-action="device-updates">Buscar actualizaciones</button>'+
     '<div class="security-note">◈ Identidad y tokens protegidos por Rust · HTTPS hacia Cloudflare</div>'+
     '<div class="preview-note">Minecraft Rust Horizon 26.3 es el único motor Android. Nexo verifica y solicita la instalación de McRust al jugar.</div>'+
   '</section>';
@@ -189,12 +192,13 @@ function account(){
     '<button class="danger full" data-action="logout">Cerrar sesión VIS Ceibo</button>';
 }
 function screen(){
+  if(state.device && !state.device.prepared){mount.innerHTML=header()+'<main class="content">'+devicePanel(state.device)+'</main>';return;}
   if(!mount)return;
   if(!state.auth.signed_in){
     mount.innerHTML=header()+authPanel();
   }else{
     mount.innerHTML=header()+'<main class="content">'+({
-      home, friends, projects, account, instances:()=>features.instancePanel()
+      home, friends, projects, account:()=>devicePanel(state.device)+account(), instances:()=>features.instancePanel()
     }[state.view]||home)()+'</main>'+footer();
   }
 }
@@ -206,12 +210,12 @@ async function performAuth(form){
   const fd=new FormData(form),step=form.dataset.step;
   const read=key=>String(fd.get(key)||'').trim();
   if(step==='login'){
-    state.auth=await command('mobile_login',{identifier:read('identifier'),password:String(fd.get('password')||'')});
+    state.auth=await command('mobile_login',{identifier:read('identifier'),password:String(fd.get('password')||''),remember:fd.get('remember')==='on'});
 
   }else if(step==='register'){
     state.auth=await command('mobile_register',{
       username:read('identifier'),password:String(fd.get('password')||''),
-      confirm:String(fd.get('confirm')||'')
+      confirm:String(fd.get('confirm')||''),remember:fd.get('remember')==='on'
     });
 
   }else if(step==='mfa'){
@@ -271,6 +275,11 @@ document.addEventListener('click',async e=>{
     catch(error){toast(error,true)}
     screen();return;
   }
+  if(act?.startsWith('device-')){
+    try{await command('mobile_device',{operation:act.slice(7)});state.device=await command('mobile_device',{operation:'status'});screen();}
+    catch(error){toast(error,true)}
+    return;
+  }
   if(act==='refresh'){void refreshAll({notify:true});return;}
   if(act==='logout'){
     state.busy=true;
@@ -296,7 +305,9 @@ document.addEventListener('change',e=>{
   if(e.target?.dataset?.featureFile)void features.handleFile(e.target);
 });
 (async()=>{
-  try{state.auth=await command('mobile_status');}
+  try{state.device=await command('mobile_device',{operation:'status'});screen();state.auth=await command('mobile_restore');if(state.auth.signed_in)void command('mobile_ms_restore').then(()=>features.refreshMicrosoft()).catch(error=>toast(error,true));}
   catch(error){toast(error,true)}
   screen();void refreshAll();
 })();
+
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void command('mobile_device',{operation:'status'}).then(d=>{state.device=d;screen();}).catch(()=>{});});

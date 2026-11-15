@@ -1,12 +1,12 @@
 //! Microsoft account linking for VIS Nexo Android. Device-code public OAuth;
-//! tokens stay exclusively in Rust memory and NEVER enter the WebView, VIS Ceibo,
-//! intent extras, crash reports, or local profiles. Optional to VIS login.
+//! Tokens never enter WebView, Ceibo, intent extras or profiles. With explicit
+//! remember-session consent, only the refresh credential is stored via Keystore.
 use super::{Session,validate_username};
 use reqwest::{blocking::Client,blocking::Response,Url};
 use serde::Serialize;
 use serde_json::{json,Value};
 use std::{io::Read,sync::Mutex,time::{Duration,Instant}};
-use tauri::State;
+use tauri::{State,AppHandle};
 const MSA_APP_ID: &str = match option_env!("VIS_MSA_CLIENT_ID") {
     Some(value) => value,
     None => "35e5d19a-b607-43cf-b22c-a659847b8e44",
@@ -43,7 +43,7 @@ impl MicrosoftState {
 pub(crate) struct DeviceDisplay{
     user_code:String,verification_uri:String,expires_in:u64,interval:u64,
 }
-enum TokenPoll{Pending,SlowDown,Expired,Denied,Access(String)}
+enum TokenPoll{Pending,SlowDown,Expired,Denied,Access(String,Option<String>)}
 fn client()->Result<Client,String>{
     Client::builder().timeout(Duration::from_secs(25))
       .connect_timeout(Duration::from_secs(8))
@@ -120,7 +120,7 @@ fn poll_access(p:&Pending)->Result<TokenPoll,String>{
         };
     }
     let body=checked(response,"Microsoft OAuth")?;
-    Ok(TokenPoll::Access(field(&body,"access_token")?.to_string()))
+    Ok(TokenPoll::Access(field(&body,"access_token")?.to_string(),body["refresh_token"].as_str().filter(|s|s.len()<=8192).map(str::to_owned)))
 }
 fn exchange_minecraft(token:&str)->Result<(String,String,String,u64),String>{
     let h=client()?;
@@ -164,6 +164,7 @@ fn owner(s:&Session)->Result<(String,u64),String>{
 pub(crate) async fn mobile_ms_begin(
     session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>
 )->Result<DeviceDisplay,String>{
+    let _auth=super::device::auth_gate().lock().await;
     let (name,epoch)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
     let (display,code,ttl)=tauri::async_runtime::spawn_blocking(begin_device)
       .await.map_err(|_|"Autorización Microsoft interrumpida")??;
@@ -190,14 +191,18 @@ pub(crate) fn mobile_ms_status(
     Ok(json!({"status":"idle"}))
 }
 #[tauri::command]
-pub(crate) fn mobile_ms_disconnect(ms:State<'_,Mutex<MicrosoftState>>)->Result<Value,String>{
+pub(crate) async fn mobile_ms_disconnect(app:AppHandle,session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>)->Result<Value,String>{
+    let _auth=super::device::auth_gate().lock().await;
     ms.lock().map_err(|_|"Microsoft ocupado")?.clear();
+    session.lock().map_err(|_|"Sesión ocupada")?.microsoft_refresh=None;
+    super::device::persist(&app,&session).await?;
     Ok(json!({"status":"idle"}))
 }
 #[tauri::command]
 pub(crate) async fn mobile_ms_poll(
-    session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>
+    app:AppHandle,session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>
 )->Result<Value,String>{
+    let _auth=super::device::auth_gate().lock().await;
     let (name,epoch)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
     let pending={
         let mut m=ms.lock().map_err(|_|"Microsoft ocupado")?;
@@ -213,11 +218,12 @@ pub(crate) async fn mobile_ms_poll(
     let key=pending.code.clone();
     let result=tauri::async_runtime::spawn_blocking(move||{
        match poll_access(&pending)?{
-          TokenPoll::Access(access)=>Ok((TokenPoll::Pending,Some(exchange_minecraft(&access)?))),
+          TokenPoll::Access(access,refresh)=>Ok((TokenPoll::Access(String::new(),refresh),Some(exchange_minecraft(&access)?))),
           other=>Ok((other,None))
        }
     }).await.map_err(|_|"Consulta Microsoft interrumpida")?;
     let (cur,cur_epoch)=owner(&*session.lock().map_err(|_|"Cuenta VIS ocupada")?)?;
+    let reply={
     let mut m=ms.lock().map_err(|_|"Microsoft ocupado")?;
     if cur!=name||cur_epoch!=epoch||
       m.pending.as_ref().map(|p|p.code.as_str())!=Some(key.as_str()){
@@ -234,9 +240,10 @@ pub(crate) async fn mobile_ms_poll(
           _minecraft_token:access,
           expires:Instant::now()+Duration::from_secs(ttl.saturating_sub(120).max(30))
         });
-        return Ok(json!({"status":"connected","name":profile_name,"uuid":uuid}));
-    }
-    match state{
+        let refresh=match state {TokenPoll::Access(_,v)=>v,_=>None};
+        session.lock().map_err(|_|"Sesión ocupada")?.microsoft_refresh=refresh;
+        Ok::<Value,String>(json!({"status":"connected","name":profile_name,"uuid":uuid}))
+    }else{match state{
       TokenPoll::Pending=>Ok(json!({"status":"pending","interval":m.pending.as_ref().map_or(5,|p|p.interval)})),
       TokenPoll::SlowDown=>{
         if let Some(p)=m.pending.as_mut(){
@@ -247,8 +254,33 @@ pub(crate) async fn mobile_ms_poll(
       }
       TokenPoll::Denied=>{m.pending=None;Ok(json!({"status":"denied"}))}
       TokenPoll::Expired=>{m.pending=None;Ok(json!({"status":"expired"}))}
-      TokenPoll::Access(_)=>Err("Estado OAuth inválido".into())
-    }
+      TokenPoll::Access(_,_)=>Err("Estado OAuth inválido".into())
+    }}
+    }?;
+    if reply["status"]=="connected"{super::device::persist(&app,&session).await?;}
+    Ok(reply)
+}
+#[tauri::command]
+pub(crate) async fn mobile_ms_restore(app:AppHandle,session:State<'_,Mutex<Session>>,ms:State<'_,Mutex<MicrosoftState>>)->Result<Value,String>{
+    let _auth=super::device::auth_gate().lock().await;
+    let (name,epoch,refresh)={let s=session.lock().map_err(|_|"Sesión ocupada")?;
+      let (name,epoch)=owner(&s)?;(name,epoch,s.microsoft_refresh.clone())};
+    let Some(refresh)=refresh else{return mobile_ms_status(session,ms)};
+    let (profile,refresh)=tauri::async_runtime::spawn_blocking(move||{
+      let response=client()?.post(OAUTH_TOKEN).form(&[("client_id",app_id()?),("grant_type","refresh_token"),("refresh_token",refresh.as_str())])
+        .send().map_err(|_|"Microsoft sin conexión")?;
+      let value=checked(response,"Microsoft OAuth")?;
+      let next=value["refresh_token"].as_str().filter(|t|t.len()<=8192).unwrap_or(&refresh).to_string();
+      Ok::<_,String>((exchange_minecraft(field(&value,"access_token")?)?,next))
+    }).await.map_err(|_|"Restauración Microsoft interrumpida")??;
+    let (profile_name,uuid,access,ttl)=profile;
+    {let mut s=session.lock().map_err(|_|"Sesión ocupada")?;
+      super::nonce_guard(&s,epoch)?;s.microsoft_refresh=Some(refresh);}
+    {let mut m=ms.lock().map_err(|_|"Microsoft ocupado")?;
+      m.verified=Some(Verified{owner:name,epoch,name:profile_name.clone(),uuid:uuid.clone(),_minecraft_token:access,
+        expires:Instant::now()+Duration::from_secs(ttl.saturating_sub(120).max(30))});}
+    super::device::persist(&app,&session).await?;
+    Ok(json!({"status":"connected","name":profile_name,"uuid":uuid}))
 }
 #[cfg(test)]
 mod tests{

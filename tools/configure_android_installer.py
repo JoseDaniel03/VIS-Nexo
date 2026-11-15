@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Add the narrowly scoped APK installer after `tauri android init`."""
 from pathlib import Path
+import shutil
 import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 ANDROID = 'http://schemas.android.com/apk/res/android'
@@ -35,6 +36,7 @@ def configure(root):
     source = root / 'app/src/main/java' / Path(*package.split('.')) / 'McRustFileProvider.kt'
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_text('package ' + package + '\n\nclass McRustFileProvider : androidx.core.content.FileProvider()\n', encoding='utf-8')
+    shutil.copyfile(ROOT / 'mobile/android/NexoDevice.kt', source.parent / 'NexoDevice.kt')
     tree.write(path, encoding='utf-8', xml_declaration=True)
     paths = root / 'app/src/main/res/xml/vis_mcrust_paths.xml'
     paths.parent.mkdir(parents=True, exist_ok=True)

@@ -134,7 +134,8 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
           '<div class="small-row">'+button('ms-poll','Comprobar autorización')+
             button('ms-disconnect','Cancelar')+'</div>'
         :button('ms-begin','Conectar con Microsoft'))+
-      '<p class="tiny-note">La verificación de Minecraft Premium depende de Microsoft y Mojang. Jugar en servidores premium desde Android requiere todavía un traspaso de sesión seguro al motor.</p>'+
+      '<p class="tiny-note">'+(state.auth.remembered?'La vinculación se conserva cifrada en este teléfono. ':'La vinculación dura mientras Nexo está abierto. Marcá Mantener sesión al ingresar para conservarla. ')+
+      'La verificación de Minecraft Premium depende de Microsoft y Mojang. Jugar en servidores premium desde Android requiere todavía un traspaso de sesión seguro al motor.</p>'+
       '</section>'+
       '<section class="mobile-panel"><div class="section-title">Editar perfil</div>'+
       '<form data-feature="display-name" class="inline-form">'+
@@ -232,6 +233,8 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
       '<p class="muted">Minecraft Rust VIS Nexo 26.3 · Vanilla. La versión y el motor se configuran automáticamente. Al tocar Instalar / Jugar, Nexo descarga la edición Android compatible con PC y Android solicita confirmar la instalación.</p>'+
       '<form data-feature="instance-create" class="inline-form">'+
       formInput('name','Nombre de instancia','text',64)+
+      '<label>Guardar los datos del juego</label>'+selectable('storage','internal',[['internal','Almacenamiento interno'],['external','Almacenamiento externo de la app']])+
+      '<p class="tiny-note">Se elige al crear la instancia. No mueve mundos existentes. Android administra la instalación de la APK.</p>'+
       '<div class="tiny-note">Motor: VIS Nexo Rust · versión 26.3 · Vanilla (fijos)</div>'+
       '<button class="primary" type="submit">Crear instancia Rust</button></form></section>'+
       '<section class="mobile-panel"><div class="section-title">Mis instancias Rust · '+list.length+'</div>'+
@@ -241,7 +244,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         '<div class="muted">Minecraft '+E(i.version)+' · '+E(i.loader)+
         (i.project_id?' · '+E(i.project_id):'')+'</div>'+
         '<div class="small-row"><span class="tiny-note">El perfil está en Nexo; los mundos reales se guardan en McRust.</span>'+
-        button('remove-instance','Quitar de lista','data-id="'+safeAttr(i.id)+'"')+'</div>'+
+        button('remove-instance','Eliminar instancia y datos','data-id="'+safeAttr(i.id)+'"')+'</div>'+
         (i.version==='26.3'&&i.loader==='vanilla'
           ?button('play-mcrust','Instalar / Jugar','data-id="'+safeAttr(i.id)+'"')
           :'<p class="muted">Esta instancia antigua no es compatible con McRust 26.3 Vanilla.</p>')+
@@ -394,7 +397,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         message='Proyecto guardado';
       }else if(name==='instance-create'){
         // Rust sets VIS Nexo/26.3/Vanilla. No Java or user-defined engine metadata.
-        await command('mobile_instance_create',{name:value('name')});
+        await command('mobile_instance_create',{name:value('name'),storage:value('storage')});
         await refreshInstances();
         toast('Instancia Rust creada. Tocá Instalar / Jugar para preparar McRust.');
         return true;
@@ -504,9 +507,9 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         clear();state.social=null;state.account=null;state.projects=null;state.community=null;screen();
         toast('Sesiones revocadas');
       }else if(act==='remove-instance'){
-        if(!window.confirm('¿Quitar esta instancia del launcher Android? Sus carpetas y datos NO se borrarán.'))return true;
+        if(!window.confirm('¿Eliminar definitivamente esta instancia, sus mundos, configuraciones y copias? Cerrá McRust antes de continuar. Esta acción no se puede deshacer.'))return true;
         await command('mobile_instance_remove',{id:button.dataset.id});
-        await refreshInstances();toast('Instancia quitada de la lista. Archivos conservados.');
+        await refreshInstances();toast('Instancia y datos eliminados.');
       }else if(act==='view-cosmetics'){
         await refreshCosmetics();
         toast('Avatar y skin sincronizados');

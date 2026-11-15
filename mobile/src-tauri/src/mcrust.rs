@@ -93,17 +93,17 @@ pub(crate) async fn mobile_mcrust_launch(
         let guard = state.lock().map_err(|_| "Sesión ocupada")?;
         nonce_guard(&guard, generation)?;
     }
-    let status = start_game(&app, payload, generation, apk, target, vis_skin).await?;
+    let status = start_game(&app, payload, generation, apk, target, vis_skin, instance.storage).await?;
     Ok(json!({"status":status,"package":mcrust_catalog::PACKAGE}))
 }
 
 #[cfg(not(target_os = "android"))]
-async fn start_game(_app: &AppHandle, _payload: String, _generation: u64, _apk: std::path::PathBuf, _target: mcrust_catalog::Target, _skin: Option<String>) -> Result<String, String> {
+async fn start_game(_app: &AppHandle, _payload: String, _generation: u64, _apk: std::path::PathBuf, _target: mcrust_catalog::Target, _skin: Option<String>, _storage:String) -> Result<String, String> {
     Err("Este inicio requiere un dispositivo Android".into())
 }
 
 #[cfg(target_os = "android")]
-async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std::path::PathBuf, target: mcrust_catalog::Target, skin: Option<String>) -> Result<String, String> {
+async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std::path::PathBuf, target: mcrust_catalog::Target, skin: Option<String>, storage:String) -> Result<String, String> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let session_app = app.clone();
     let window = app.get_webview_window("main").ok_or("Ventana Android no disponible")?;
@@ -116,7 +116,7 @@ async fn start_game(app: &AppHandle, payload: String, generation: u64, apk: std:
                 if session.bearer.is_none() { return Err("La sesión se cerró".into()); }
                 // Native Android returns a safe failure stage without logging
                 // JNI exception contents or the VIS launch payload.
-                let status = android::operate(env, activity, &payload, &apk, &target, skin.as_deref())?;
+                let status = android::operate(env, activity, &payload, &apk, &target, skin.as_deref(), &storage)?;
                 match status.as_str() {
                     "unsupported_android" => Err("McRust necesita Android 9 o superior (API 28) y ARM64".into()),
                     "newer_installed" => Err("McRust instalado es más nuevo que el canal publicado. Actualizá el catálogo o usá el canal correspondiente; Android no permite instalar esta versión anterior encima.".into()),

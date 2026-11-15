@@ -12,6 +12,7 @@ pub fn operate(
     apk: &Path,
     target: &mcrust_catalog::Target,
     skin: Option<&str>,
+    storage: &str,
 ) -> Result<String, String> {
     // A fixed stage identifier is safe to display; never echo the Intent,
     // account token, JNI exception message, or filesystem paths.
@@ -190,6 +191,35 @@ pub fn operate(
             }
             .into());
         }
+        stage = "preparar almacenamiento de la instancia (actualizá McRust y cerrá el juego)";
+        let request: serde_json::Value =
+            serde_json::from_str(payload).expect("native launch payload");
+        let settings=serde_json::json!({"owner":request["owner"],"instance":request["instance"],"storage":storage}).to_string();
+        let loader = env
+            .call_method(activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?
+            .l()?;
+        let name = JObject::from(env.new_string("com.visstudios.nexo.mobile.NexoDevice")?);
+        let class = JClass::from(
+            env.call_method(
+                loader,
+                "loadClass",
+                "(Ljava/lang/String;)Ljava/lang/Class;",
+                &[JValue::Object(&name)],
+            )?
+            .l()?,
+        );
+        let op = JObject::from(env.new_string("game-prepare")?);
+        let data = JObject::from(env.new_string(settings)?);
+        env.call_static_method(
+            class,
+            "call",
+            "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[
+                JValue::Object(activity),
+                JValue::Object(&op),
+                JValue::Object(&data),
+            ],
+        )?;
         stage = "abrir NativeActivity de McRust";
         let intent = env.new_object("android/content/Intent", "()V", &[])?;
         let package = JObject::from(env.new_string(mcrust_catalog::PACKAGE)?);

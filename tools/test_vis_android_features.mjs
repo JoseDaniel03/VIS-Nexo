@@ -111,12 +111,12 @@ await features.handleForm(form('project-manage',{id:'virgoland',title:'Virgoland
  summary:'Nueva temporada',visibility:'draft'}));
 assert(calls.some(x=>x.args.action==='projects.manage'&&x.args.body.visibility==='draft'));
 
-await features.handleForm(form('instance-create',{name:'Survival móvil'}));
+await features.handleForm(form('instance-create',{name:'Survival móvil',storage:'external'}));
 assert(calls.some(x=>x.name==='mobile_instance_create'&&
-  x.args.name==='Survival móvil'&&Object.keys(x.args).length===1),
-  'Android instance creation must submit only a name; native Rust owns fixed engine metadata');
+  x.args.name==='Survival móvil'&&x.args.storage==='external'&&Object.keys(x.args).length===2),
+  'Android creation submits name and storage only; native Rust owns engine metadata');
 await features.handleAction({dataset:{action:'remove-instance',id:'a'.repeat(32)}});
-assert(calls.some(x=>x.name==='mobile_instance_remove'), 'unlinked instance action is native');
+assert(calls.some(x=>x.name==='mobile_instance_remove'), 'full instance deletion is native');
 await features.handleForm(form('project-staff',{
   project_id:'virgoland',username:'bruno',staff_role:'editor'
 }));

@@ -231,6 +231,8 @@ jobs:
       - name: Configure Nexo-managed McRust installation
         run: |
           python3 -m unittest discover -s tools -p test_android_installer.py
+          node tools/test_mobile_device.mjs
+          node tools/test_vis_android_features.mjs
           python3 tools/configure_android_installer.py
       - name: Build signed-by-Android-debug-key ARM64 APK
         working-directory: mobile
@@ -302,12 +304,18 @@ jobs:
           printf 'Launcher source commit: %s\n' "$GITHUB_SHA" > release/BUILD.txt
           (cd release && sha256sum -- *.zip *.AppImage *.apk > SHA256SUMS && sha256sum -c SHA256SUMS)
           cat > release/NOTAS.txt <<'NOTES'
-          VIS Nexo 2.22.2 (Windows/Linux) / Android 0.4.1
+          VIS Nexo 2.22.2 (Windows/Linux) / Android 0.4.2
           Vista previa de integración — NO release estable.
           - PC: Actualizar / reparar busca el último motor Rust compartido verificado.
           - No se puede preparar una instancia mientras esté abierta.
           - Esta preview de Nexo admite el canal de prueba firmado del motor.
           - Android: Instalar / Jugar descarga el APK del mismo catálogo que PC.
+          - Android: preparación inicial y acceso a permisos/actualizaciones.
+          - Mantener sesión es opcional; credenciales cifradas con Android Keystore.
+          - Microsoft conserva su vinculación con consentimiento; el juego premium
+            sigue pendiente y la identidad social sigue siendo VIS Ceibo.
+          - Nuevas instancias: datos internos o externos de la app (no carpeta libre).
+          - Borrado de mundos requiere el motor nuevo, cerrado y almacenamiento disponible.
           - Las comprobaciones automáticas de servicios no muestran avisos repetidos.
           - Catálogo de mods: consulta/diagnóstico, sin conversión automática Fabric a Rust.
           - Minecraft Rust/Horizon NO viene incluido. La publicación del motor es
@@ -329,4 +337,4 @@ jobs:
             echo "Pre-release $tag already exists; refusing to overwrite an immutable preview."
             exit 0
           fi
-          gh release create "$tag"             release/*.AppImage             release/*.zip             release/*.apk             release/SHA256SUMS             release/NOTAS.txt             release/BUILD.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "VIS Nexo 2.22.2 + Android 0.4.1 · ${GITHUB_SHA:0:12} (preview)"             --notes-file release/NOTAS.txt             --prerelease
+          gh release create "$tag"             release/*.AppImage             release/*.zip             release/*.apk             release/SHA256SUMS             release/NOTAS.txt             release/BUILD.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "VIS Nexo 2.22.2 + Android 0.4.2 · ${GITHUB_SHA:0:12} (preview)"             --notes-file release/NOTAS.txt             --prerelease
