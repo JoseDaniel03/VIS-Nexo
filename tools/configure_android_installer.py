@@ -20,9 +20,21 @@ def configure(root):
     app = manifest.find('application')
     assert app is not None
     authority = '${applicationId}.mcrust.files'
-    if not any(e.get(a('authorities')) == authority for e in app.findall('provider')):
-        provider = ET.SubElement(app, 'provider', {a('name'): 'androidx.core.content.FileProvider', a('authorities'): authority, a('exported'): 'false', a('grantUriPermissions'): 'true'})
-        ET.SubElement(provider, 'meta-data', {a('name'): 'android.support.FILE_PROVIDER_PATHS', a('resource'): '@xml/vis_mcrust_paths'})
+    package = 'com.visstudios.nexo.mobile'
+    provider_name = package + '.McRustFileProvider'
+    # A dedicated subclass avoids manifest-merger collisions with Tauri/plugins.
+    providers = [e for e in app.findall('provider') if e.get(a('authorities')) == authority]
+    provider = providers[0] if providers else ET.SubElement(app, 'provider')
+    for duplicate in providers[1:]: app.remove(duplicate)
+    provider.attrib.update({a('name'): provider_name, a('authorities'): authority,
+                           a('exported'): 'false', a('grantUriPermissions'): 'true'})
+    metadata = [e for e in provider.findall('meta-data') if e.get(a('name')) == 'android.support.FILE_PROVIDER_PATHS']
+    item = metadata[0] if metadata else ET.SubElement(provider, 'meta-data')
+    item.attrib.update({a('name'): 'android.support.FILE_PROVIDER_PATHS', a('resource'): '@xml/vis_mcrust_paths'})
+    for duplicate in metadata[1:]: provider.remove(duplicate)
+    source = root / 'app/src/main/java' / Path(*package.split('.')) / 'McRustFileProvider.kt'
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text('package ' + package + '\n\nclass McRustFileProvider : androidx.core.content.FileProvider()\n', encoding='utf-8')
     tree.write(path, encoding='utf-8', xml_declaration=True)
     paths = root / 'app/src/main/res/xml/vis_mcrust_paths.xml'
     paths.parent.mkdir(parents=True, exist_ok=True)

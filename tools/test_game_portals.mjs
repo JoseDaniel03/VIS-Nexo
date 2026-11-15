@@ -28,4 +28,15 @@ const pending=new Promise(resolve=>{resolveExchange=resolve;});
 const second=createGamePortals(async(name)=>name==='portals_games'?[{pid:10}]:name==='portals_command'?{sharing:false}:pending,social,{},voice,()=>({...state,user:{username:identity}}),error=>{throw Error(error);});
 const work=second.refresh();await new Promise(resolve=>setImmediate(resolve));await second.stop();resolveExchange({events:[{type:'send',to:'bob',body:'stale'}]});await work;
 assert.equal(sends,0,'stopping a bridge must invalidate delayed events');
+social.state=()=>({username:'alice',friends:[{username:'bob',display_name:'Bobby',presence:'online'}]});
+const canonical=portalsSnapshot({...state,friends:[]},social,voice);
+assert.equal(canonical.friends[0].username,'bob','use the authenticated cloud contacts when the local UI snapshot is empty');
+social.state=()=>({username:'bruno',friends:[{username:'secret_friend'}]});
+assert.deepEqual(portalsSnapshot(state,social,voice).friends,[],'a stale cloud identity must never supply another account contacts');
 console.log('VIS Portals: bounded snapshots, offline privacy, account switch and stopped-session isolation passed');
+
+let syncs=0;social.online=()=>false;social.sync=async()=>syncs++;
+const reconnect=createGamePortals(async(name)=>name==='portals_games'?[{pid:21}]:{events:[{type:'refresh'},{type:'send',to:'bob',body:'blocked'}]},social,{},voice,()=>({...state,user:{username:'alice'}}),error=>{throw Error(error);});
+await reconnect.refresh();await reconnect.stop();
+assert.equal(syncs,1,'reconnect remains usable while network actions are disabled');
+assert.equal(sends,0,'offline refresh must not enable message delivery');

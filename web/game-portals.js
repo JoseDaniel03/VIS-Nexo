@@ -4,10 +4,15 @@ const clip=(value,max)=>String(value??'').slice(0,max);
 const isOnline=social=>typeof social.online==='function'?social.online():social.connected();
 const accountName=/^[a-z0-9_]{3,24}$/;
 export function portalsSnapshot(state,social,voice,options={}){
- const connected=isOnline(social);
  const username=state.user?.username||'';
+ const cloud=social.state?.();
+ const sameAccount=!cloud?.username||cloud.username===username;
+ const connected=isOnline(social)&&sameAccount;
+ // Cloud state is authoritative; the launcher's local snapshot can be replaced
+ // by instance operations before the next UI merge.
+ const contacts=cloud?.username===username?(cloud.friends||[]):(state.friends||[]);
  const query=clip(options.query,64).toLowerCase();
- const friends=connected?(state.friends||[]).filter(f=>accountName.test(f.username)&&
+ const friends=connected?contacts.filter(f=>accountName.test(f.username)&&
   [f.username,f.alias,f.display_name,f.public_handle].join(' ').toLowerCase().includes(query))
   .sort((a,b)=>Number(b.presence==='online')-Number(a.presence==='online')||String(a.alias||a.display_name||a.username).localeCompare(String(b.alias||b.display_name||b.username)))
   .slice(0,40).map(f=>({username:f.username,name:clip(f.alias||f.display_name||f.username,64),handle:clip(f.public_handle||f.username,24),presence:['online','away','busy'].includes(f.presence)?f.presence:'offline',status:clip(f.custom_status,100)})):[];
@@ -19,7 +24,7 @@ export function portalsSnapshot(state,social,voice,options={}){
   friends,messages,world_sharing:connected&&options.sharing===true,
   invitations:connected?social.worldInvitations().slice(0,2).map(i=>({id:clip(i.id,100),sender:clip(i.sender,24)})):[],
   auto_pause:options.autoPause!==false,hotkey:options.hotkey||'F8',quiet:social.state()?.presence==='busy',
-  notice:latest?{id:clip(latest.id||latest.created,80),from:clip(latest.from,24)}:null,error:clip(options.error,150),
+  notice:latest?{id:clip(latest.id||latest.created,80),from:clip(latest.from,24)}:null,error:clip(options.error||social.network?.().error,150),
   voice:connected?voice.status():{connected:false,muted:true,deaf:false},presence:connected?(social.state()?.presence||'online'):'offline'};
  while(encoder.encode(JSON.stringify(snapshot)).length>11500&&snapshot.messages.length)snapshot.messages.shift();
  while(encoder.encode(JSON.stringify(snapshot)).length>11500&&snapshot.friends.length)snapshot.friends.pop();
@@ -64,9 +69,14 @@ export function createGamePortals(command,social,worlds,voice,view,onError,onSet
      const snapshot=portalsSnapshot(view(),social,voice,{query:queries.get(game.pid),selected:selections.get(game.pid),sharing:worldStatus.get(game.pid)?.sharing,
       autoPause:localStorage.getItem('vis-portals-autopause')!=='false',hotkey:localStorage.getItem('vis-portals-hotkey')||'F8',error:lastError});
      const result=await command('portals_exchange',{pid:game.pid,snapshot});
-     if(!current(identity,epoch)||!isOnline(social))continue;
+     if(!current(identity,epoch))continue;
      lastError='';failures.delete(game.pid);
      for(const event of result.events||[]){
+      if(event.type==='refresh'){
+       if(typeof social.sync==='function')void social.sync();
+       continue;
+      }
+      if(!isOnline(social))continue;
       const send=task=>dispatch(task,identity,epoch);
       if(event.type==='search')queries.set(game.pid,clip(event.query,64).toLowerCase());
       if(event.type==='select')selections.set(game.pid,clip(event.username,24));

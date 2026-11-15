@@ -98,7 +98,9 @@ jobs:
           fi
           grep -q 'android.permission.INTERNET' "$manifest"
       - name: Configure Nexo-managed McRust installation
-        run: python3 tools/configure_android_installer.py
+        run: |
+          python3 -m unittest discover -s tools -p test_android_installer.py
+          python3 tools/configure_android_installer.py
       - name: Build signed-by-Android-debug-key ARM64 APK
         working-directory: mobile
         shell: bash

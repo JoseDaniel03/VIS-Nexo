@@ -229,10 +229,10 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const list=all.filter(i=>i.engine==='horizon');
     const legacyCount=all.length-list.length;
     return '<section class="mobile-panel"><div class="section-title">Nueva instancia Rust</div>'+
-      '<p class="muted">Minecraft Rust Horizon 26.3 · Vanilla. La versión y el motor se configuran automáticamente. Al tocar Instalar / Jugar, Nexo descarga la edición Android compatible con PC y Android solicita confirmar la instalación.</p>'+
+      '<p class="muted">Minecraft Rust VIS Nexo 26.3 · Vanilla. La versión y el motor se configuran automáticamente. Al tocar Instalar / Jugar, Nexo descarga la edición Android compatible con PC y Android solicita confirmar la instalación.</p>'+
       '<form data-feature="instance-create" class="inline-form">'+
       formInput('name','Nombre de instancia','text',64)+
-      '<div class="tiny-note">Motor: Horizon Rust · versión 26.3 · Vanilla (fijos)</div>'+
+      '<div class="tiny-note">Motor: VIS Nexo Rust · versión 26.3 · Vanilla (fijos)</div>'+
       '<button class="primary" type="submit">Crear instancia Rust</button></form></section>'+
       '<section class="mobile-panel"><div class="section-title">Mis instancias Rust · '+list.length+'</div>'+
       (list.length?list.map(i=>
@@ -393,7 +393,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         await nativeAction('projects.manage',project);
         message='Proyecto guardado';
       }else if(name==='instance-create'){
-        // Rust sets Horizon/26.3/Vanilla. No Java or user-defined engine metadata.
+        // Rust sets VIS Nexo/26.3/Vanilla. No Java or user-defined engine metadata.
         await command('mobile_instance_create',{name:value('name')});
         await refreshInstances();
         toast('Instancia Rust creada. Tocá Instalar / Jugar para preparar McRust.');

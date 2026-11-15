@@ -104,6 +104,10 @@ export function socialPollDelay(chatOpen,failures=0){
   const attempts=Math.min(4,Math.max(0,Number(failures)||0));
   return Math.min(45000,base*2**attempts);
 }
+// A peer-key warning does not mean the successful state fetch was offline.
+export function socialNetworkReady(authenticated, status) {
+  return !!authenticated && (status==='connected'||status==='security_warning');
+}
 export function createSocialRemote(command, onUpdate, onStatus) {
   let state = null, keys = null, privateDb = null, currentUser = '';
   let messages = [], busy = false, interval = null, lastHeartbeat = 0;
@@ -118,9 +122,9 @@ export function createSocialRemote(command, onUpdate, onStatus) {
   // A peer key change is still checked against its persisted TOFU pin.
   const pinnedPeers=new Map(), derivedKeys=new Map();
   const connected = () => !!(state && privateDb && keys);
-  let networkStatus='disconnected';
-  const status = (value, error = '') => {networkStatus=value;onStatus?.(value,error);};
-  const online = () => connected() && networkStatus==='connected';
+  let networkStatus='disconnected', networkError='';
+  const status = (value, error = '') => {networkStatus=value;networkError=String(error||'');onStatus?.(value,error);};
+  const online = () => socialNetworkReady(connected(), networkStatus);
   const rpc = (path, method = 'GET', body = null) => command('social_request',
     { path, method, body });
   function stopRealtime(){
@@ -695,7 +699,7 @@ export function createSocialRemote(command, onUpdate, onStatus) {
     if (!connected() || state.role !== 'super_admin') throw Error('Supercuenta requerida');
     return rpc('/v1/admin/accounts/disable','POST',{username,disabled});
   }
-  return { setGameActive:value=>{const changed=gameActive!==!!value;gameActive=!!value;if(changed&&gameActive)void sync();}, hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, online, friendRequest, acceptFriend, setAlias,
+  return { network:()=>({status:networkStatus,error:networkError}), setGameActive:value=>{const changed=gameActive!==!!value;gameActive=!!value;if(changed&&gameActive)void sync();}, hostWorld, closeWorld, inviteWorld, acceptWorld, declineWorld, worldInvitations:()=>worldInvitations, start, stop, sync, connected, online, friendRequest, acceptFriend, setAlias,
     setPresence, sendMessage, setChatActive, subscribeProject, manageProject, grantStaff,
     setAccountRole, setAccountDisabled, accountInfo, setDisplayName, setPublicHandle, getAvatar, uploadAvatar, getSkin, uploadSkin, deleteSkin,
     projectCommunity,requestProjectJoin,projectMember,reviewProjectJoin,setProjectPolicy,projectMedia,globalAdmin,
