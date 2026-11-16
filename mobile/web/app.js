@@ -275,6 +275,13 @@ document.addEventListener('click',async e=>{
     catch(error){toast(error,true)}
     screen();return;
   }
+  if(act==='device-diagnostics'){
+    try{
+      const result=await command('mobile_device',{operation:'diagnostics'});
+      diagnostics.open({platform:'Android ARM64',system:'VIS Nexo Rust',stage:'Último cierre del juego',error:result.report});
+    }catch(error){toast(error,true)}
+    return;
+  }
   if(act?.startsWith('device-')){
     try{await command('mobile_device',{operation:act.slice(7)});state.device=await command('mobile_device',{operation:'status'});screen();}
     catch(error){toast(error,true)}

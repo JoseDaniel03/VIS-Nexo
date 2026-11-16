@@ -46,7 +46,7 @@ pub(crate) async fn call(
 pub(crate) async fn mobile_device(app: AppHandle, operation: String) -> Result<Value, String> {
     if !matches!(
         operation.as_str(),
-        "status" | "onboarding" | "installer" | "settings" | "updates"
+        "status" | "onboarding" | "installer" | "settings" | "updates" | "diagnostics"
     ) {
         return Err("Operación de dispositivo no permitida".into());
     }

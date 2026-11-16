@@ -79,6 +79,13 @@ object NexoDevice {
                 check(result?.getBoolean("ok") == true) { "Close McRust and verify storage" }
                 return "{}"
             }
+            "diagnostics" -> {
+                val provider = activity.packageManager.resolveContentProvider("com.visstudios.mcrust.worlds", 0)
+                require(provider?.packageName == "com.visstudios.mcrust") { "Actualizá el motor Rust para leer el diagnóstico" }
+                val result = activity.contentResolver.call(Uri.parse("content://com.visstudios.mcrust.worlds"), "diagnostics", null, null)
+                check(result?.getBoolean("ok") == true) { "El motor instalado no ofrece diagnóstico. Actualizalo desde Jugar." }
+                return JSONObject().put("report", result?.getString("report")).toString()
+            }
             "status" -> return JSONObject().put("prepared", prefs.getBoolean("prepared", false))
                 .put("installer_allowed", activity.packageManager.canRequestPackageInstalls())
                 .put("remembered", secret.isFile).toString()

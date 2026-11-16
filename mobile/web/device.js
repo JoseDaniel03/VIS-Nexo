@@ -8,5 +8,6 @@ export function devicePanel(device){
     '<p>La conexión HTTPS no necesita un permiso especial. No pedimos acceso a todos tus archivos. El micrófono se autoriza al usar una función que lo necesite.</p>'+
     '<button type="button" data-action="device-updates">Buscar actualizaciones de Nexo</button>'+
     '<p>Las actualizaciones de McRust se comprueban al pulsar Jugar. Conservá la aplicación instalada para mantener tus mundos.</p>'+
+    '<button type="button" data-action="device-diagnostics">Ver diagnóstico del último cierre del juego</button>'+
     (!device?.prepared?'<button class="primary" type="button" data-action="device-onboarding">Continuar</button>':'')+'</section>';
 }
