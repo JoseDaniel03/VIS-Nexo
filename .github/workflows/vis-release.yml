@@ -1,87 +1,17 @@
-# VIS Nexo signed public releases. Publish only after configuring a trusted signing key.
-name: VIS Nexo - Publicar versión firmada
+# SECURITY HOLD: Legacy release pipeline bundled installers and read an updater signing key.
+# It must not publish software while VIS Nexo commits to portable-only distribution.
+# Replace with reviewed, protected-environment portable EXE/AppImage signing workflow.
+name: VIS Nexo - Legacy installer pipeline disabled
 on:
-  push:
-    tags:
-      - 'nexo-v*'
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
-  release:
-    name: VIS Nexo ${{ matrix.platform }}
-    if: startsWith(github.ref, 'refs/tags/nexo-v')
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux
-            runner: ubuntu-24.04
-            bundles: appimage,deb
-          - platform: windows
-            runner: windows-2022
-            bundles: nsis
-    env:
-      PYTHONUTF8: "1"
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      VIS_UPDATER_PUBKEY: ${{ vars.VIS_UPDATER_PUBKEY }}
-      VIS_UPDATE_MANIFEST_URL: ${{ vars.VIS_UPDATE_MANIFEST_URL }}
-      VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
-      # For identical signed Linux/Windows builds set a full upstream Git SHA.
-      VIS_HORIZON_REF: ${{ vars.VIS_HORIZON_COMMIT }}
+  release-disabled:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Validate release signing configuration
-        shell: bash
+      - name: Explain safety hold
         run: |
-          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo 'Missing secret TAURI_SIGNING_PRIVATE_KEY'; exit 1; }
-          test -n "$VIS_UPDATER_PUBKEY" || { echo 'Missing variable VIS_UPDATER_PUBKEY'; exit 1; }
-          [[ "$VIS_UPDATE_MANIFEST_URL" =~ ^https:// ]] || { echo 'Configure public HTTPS VIS_UPDATE_MANIFEST_URL (private GitHub Releases are not public)'; exit 1; }
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-      - name: Linux native libraries
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf libasound2-dev libudev-dev
-      - run: npm ci
-      - name: JavaScript and bridge verification
-        run: |
-          npm run validate
-          npm run check:release
-      - name: Verify Rust backend and tests
-        run: |
-          cargo check -p vslauncher-tauri --all-targets --locked
-          cargo test --workspace --bins --lib --locked
-      - name: Require a pinned upstream Horizon commit for public release
-        shell: bash
-        run: |
-          [[ "$VIS_HORIZON_REF" =~ ^[0-9a-fA-F]{40}$ ]] || { echo 'Configure VIS_HORIZON_COMMIT (40 hex SHA) to ship the same game source on Windows/Linux'; exit 1; }
-      - name: Build Minecraft Horizon GAME from the pinned official Rust sources
-        run: npm run horizon:source
-      - name: Verify bundled game's source manifest
-        run: npm run horizon:verify
-      - name: Build, sign and attach release artifacts
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: VIS Nexo ${{ github.ref_name }}
-          releaseBody: 'Instaladores Linux/Windows y actualización firmada. Se conservan perfiles y mundos existentes.'
-          releaseDraft: false
-          prerelease: false
-          uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
-          args: --bundles ${{ matrix.bundles }}
+          echo 'Legacy installer releases are disabled for VIS Nexo security.'
+          echo 'Use the manual unsigned build only for local testing.'
+          echo 'Release must wait for a SignPath-approved signed portable channel.'

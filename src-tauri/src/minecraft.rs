@@ -582,7 +582,8 @@ fn extract_natives(tasks:&[Task],dir:&Path)->Result<(),String>{
   let mut zip=zip::ZipArchive::new(f).map_err(|e|e.to_string())?;
   for i in 0..zip.len(){let mut entry=zip.by_index(i).map_err(|e|e.to_string())?;
    if entry.is_dir()||entry.size()>100*1024*1024 {continue}
-   let Some(name)=entry.name().split('/').last() else{continue};
+   let entry_name=entry.name().map_err(|e|e.to_string())?.into_owned();
+   let Some(name)=entry_name.split('/').last() else{continue};
    if !name.ends_with(".so")&&!name.ends_with(".dll")&&!name.ends_with(".dylib")&&!name.ends_with(".jnilib"){continue}
    let name=safe_file_name(name)?;let mut out=File::create(dir.join(name)).map_err(|e|e.to_string())?;
    std::io::copy(&mut entry,&mut out).map_err(|e|e.to_string())?;
@@ -1269,7 +1270,7 @@ fn mod_install_order(versions:&[Value])->Result<Vec<usize>,String>{
 
 pub fn install_modrinth(data_root:&Path,username:&str,ins:&Instance,project_id:&str,kind:&str)->Result<Vec<String>,String>{
  if !["mod","resourcepack","shader"].contains(&kind){return Err("Tipo de contenido inválido".into())}
- if kind=="mod"&&ins.loader!="fabric"{return Err("Esta instalación de mods requiere Fabric".into())}
+ if kind=="mod"&&(ins.engine!="java"||ins.loader!="fabric"){return Err("Esta instalación de mods requiere Fabric".into())}
  let c=client()?;let dir=instance_dir(data_root,username,ins)?;
  crate::instance_guard::private_paths(&dir,&["mods","resourcepacks","shaderpacks",".vslauncher"])?;
  let folder=match kind{"mod"=>"mods","resourcepack"=>"resourcepacks",_=>"shaderpacks"};
@@ -1354,7 +1355,7 @@ pub fn install_modrinth(data_root:&Path,username:&str,ins:&Instance,project_id:&
  Ok(planned.into_iter().map(|(name,_,_)|name).collect())
 }
 pub fn import_local(data_root:&Path,username:&str,ins:&Instance,source:&Path,kind:&str)->Result<InstalledFile,String>{
- let folder=match kind{"mod" if ins.loader=="fabric"=>"mods","resourcepack"=>"resourcepacks","shader"=>"shaderpacks",_=>return Err("Tipo de recurso no compatible con esta instancia".into())};
+ let folder=match kind{"mod" if ins.engine=="java"&&ins.loader=="fabric"=>"mods","resourcepack"=>"resourcepacks","shader"=>"shaderpacks",_=>return Err("Tipo de recurso no compatible con esta instancia".into())};
  let name=source.file_name().and_then(|s|s.to_str()).ok_or("Archivo sin nombre")?;safe_file_name(name)?;
  if !(if kind=="mod"{name.ends_with(".jar")}else{name.ends_with(".zip")}){return Err("Formato de archivo incompatible".into())}
  let metadata=fs::metadata(source).map_err(|e|e.to_string())?;if metadata.len()>150*1024*1024{return Err("Archivo mayor a 150 MB".into())}
@@ -1378,7 +1379,7 @@ pub fn list_local(data_root:&Path,username:&str,ins:&Instance)->Result<Vec<Insta
 pub fn toggle_local(data_root:&Path,username:&str,ins:&Instance,kind:&str,name:&str)->Result<String,String>{
  safe_file_name(name)?;
  let (folder,extension)=match kind{
-  "mod" if ins.loader=="fabric"=>("mods",".jar"),
+  "mod" if ins.engine=="java"&&ins.loader=="fabric"=>("mods",".jar"),
   "resourcepack"=>("resourcepacks",".zip"),
   "shader"=>("shaderpacks",".zip"),
   _=>return Err("Este recurso no se puede activar en esta instancia".into()),

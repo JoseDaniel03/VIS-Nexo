@@ -1,6 +1,6 @@
 [package]
 name = "vslauncher-tauri"
-version = "2.19.0"
+version = "2.22.2"
 edition = "2021"
 publish = false
 
@@ -20,7 +20,7 @@ vsui-core = { path = "../legacy/crates/vsui-core" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 sha1 = "0.10"
 rayon = "1.10"
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
+zip = { version = "=9.4.2", default-features = false, features = ["deflate-flate2"] }
 uuid = "1"
 urlencoding = "2.1"
 md5 = "0.7"

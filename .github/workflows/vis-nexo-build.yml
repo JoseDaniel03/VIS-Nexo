@@ -2,10 +2,12 @@ name: VIS Nexo Portable Build (Linux + Windows)
 concurrency:
   group: vis-nexo-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-# This workflow creates distributable Linux/Windows binaries.
-# During VIS Nexo development it must run only when explicitly requested.
+# This workflow creates unsigned portable Linux/Windows binaries.
+# It must run only when explicitly requested; no automatic push releases.
 on:
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   build:
     strategy:
@@ -24,6 +26,8 @@ jobs:
       VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

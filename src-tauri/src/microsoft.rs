@@ -493,6 +493,63 @@ pub(crate) async fn microsoft_upload_skin(
     }).await.map_err(|_|"Carga de skin interrumpida".to_string())?
 }
 
+/// Optional, explicitly approved VIS Ceibo skin -> official Minecraft Java
+/// synchronization. The skin PNG is public image data, not OAuth credentials.
+/// The Minecraft token never leaves Rust. Not invoked automatically on login.
+#[tauri::command]
+pub(crate) async fn microsoft_publish_vis_skin(
+    backend:State<'_,Mutex<Backend>>,ms:State<'_,Mutex<MicrosoftState>>,
+    png:String,variant:String
+)->Result<Value,String>{
+    let identity=premium_identity(&backend,&ms)?;
+    if variant!="classic"&&variant!="slim"{
+        return Err("Seleccioná el modelo de skin clásico o delgado".into());
+    }
+    if png.len()>87500 || !png.starts_with("data:image/png;base64,"){
+        return Err("La skin VIS no es un PNG válido".into());
+    }
+    use base64::Engine;
+    let data=png.strip_prefix("data:image/png;base64,").unwrap_or_default();
+    let bytes=base64::engine::general_purpose::STANDARD.decode(data)
+        .map_err(|_|"La skin VIS tiene datos Base64 inválidos")?;
+    if bytes.len()<33||bytes.len()>65536
+        || !bytes.starts_with(&[137,80,78,71,13,10,26,10])
+        || &bytes[12..16]!=b"IHDR"{
+        return Err("La skin VIS no es un archivo PNG válido".into());
+    }
+    let width=u32::from_be_bytes([bytes[16],bytes[17],bytes[18],bytes[19]]);
+    let height=u32::from_be_bytes([bytes[20],bytes[21],bytes[22],bytes[23]]);
+    if width!=64||![32,64].contains(&height)||
+      bytes[24]!=8||![2,6].contains(&bytes[25]){
+        return Err("Minecraft requiere una skin PNG 64x64 o 64x32 RGB/RGBA".into());
+    }
+    tauri::async_runtime::spawn_blocking(move||{
+        use rand_core::{OsRng,RngCore};
+        use std::io::Write;
+        let mut nonce=[0u8;16];OsRng.fill_bytes(&mut nonce);
+        let boundary=format!("VISNexo{}",uuid::Uuid::from_bytes(nonce).simple());
+        nonce.fill(0);
+        let mut form=Vec::with_capacity(bytes.len()+512);
+        write!(&mut form,
+          "--{boundary}\r\nContent-Disposition: form-data; name=\"variant\"\r\n\r\n{variant}\r\n\
+           --{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"skin.png\"\r\n\
+           Content-Type: image/png\r\n\r\n"
+        ).map_err(|_|"Error al crear el formulario de Minecraft")?;
+        form.extend_from_slice(&bytes);
+        write!(&mut form,"\r\n--{boundary}--\r\n")
+            .map_err(|_|"No se pudo cerrar el formulario Minecraft")?;
+        let http=client()?;
+        let response=http.post("https://api.minecraftservices.com/minecraft/profile/skins")
+            .bearer_auth(&identity.access_token)
+            .header(reqwest::header::CONTENT_TYPE,format!("multipart/form-data; boundary={boundary}"))
+            .body(form).send().map_err(|_|"No se pudo conectar con Minecraft Services")?;
+        if !response.status().is_success(){
+            return Err(format!("Minecraft rechazó la skin VIS (HTTP {})",response.status()));
+        }
+        Ok(public_cosmetics(&owned_profile(&http,&identity)?))
+    }).await.map_err(|_|"Sincronización de skin VIS interrumpida".to_string())?
+}
+
 /// Open only the fixed Microsoft device login URL. On Linux/AppImage the
 /// bundled xdg-open and inherited library paths can break Flatpak browsers
 /// (including Zen), even though xdg-open succeeds from a terminal.

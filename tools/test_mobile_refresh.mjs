@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {refreshServices} from '../mobile/web/service-refresh.js';
+let notices=[],renders=0;
+const state={auth:{signed_in:true,username:'alice'},busy:false};
+const options={state,command:async name=>name==='mobile_health'?{reachable:true,ready:true}:({ok:true}),render:()=>renders++,notify:(...args)=>notices.push(args)};
+for(let i=0;i<5;i++)await refreshServices(options);
+assert.equal(notices.length,0,'automatic HTTPS/cloud checks must remain silent');
+await refreshServices({...options,announce:true});assert.equal(notices.length,1);
+options.command=async name=>name==='mobile_health'?{reachable:true,ready:false,schema:8}:assert.fail('Do not query services requiring newer migrations');
+await refreshServices(options);assert.equal(notices.length,1);assert.equal(state.social,null);
+let finish;
+options.command=()=>new Promise(resolve=>{finish=resolve;});
+const task=refreshServices(options);state.auth={signed_in:true,username:'bob'};finish({reachable:true,ready:true});await task;
+assert.equal(state.social,null,'response belonging to prior identity is discarded');assert.equal(state.busy,false);assert(renders>0);
+console.log('Mobile refresh: quiet automatic checks, explicit feedback and account isolation passed');

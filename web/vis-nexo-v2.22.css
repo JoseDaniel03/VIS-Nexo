@@ -1,0 +1,28 @@
+/* VIS Nexo 2.22: compact Portals actions, responsive chat and destructive confirmations. */
+.social-pane .request-row{
+  display:flex;align-items:center;flex-wrap:wrap;gap:7px;
+  min-width:0;padding:9px 14px;
+}
+.social-pane .request-row>span{min-width:0;flex:1 1 150px;overflow-wrap:anywhere;}
+.social-pane .request-row .mini-add{flex:0 1 auto;}
+.social-pane .mini-add{
+  display:inline-flex;justify-content:center;align-items:center;gap:6px;
+  min-width:0;max-width:100%;min-height:32px;
+  padding:7px 11px;font-size:11px;line-height:1.2;
+  white-space:normal;text-align:center;overflow-wrap:anywhere;
+}
+.social-person .icon-btn{flex:0 0 auto;min-width:28px;min-height:28px;}
+.chat-drawer .chat-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 12px;}
+.chat-drawer .chat-head>b{flex:1 1 120px;min-width:0;overflow-wrap:anywhere;}
+.chat-drawer .chat-head>.chat-world-invite{flex:0 1 auto;max-width:min(100%,190px);}
+.chat-drawer .chat-head>.icon-btn{flex:0 0 auto;margin-left:auto;}
+.chat-drawer .chat-send{min-width:0;}
+.chat-drawer .chat-send input{flex:1 1 auto;min-width:0;width:100%;font-size:12px;min-height:36px;}
+.chat-drawer .chat-send button{flex:0 0 auto;min-width:36px;min-height:36px;display:grid;place-items:center;}
+.modal-small .bulk-confirm-label{min-width:0;max-width:100%;overflow-wrap:anywhere;}
+.modal-small .bulk-confirm-label input{width:100%;min-width:0;}
+@media(max-width:780px){
+  .chat-drawer .chat-head .chat-world-invite{flex:1 1 100%;max-width:100%;}
+  .social-pane .request-row{padding:8px 11px;}
+  .social-pane .mini-add{min-height:34px;}
+}

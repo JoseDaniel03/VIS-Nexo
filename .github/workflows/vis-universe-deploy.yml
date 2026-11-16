@@ -1,0 +1,73 @@
+name: VIS Universe - Cloudflare R2 production
+# Deliberately manual: creating/updating the public catalog is a privileged operation.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vis-universe-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: vis-universe-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test VIS Universe Worker and publication contracts
+        run: |
+          node tools/test_universe_worker.mjs
+          python3 tools/test_cloud_release.py
+      - name: Require production Cloudflare access and an HTTPS catalog URL
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Configure GitHub Actions CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Configure GitHub Actions CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+          test -n "$VIS_CATALOG_URL" || { echo 'Configure GitHub Actions VIS_CATALOG_URL'; exit 1; }
+          node - <<'NODE'
+          const u=new URL(process.env.VIS_CATALOG_URL);
+          if(u.protocol!=='https:'||!u.hostname.endsWith('.workers.dev')||u.pathname!=='/catalog.json'||u.username||u.password||u.search||u.hash) {
+            throw Error('VIS_CATALOG_URL must be the trusted Cloudflare Worker /catalog.json endpoint');
+          }
+          NODE
+      - name: Deploy VIS Universe Worker to Cloudflare with existing R2 binding
+        working-directory: services/universe
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy
+      - name: Verify public catalog response after Cloudflare edge propagation
+        shell: bash
+        env:
+          VIS_CATALOG_URL: ${{ vars.VIS_CATALOG_URL }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error --max-time 12 "$VIS_CATALOG_URL" > /tmp/vis-universe-catalog.json &&
+              node - <<'NODE'
+          const fs=require('node:fs');
+          const m=JSON.parse(fs.readFileSync('/tmp/vis-universe-catalog.json','utf8'));
+          if(m.format_version!==1||!Array.isArray(m.projects))process.exit(1);
+          for(const p of m.projects){
+            if(typeof p.id!=='string'||!p.id||typeof p.name!=='string')process.exit(1);
+          }
+          NODE
+            then
+              echo "VIS Universe catalog reachable; project records verified"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Catalog did not pass production verification'
+          exit 1
+# VIS_PUBLISH_TOKEN must remain a separate secret on the Cloudflare Worker.
+# A successful deploy does not upload projects; publish through an authorized VIS admin.

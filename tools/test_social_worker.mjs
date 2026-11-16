@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import {createHmac} from 'node:crypto';
 import {deflateSync} from 'node:zlib';
 import worker, { VisRealtimeRoom } from '../services/social/worker.mjs';
 
@@ -18,7 +19,12 @@ class D1Database {
       '../services/social/migrations/0007_public_skins.sql',
       '../services/social/migrations/0008_fix_cloud_device_key_unique.sql',
        '../services/social/migrations/0009_realtime_tickets.sql',
-       '../services/social/migrations/0010_public_handles.sql'
+       '../services/social/migrations/0010_public_handles.sql',
+       '../services/social/migrations/0011_project_community.sql',
+       '../services/social/migrations/0012_ceibo_recovery.sql',
+       '../services/social/migrations/0013_mfa_login_gate.sql',
+       '../services/social/migrations/0014_world_invites.sql',
+       '../services/social/migrations/0015_server_voice.sql'
     ]) this.sqlite.exec(readFileSync(new URL(path, import.meta.url), 'utf8'));
   }
   prepare(sql) {
@@ -59,6 +65,49 @@ const env={
     }})
   }
 };
+const recoveryDeliveries=[];
+env.RESEND_API_KEY='re_test_unit_only_not_a_real_secret';
+env.CEIBO_FROM_EMAIL='cuentas@example.org';
+env.CEIBO_MFA_ENCRYPTION_KEY=Buffer.alloc(32,113).toString('base64');
+const realFetch=globalThis.fetch;
+globalThis.fetch=async(url,options)=>{
+  if(String(url)==='https://api.resend.com/emails'){
+    recoveryDeliveries.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({id:'test-mail'}),{status:200});
+  }
+  return realFetch(url,options);
+};
+function lastRecoveryCode(){
+  const mail=recoveryDeliveries.at(-1);
+  const match=mail?.text?.match(/[A-Za-z0-9_-]{43}/);
+  assert(match,'a one-time email recovery code is expected');
+  return match[0];
+}
+function decodeBase32(input){
+  const letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let value=0,bits=0;const out=[];
+  for(const char of input){value=(value<<5)|letters.indexOf(char);bits+=5;
+    if(bits>=8){bits-=8;out.push((value>>>bits)&255);}}
+  return Buffer.from(out);
+}
+function otpFromSecret(secret){
+  const counter=Math.floor(Date.now()/30000);
+  const msg=Buffer.alloc(8);msg.writeUInt32BE(Math.floor(counter/2**32),0);
+  msg.writeUInt32BE(counter>>>0,4);
+  const mac=createHmac('sha1',decodeBase32(secret)).update(msg).digest();
+  const off=mac[19]&15;
+  return String((mac.readUInt32BE(off)&0x7fffffff)%1000000).padStart(6,'0');
+}
+async function enrollMfa(user){
+  const start=await call('/v1/account/mfa/setup',{},user.token);
+  assert.equal(start.status,200,JSON.stringify(start));
+  assert.match(start.data.secret,/^[A-Z2-7]{32}$/);
+  const confirm=await call('/v1/account/mfa/confirm',{code:otpFromSecret(start.data.secret)},user.token);
+  assert.equal(confirm.status,200,JSON.stringify(confirm));
+  assert.equal(confirm.data.recovery_codes.length,8);
+  assert.equal((await call('/v1/account/mfa/status',undefined,user.token)).data.enrolled,true);
+  return confirm.data.recovery_codes;
+}
 const origin = 'https://vis-social.example';
 const to64 = bytes => Buffer.from(bytes).toString('base64');
 async function call(path, body, token) {
@@ -104,7 +153,7 @@ async function account(username) {
 }
 let response = await call('/health');
 assert.equal(response.status, 200, JSON.stringify(response));
-assert.equal(response.data.schema, 10);
+assert.equal(response.data.schema, 15);
 assert.equal((await call('/v1/state')).status, 401);
 
 const alice = await account('alice');
@@ -212,6 +261,7 @@ const png64=png.toString('base64');
 assert.equal((await call('/v1/skins/upload',{mime:'image/webp',data:png64},bob.token)).status,400);
 assert.equal((await call('/v1/skins/upload',{mime:'image/png',data:png64},bob.token)).status,200);
 const charlie=await account('charlie');
+
 const publicSkin=await call('/v1/skins/get',{username:'bob'},charlie.token);
 assert.equal(publicSkin.status,200,'public to authenticated non-friend');
 assert.equal(publicSkin.data.skin,'data:image/png;base64,'+png64);
@@ -293,6 +343,10 @@ assert.equal((await call('/v1/admin/accounts/role',{
 DB.sqlite.prepare("UPDATE social_users SET role='super_admin' WHERE username='alice'").run();
 assert.equal((await call('/v1/account',undefined,alice.token)).data.account.role,'super_admin');
 assert.equal((await call('/v1/admin/projects/upsert',{
+  id:'virgoland',title:'Unauthorized',visibility:'published'
+},alice.token)).status,403,'super administrators must enroll MFA before acting');
+const aliceRecoveryCodes=await enrollMfa(alice);
+assert.equal((await call('/v1/admin/projects/upsert',{
   id:'virgoland',title:'Virgoland',summary:'Project catalog',visibility:'published'
 },alice.token)).status,200);
 let projects=await call('/v1/projects',undefined,bob.token);
@@ -309,6 +363,79 @@ assert.equal((await call('/v1/admin/projects/upsert',{
 assert.equal((await call('/v1/admin/projects/staff',{
   project_id:'virgoland',username:'bob',staff_role:'editor'
 },alice.token)).status,200);
+
+// Community permissions must remain on the server, not in the editable launcher.
+let community=await call('/v1/projects/community',{project_id:'virgoland'},bob.token);
+assert.equal(community.status,200,JSON.stringify(community));
+assert.equal(community.data.can_manage,false);
+assert.equal(community.data.admission,'request');
+assert.equal((await call('/v1/admin/projects/community-policy',{
+ project_id:'virgoland',admission:'request',play_access:'members'
+},bob.token)).status,403,'regular accounts cannot change admission');
+assert.equal((await call('/v1/admin/projects/community-policy',{
+ project_id:'virgoland',admission:'request',play_access:'members'
+},alice.token)).status,200);
+assert.equal((await call('/v1/projects/request-join',{
+ project_id:'virgoland',note:'Me gustaría participar'
+},bob.token)).data.status,'pending');
+community=await call('/v1/projects/community',{project_id:'virgoland'},alice.token);
+assert.equal(community.data.pending.length,1,'manager sees pending join request');
+assert.equal((await call('/v1/admin/projects/review-join',{
+ project_id:'virgoland',username:'bob',action:'approve'
+},bob.token)).status,403);
+assert.equal((await call('/v1/admin/projects/review-join',{
+ project_id:'virgoland',username:'bob',action:'approve'
+},alice.token)).status,200);
+community=await call('/v1/projects/community',{project_id:'virgoland'},bob.token);
+assert.equal(community.data.role,'participant');
+assert.equal(community.data.can_play,true);
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'bob',role:'creator',can_play:true,action:'grant'
+},bob.token)).status,403);
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'bob',role:'content_creator',can_play:false,action:'grant'
+},alice.token)).status,200);
+community=await call('/v1/projects/community',{project_id:'virgoland'},bob.token);
+assert.equal(community.data.role,'content_creator');
+assert.equal(community.data.can_play,false);
+assert.equal((await call('/v1/admin/projects/community-media',{
+ project_id:'virgoland',action:'add',title:'Video inseguro',kind:'video',
+ url:'https://example.com/fake'
+},bob.token)).status,400,'block arbitrary media origins');
+assert.equal((await call('/v1/admin/projects/community-media',{
+ project_id:'virgoland',action:'add',title:'Presentación del proyecto',kind:'video',
+ url:'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+},bob.token)).status,200);
+community=await call('/v1/projects/community',{project_id:'virgoland'},alice.token);
+assert.equal(community.data.media.length,1);
+assert.equal((await call('/v1/admin/accounts/global-admin',{
+ username:'bob',enabled:true
+},bob.token)).status,403,'global admin cannot self-promote');
+assert.equal((await call('/v1/admin/accounts/global-admin',{
+ username:'bob',enabled:true
+},alice.token)).status,200);
+assert.equal((await call('/v1/account',undefined,bob.token)).data.account.global_admin,true);
+assert.equal((await call('/v1/admin/accounts/global-admin',{
+ username:'bob',enabled:false
+},alice.token)).status,200);
+assert.equal((await call('/v1/account',undefined,bob.token)).data.account.global_admin,false);
+// Regression: a delegated project manager must never revoke a creator by lying
+// about the creator's old role in the request body.
+const role_guard_user=await account('role_guard_user');
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'role_guard_user',role:'creator',can_play:false,action:'grant'
+},alice.token)).status,200);
+assert.equal((await call('/v1/admin/projects/staff',{
+ project_id:'virgoland',username:'bob',staff_role:'manager'
+},alice.token)).status,200);
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'role_guard_user',role:'participant',action:'revoke'
+},bob.token)).status,403,'manager cannot revoke creator by forging the role field');
+assert.equal((await call('/v1/admin/projects/community-members',{
+ project_id:'virgoland',username:'role_guard_user',role:'creator',action:'revoke'
+},alice.token)).status,200);
+
+
 assert.equal((await call('/v1/admin/accounts/role',{
   username:'bob',role:'super_admin'
 },alice.token)).status,400,'super_admin elevation must not be exposed by HTTP');
@@ -325,6 +452,12 @@ assert.equal((await call('/v1/admin/accounts/disable',{
 assert.equal((await call('/v1/state',undefined,bob.token)).status,401,
  'revoked sessions should not survive disable');
 assert.equal(DB.sqlite.prepare("SELECT count(*) AS n FROM admin_audit").get().n>=4,true);
+assert.equal((await call('/v1/account/mfa/verify',{
+  recovery_code:aliceRecoveryCodes[0]
+},alice.token)).status,200,'a backup code can provide step-up authorization');
+assert.equal((await call('/v1/account/mfa/verify',{
+  recovery_code:aliceRecoveryCodes[0]
+},alice.token)).status,401,'a backup code cannot be replayed');
 assert.equal((await call('/v1/auth/logout',{},alice.token)).status,200);
 assert.equal((await call('/v1/state',undefined,alice.token)).status,401);
 
@@ -538,4 +671,228 @@ assert.equal(DB.sqlite.prepare('SELECT count(*) AS n FROM realtime_tickets').get
     globalThis.Response=originalResponse;
   }
 }
+// VIS Ceibo Recovery — end-to-end account ownership and old-device revocation.
+const recoverAccount=await account('recover_me');
+const sessionOutsider=await account('session_outsider');
+const oldPasswordKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const oldSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const oldPub=to64(await crypto.subtle.exportKey('raw',oldPasswordKey.publicKey));
+assert.equal((await call('/v1/accounts/upgrade',{
+  username:'recover_me',password_salt:oldSalt,password_public_key:oldPub,
+  registration_signature:to64(await sign(oldPasswordKey.privateKey,
+    'VIS-CLOUD-REGISTER-V2\nrecover_me\n'+oldSalt))
+},recoverAccount.token)).status,200);
+assert.equal((await call('/v1/account/email/request',{
+  email:'Recover.Me@Example.org'
+},recoverAccount.token)).status,403,
+  'a device bearer alone cannot install an account recovery mailbox');
+const bindChallenge=await call('/v1/accounts/login/challenge',{identifier:'recover_me'});
+const bindLogin=await call('/v1/accounts/login/verify',{
+  identifier:'recover_me',challenge_id:bindChallenge.data.challenge_id,
+  signature:to64(await sign(oldPasswordKey.privateKey,
+    'VIS-CLOUD-AUTH-V2\nrecover_me\n'+bindChallenge.data.challenge_id+'\n'+bindChallenge.data.nonce))
+});
+assert.equal(bindLogin.status,200);
+assert.equal((await call('/v1/account/email/request',{
+  email:'Recover.Me@Example.org'
+},bindLogin.data.token)).status,200);
+const emailCode=lastRecoveryCode();
+assert.equal((await call('/v1/recovery/email/verify',{code:emailCode})).data.verified,true);
+assert.equal((await call('/v1/recovery/email/verify',{code:emailCode})).status,400,
+ 'email confirmation codes are single use');
+assert.equal((await call('/v1/account',undefined,recoverAccount.token)).data.account.verified_email,
+ 'recover.me@example.org');
+const activeSessions=await call('/v1/account/sessions',undefined,recoverAccount.token);
+assert.equal(activeSessions.status,200);
+assert(activeSessions.data.sessions.some(s=>s.current===true),'sessions should be visible');
+assert.equal((await call('/v1/account/sessions/revoke',{
+  session_id:activeSessions.data.sessions[0].session_id
+},sessionOutsider.token)).status,404,'a user must not revoke another account session');
+const unknown=await call('/v1/recovery/start',{kind:'password',identity:'unknown@example.org'});
+const known=await call('/v1/recovery/start',{kind:'password',identity:'recover_me'});
+assert.equal(unknown.status,200);
+assert.deepEqual(unknown.data,known.data,'forgot-password must not enumerate accounts');
+const resetToken=lastRecoveryCode();
+const newerKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const newerSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const newerPub=to64(await crypto.subtle.exportKey('raw',newerKey.publicKey));
+const newProof={
+  code:resetToken,password_salt:newerSalt,password_public_key:newerPub,
+  registration_signature:to64(await sign(newerKey.privateKey,
+    'VIS-CLOUD-REGISTER-V2\nrecover_me\n'+newerSalt))
+};
+assert.equal((await call('/v1/recovery/reset',{...newProof,registration_signature:'invalid'})).status,400);
+assert.equal((await call('/v1/recovery/reset',newProof)).status,200);
+assert.equal((await call('/v1/recovery/reset',newProof)).status,400,
+ 'reset code replay must be rejected');
+assert.equal((await call('/v1/state',undefined,recoverAccount.token)).status,401,
+ 'old sessions must expire after recovery');
+const oldDeviceChallenge=await call('/v1/auth/challenge',{username:'recover_me'});
+assert.equal(oldDeviceChallenge.status,200);
+assert.equal((await call('/v1/auth/session',{
+  username:'recover_me',challenge_id:oldDeviceChallenge.data.id,
+  signature:to64(await sign(recoverAccount.signing.privateKey,
+    authText('recover_me',oldDeviceChallenge.data)))
+})).status,401,'old device keys must stop working after password reset');
+const newChallenge=await call('/v1/accounts/login/challenge',{identifier:'recover_me'});
+assert.equal(newChallenge.status,200);
+const newLogin=await call('/v1/accounts/login/verify',{
+  identifier:'recover_me',challenge_id:newChallenge.data.challenge_id,
+  signature:to64(await sign(newerKey.privateKey,
+    'VIS-CLOUD-AUTH-V2\nrecover_me\n'+newChallenge.data.challenge_id+'\n'+newChallenge.data.nonce))
+});
+assert.equal(newLogin.status,200,JSON.stringify(newLogin));
+const emailReminder=await call('/v1/recovery/start',{
+  kind:'username',identity:'recover.me@example.org'
+});
+assert.equal(emailReminder.status,200);
+assert(recoveryDeliveries.at(-1).text.includes('recover_me'));
+const oldCount=recoveryDeliveries.length;
+// Simulate the enforced 90-second cooldown before requesting another email change.
+DB.sqlite.prepare("UPDATE account_recovery_notice_limits SET sent_at=sent_at-120 "+
+  "WHERE purpose='email' AND user_id=(SELECT id FROM social_users WHERE username='recover_me')").run();
+assert.equal((await call('/v1/account/email/request',{
+  email:'new-recovery@example.org'
+},newLogin.data.token)).status,200);
+assert.equal(recoveryDeliveries.length,oldCount+2,'email change requires approval from both mailboxes');
+const newApproval=recoveryDeliveries.at(-1).text.match(/[A-Za-z0-9_-]{43}/)[0];
+const oldApproval=recoveryDeliveries.at(-2).text.match(/[A-Za-z0-9_-]{43}/)[0];
+assert.equal((await call('/v1/recovery/email/verify',{code:newApproval})).data.verified,false,
+ 'new mailbox alone must not take over the account');
+assert.equal((await call('/v1/account',undefined,newLogin.data.token)).data.account.verified_email,
+ 'recover.me@example.org','verified email should not change without old approval');
+assert.equal((await call('/v1/recovery/email/verify',{code:oldApproval})).data.verified,true);
+assert.equal((await call('/v1/account',undefined,newLogin.data.token)).data.account.verified_email,
+ 'new-recovery@example.org');
+
+assert(!recoveryDeliveries.some(d=>JSON.stringify(d).includes(oldSalt)),
+ 'email must never contain password verifier salts');
+assert.equal((await call('/v1/account/mfa/verify',{code:'000000'},newLogin.data.token)).status,409,
+ 'MFA verifies only after enrollment');
+
+// Password changes require a recent password-based login even if a bearer token
+// still exists, and must revoke all the user's other sessions.
+const rotatedKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const rotatedSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const rotatedPublic=to64(await crypto.subtle.exportKey('raw',rotatedKey.publicKey));
+const rotatePayload={
+ password_salt:rotatedSalt,password_public_key:rotatedPublic,
+ registration_signature:to64(await sign(rotatedKey.privateKey,
+   'VIS-CLOUD-REGISTER-V2\nrecover_me\n'+rotatedSalt))
+};
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=created_at-601 "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='recover_me')")
+  .run();
+assert.equal((await call('/v1/account/password/change',rotatePayload,newLogin.data.token)).status,403,
+ 'old authenticated sessions may not rotate credentials');
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=unixepoch() "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='recover_me')").run();
+assert.equal((await call('/v1/account/password/change',rotatePayload,newLogin.data.token)).status,200);
+assert.equal((await call('/v1/state',undefined,newLogin.data.token)).status,401,
+ 'password rotation must revoke the old bearer session');
+
+
+// MFA is not merely a step-up privilege check: no bearer may be issued until
+// a second factor succeeds, for either cloud/password or device proofs.
+const gateKey=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+const gatePub=to64(await crypto.subtle.exportKey('raw',gateKey.publicKey));
+const gateSalt=to64(crypto.getRandomValues(new Uint8Array(16)));
+const gateSignup={
+ username:'mfa_gate',password_salt:gateSalt,password_public_key:gatePub,
+ registration_signature:to64(await sign(gateKey.privateKey,
+   'VIS-CLOUD-REGISTER-V2\nmfa_gate\n'+gateSalt))
+};
+const gateRegistered=await call('/v1/accounts/register',gateSignup);
+assert.equal(gateRegistered.status,200);
+async function firstFactorGate(){
+ const challenge=await call('/v1/accounts/login/challenge',{identifier:'mfa_gate'});
+ assert.equal(challenge.status,200);
+ return call('/v1/accounts/login/verify',{
+  identifier:'mfa_gate',challenge_id:challenge.data.challenge_id,
+  signature:to64(await sign(gateKey.privateKey,
+   'VIS-CLOUD-AUTH-V2\nmfa_gate\n'+challenge.data.challenge_id+
+   '\n'+challenge.data.nonce))
+ });
+}
+const preMfa=await firstFactorGate();
+assert.equal(preMfa.status,200);
+assert(preMfa.data.token,'before enrolling MFA, a password proof is sufficient');
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=created_at-601 "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='mfa_gate')").run();
+assert.equal((await call('/v1/account/mfa/setup',{},gateRegistered.data.token)).status,403,
+  'stale bearer must not enroll a second factor');
+DB.sqlite.prepare("UPDATE auth_sessions SET created_at=unixepoch() "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='mfa_gate')").run();
+const mfaSetup=await call('/v1/account/mfa/setup',{},gateRegistered.data.token);
+assert.equal(mfaSetup.status,200,JSON.stringify(mfaSetup));
+const mfaConfirm=await call('/v1/account/mfa/confirm',{
+ code:otpFromSecret(mfaSetup.data.secret)
+},gateRegistered.data.token);
+assert.equal(mfaConfirm.status,200);
+assert.equal((await call('/v1/state',undefined,preMfa.data.token)).status,401,
+ 'enrolling MFA must revoke other existing bearers');
+const gated=await firstFactorGate();
+assert.equal(gated.status,200);
+assert.equal(gated.data.mfa_required,true);
+assert.match(gated.data.mfa_ticket,/^[A-Za-z0-9_-]{43}$/);
+assert.equal(gated.data.token,undefined,'no bearer or account access before MFA');
+assert.equal((await call('/v1/state',undefined,gated.data.mfa_ticket)).status,401,
+ 'the pre-MFA ticket is never an authenticated bearer');
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gated.data.mfa_ticket,recovery_code:'WRONG-FACTOR'
+})).status,401);
+const gateBackup=mfaConfirm.data.recovery_codes;
+const gateVerified=await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gated.data.mfa_ticket,recovery_code:gateBackup[0]
+});
+assert.equal(gateVerified.status,200,JSON.stringify(gateVerified));
+assert(gateVerified.data.token,'the bearer is granted only after MFA');
+assert.equal((await call('/v1/state',undefined,gateVerified.data.token)).status,200);
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gated.data.mfa_ticket,recovery_code:gateBackup[0]
+})).status,401,'consumed MFA tickets may not be reused');
+const locked=await firstFactorGate();
+for(let n=0;n<5;n++){
+ assert.equal((await call('/v1/accounts/login/mfa',{
+  mfa_ticket:locked.data.mfa_ticket,code:'000000'
+ })).status,401,'wrong TOTP is rejected without issuing a session');
+}
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:locked.data.mfa_ticket,recovery_code:gateBackup[1]
+})).status,401,'5 failed attempts exhaust a pre-MFA login challenge');
+const gateAgain=await firstFactorGate();
+// In the test fixture advance the one-use TOTP counter, without waiting 30s.
+DB.sqlite.prepare("UPDATE account_totp SET last_counter=last_counter-1 "+
+  "WHERE user_id=(SELECT id FROM social_users WHERE username='mfa_gate')").run();
+const gateOtp=otpFromSecret(mfaSetup.data.secret);
+const gateByTotp=await call('/v1/accounts/login/mfa',{
+ mfa_ticket:gateAgain.data.mfa_ticket,code:gateOtp
+});
+assert.equal(gateByTotp.status,200,JSON.stringify(gateByTotp));
+const reuseTotp=await firstFactorGate();
+assert.equal((await call('/v1/accounts/login/mfa',{
+ mfa_ticket:reuseTotp.data.mfa_ticket,code:gateOtp
+})).status,401,'a TOTP counter must be consumed only once');
+// A device-key login must be challenged as well, not be an alternative bypass.
+const mfaDevice=await account('mfa_device');
+const deviceCodes=await enrollMfa(mfaDevice);
+const deviceChallenge=await call('/v1/auth/challenge',{username:'mfa_device'});
+const deviceStage=await call('/v1/auth/session',{
+ username:'mfa_device',challenge_id:deviceChallenge.data.id,
+ signature:to64(await sign(mfaDevice.signing.privateKey,
+  authText('mfa_device',deviceChallenge.data)))
+});
+assert.equal(deviceStage.status,200);
+assert.equal(deviceStage.data.mfa_required,true);
+assert.equal(deviceStage.data.token,undefined,'device signature alone cannot bypass MFA');
+const deviceDone=await call('/v1/accounts/login/mfa',{
+ mfa_ticket:deviceStage.data.mfa_ticket,recovery_code:deviceCodes[0]
+});
+assert.equal(deviceDone.status,200,JSON.stringify(deviceDone));
+assert.equal((await call('/v1/state',undefined,deviceDone.data.token)).status,200);
+
+console.log('VIS Ceibo email, recovery, MFA and session tests passed');
+
 console.log('VIS Social authentication, encrypted delivery and D1 migrations passed');
+
+

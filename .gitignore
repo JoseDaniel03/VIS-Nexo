@@ -9,3 +9,23 @@ __pycache__/
 *.pyc
 /preview-*.png
 .vis-smoke-test/
+
+# Keep secrets and local material out of public Git history.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+*.jks
+**/credentials.json
+**/secrets.json
+**/.vis-ci-live-users.sql
+**/.vis-developer-*.sql
+**/.vis-superadmin-*.sql
+**/.vis-developer-result.json
+**/.vis-superadmin-result.json
+.vis-private/
+*.log

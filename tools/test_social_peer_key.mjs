@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { validatePinnedPeerKey, socialPollDelay } from '../web/social-remote.js';
+import { validatePinnedPeerKey, socialPollDelay, socialNetworkReady } from '../web/social-remote.js';
 
 const first='A'.repeat(88), second='B'.repeat(88);
 assert.equal(validatePinnedPeerKey(null, first),first);
@@ -17,3 +17,7 @@ assert.equal(socialPollDelay(true,5),35200,'capped exponential backoff');
 assert.equal(socialPollDelay(false,9),45000,'idle backoff cannot exceed 45s');
 assert.equal(socialPollDelay(true,-1),2200,'negative retry counters ignored');
 console.log('VIS Social adaptive polling: active, idle, exponential backoff and limits passed');
+
+assert.equal(socialNetworkReady(true,'security_warning'),true);
+assert.equal(socialNetworkReady(true,'degraded'),false);
+assert.equal(socialNetworkReady(false,'connected'),false);

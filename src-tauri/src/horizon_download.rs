@@ -40,7 +40,7 @@ fn platform_archive() -> Result<&'static str,String> {
     #[cfg(all(target_os="linux",target_arch="x86_64"))] {return Ok("horizon-linux-x86_64.tar.gz");}
     #[cfg(all(target_os="windows",target_arch="x86_64"))] {return Ok("horizon-windows-x64.zip");}
     #[cfg(all(target_os="windows",target_arch="aarch64"))] {return Ok("horizon-windows-arm64.zip");}
-    #[allow(unreachable_code)] Err("Horizon no ofrece un paquete automático para esta plataforma de VIS".into())
+    #[allow(unreachable_code)] Err("VIS Nexo Rust no ofrece un paquete automático para esta plataforma de VIS".into())
 }
 fn client()->Result<Client,String>{
     Client::builder().user_agent("VIS-Nexo-Horizon-Integration/2.15 (+https://github.com/horizon-rust/horizon)")
@@ -80,7 +80,7 @@ fn release_candidate(release:&Release,archive:&str)->bool{
 fn choose_release<'a>(releases:&'a [Release],archive:&str)->Result<&'a Release,String>{
     releases.iter().find(|r|r.tag_name=="nightly"&&release_candidate(r,archive))
         .or_else(||releases.iter().find(|r|release_candidate(r,archive)))
-        .ok_or_else(||"No se encontró una Nightly de Horizon con el cliente del juego y firma v2 para tu sistema".into())
+        .ok_or_else(||"No se encontró una Nightly de VIS Nexo Rust con el cliente del juego y firma v2 para tu sistema".into())
 }
 fn list(client:&Client)->Result<Vec<Release>,String>{
     let response=client.get(GITHUB_API).send().and_then(|r|r.error_for_status())
@@ -107,7 +107,7 @@ fn small_file(http:&Client,a:&Asset,release:&Release,limit:u64)->Result<Vec<u8>,
 }
 fn signature_is_valid(tag:&str,sums:&[u8],signature_file:&[u8])->Result<(),String>{
     let key_bytes=STANDARD.decode(HORIZON_KEY).map_err(|e|e.to_string())?;
-    let key:[u8;32]=key_bytes.try_into().map_err(|_|"Clave oficial Horizon inválida")?;
+    let key:[u8;32]=key_bytes.try_into().map_err(|_|"Clave oficial VIS Nexo Rust inválida")?;
     let verifying_key=VerifyingKey::from_bytes(&key).map_err(|e|e.to_string())?;
     let content=std::str::from_utf8(signature_file).map_err(|_|"Firma v2 no es UTF-8")?;
     let mut msg=format!("horizon release {tag}\n").into_bytes();
@@ -117,7 +117,7 @@ fn signature_is_valid(tag:&str,sums:&[u8],signature_file:&[u8])->Result<(),Strin
         let Ok(sig)=Signature::from_slice(&decoded) else{continue};
         if verifying_key.verify(&msg,&sig).is_ok(){return Ok(())}
     }
-    Err("Horizon: firma Ed25519 v2 inválida o no reconocida. No se instaló ningún ejecutable".into())
+    Err("VIS Nexo Rust: firma Ed25519 v2 inválida o no reconocida. No se instaló ningún ejecutable".into())
 }
 fn checksum_of(sums:&[u8],archive:&str)->Result<String,String>{
     let manifest=std::str::from_utf8(sums).map_err(|_|"SHA256SUMS no es UTF-8")?;
@@ -138,7 +138,7 @@ fn emit(app:&AppHandle,stage:&str,completed:usize,detail:&str){
 }
 fn stream_archive(app:&AppHandle,http:&Client,a:&Asset,release:&Release,dest:&Path,expected:&str)->Result<(),String>{
     if a.size==0||a.size>MAX_ARCHIVE||!trustworthy_url(&a.browser_download_url,release,&a.name){
-        return Err("Archivo Horizon demasiado grande o URL inesperada".into());
+        return Err("Archivo VIS Nexo Rust demasiado grande o URL inesperada".into());
     }
     let response=http.get(&a.browser_download_url).send().and_then(|r|r.error_for_status())
         .map_err(|e|format!("No se pudo descargar el juego: {e}"))?;
@@ -153,11 +153,11 @@ fn download_stream<R:Read>(app:&AppHandle,mut reader:R,dest:&Path,expected:&str,
         let n=reader.read(&mut buffer).map_err(|e|e.to_string())?;
         if n==0{break}
         downloaded+=n as u64;
-        if downloaded>MAX_ARCHIVE {return Err("Horizon superó el límite de descarga".into())}
+        if downloaded>MAX_ARCHIVE {return Err("VIS Nexo Rust superó el límite de descarga".into())}
         file.write_all(&buffer[..n]).map_err(|e|e.to_string())?;
         hasher.update(&buffer[..n]);
         let percent=(downloaded.saturating_mul(80)/reported_size.max(1)).min(80) as usize;
-        if percent!=last_percent {emit(app,"Descargando Horizon",percent,&format!("{} MiB descargados",downloaded/1048576));last_percent=percent;}
+        if percent!=last_percent {emit(app,"Descargando VIS Nexo Rust",percent,&format!("{} MiB descargados",downloaded/1048576));last_percent=percent;}
     }
     file.sync_all().map_err(|e|e.to_string())?;
     crate::download_manager::checkpoint()?;
@@ -168,18 +168,18 @@ fn safe_rel(path:&Path)->Result<PathBuf,String>{
     let mut clean=PathBuf::new();let mut depth=0;
     for part in path.components(){
         match part {
-            Component::Normal(name)=>{depth+=1;if depth>16{return Err("Ruta Horizon demasiado profunda".into())}clean.push(name);}
+            Component::Normal(name)=>{depth+=1;if depth>16{return Err("Ruta VIS Nexo Rust demasiado profunda".into())}clean.push(name);}
             Component::CurDir=>{},
-            _=>return Err("Un archivo Horizon intentó escapar de su carpeta".into())
+            _=>return Err("Un archivo VIS Nexo Rust intentó escapar de su carpeta".into())
         }
     }
-    if clean.as_os_str().is_empty(){return Err("Ruta vacía en el paquete Horizon".into())}
+    if clean.as_os_str().is_empty(){return Err("Ruta vacía en el paquete VIS Nexo Rust".into())}
     Ok(clean)
 }
 fn extraction_limit(total:&mut u64,count:&mut usize,size:u64)->Result<(),String>{
     *count+=1;*total=total.saturating_add(size);
     if *count>MAX_ITEMS||*total>MAX_UNPACKED||size>MAX_ARCHIVE{
-        return Err("Paquete Horizon supera límites de extracción".into())
+        return Err("Paquete VIS Nexo Rust supera límites de extracción".into())
     }
     Ok(())
 }
@@ -188,7 +188,7 @@ fn write_member<R:Read>(mut src:R,root:&Path,rel:&Path,size:u64)->Result<PathBuf
     if let Some(parent)=dest.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
     let mut file=OpenOptions::new().write(true).create_new(true).open(&dest).map_err(|e|e.to_string())?;
     let copied=io::copy(&mut src,&mut file).map_err(|e|e.to_string())?;
-    if copied!=size{return Err("Tamaño inconsistente en el paquete Horizon".into())}
+    if copied!=size{return Err("Tamaño inconsistente en el paquete VIS Nexo Rust".into())}
     Ok(dest)
 }
 fn unpack_tar(archive_path:&Path,target:&Path)->Result<(),String>{
@@ -198,7 +198,7 @@ fn unpack_tar(archive_path:&Path,target:&Path)->Result<(),String>{
     for item in archive.entries().map_err(|e|e.to_string())?{
         let mut item=item.map_err(|e|e.to_string())?;
         let kind=item.header().entry_type();
-        if !kind.is_file()&&!kind.is_dir(){return Err("Paquete Horizon contiene enlaces u objetos no permitidos".into())}
+        if !kind.is_file()&&!kind.is_dir(){return Err("Paquete VIS Nexo Rust contiene enlaces u objetos no permitidos".into())}
         let path=item.path().map_err(|e|e.to_string())?.to_path_buf();
         if path == Path::new(".") && kind.is_dir(){continue}
         let relative=safe_rel(&path)?;
@@ -213,14 +213,14 @@ fn unpack_tar(archive_path:&Path,target:&Path)->Result<(),String>{
 fn unpack_zip(archive_path:&Path,target:&Path)->Result<(),String>{
     let input=File::open(archive_path).map_err(|e|e.to_string())?;
     let mut archive=zip::ZipArchive::new(input).map_err(|e|e.to_string())?;
-    if archive.len()>MAX_ITEMS{return Err("ZIP Horizon tiene demasiados elementos".into())}
+    if archive.len()>MAX_ITEMS{return Err("ZIP VIS Nexo Rust tiene demasiados elementos".into())}
     let mut size=0u64;let mut count=0usize;
     for n in 0..archive.len(){
         let mut item=archive.by_index(n).map_err(|e|e.to_string())?;
         if item.unix_mode().is_some_and(|mode|mode & 0o170000 == 0o120000){
-            return Err("ZIP Horizon contiene un enlace simbólico".into())
+            return Err("ZIP VIS Nexo Rust contiene un enlace simbólico".into())
         }
-        let member_name=item.name().to_owned();
+        let member_name=item.name().map_err(|e|e.to_string())?.into_owned();
         let path=Path::new(&member_name);let relative=safe_rel(path)?;
         let bytes=if item.is_dir(){0}else{item.size()};
         extraction_limit(&mut size,&mut count,bytes)?;
@@ -234,7 +234,7 @@ fn unpack_zip(archive_path:&Path,target:&Path)->Result<(),String>{
 fn sha256_file(path:&Path)->Result<String,String>{
     let meta=fs::symlink_metadata(path).map_err(|e|e.to_string())?;
     if !meta.file_type().is_file() || meta.len()==0 || meta.len()>MAX_UNPACKED{
-        return Err("Archivo Horizon ausente, enlazado o de tamaño inválido".into());
+        return Err("Archivo VIS Nexo Rust ausente, enlazado o de tamaño inválido".into());
     }
     let mut file=File::open(path).map_err(|e|format!("No se puede leer {}: {e}",path.display()))?;
     let mut digest=Sha256::new();let mut buf=[0u8;64*1024];
@@ -261,11 +261,11 @@ pub fn verify_managed_build(build:&Path)->Result<bool,String>{
     if !path.exists(){return Ok(false)}
     let bytes=fs::read(&path).map_err(|e|e.to_string())?;
     let saved:GameFiles=serde_json::from_slice(&bytes)
-        .map_err(|_|"El comprobante de Horizon es inválido; volvé a instalar el build")?;
+        .map_err(|_|"El comprobante de VIS Nexo Rust es inválido; volvé a instalar el build")?;
     let actual=game_stamp(build,&saved.tag)?;
     if saved.client_sha256!=actual.client_sha256 || saved.prepare_sha256!=actual.prepare_sha256
         || saved.lock_sha256!=actual.lock_sha256{
-        return Err("Los binarios o research-lock.json de Horizon cambiaron desde su instalación firmada. Elegí otra Nightly o reinstalá el build sin tocar tus mundos".into())
+        return Err("Los binarios o research-lock.json de VIS Nexo Rust cambiaron desde su instalación firmada. Elegí otra Nightly o reinstalá el build sin tocar tus mundos".into())
     }
     Ok(true)
 }
@@ -323,11 +323,11 @@ struct TempGuard(PathBuf);
 impl Drop for TempGuard{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
 /// Never overwrites an installed build. All existing worlds live elsewhere.
 pub fn install(app:&AppHandle,data_root:&Path,expected_tag:&str)->Result<Installed,String>{
-    let _guard=INSTALL_LOCK.lock().map_err(|_|"El instalador Horizon está bloqueado")?;
+    let _guard=INSTALL_LOCK.lock().map_err(|_|"El instalador VIS Nexo Rust está bloqueado")?;
     let http=client()?;let archive=platform_archive()?;let releases=list(&http)?;
     let release=choose_release(&releases,archive)?;
     let version=signed_version(release).ok_or("Versión Nightly inválida")?;
-    if version!=expected_tag{return Err("La Nightly de Horizon cambió desde la confirmación. Volvé a comprobar la versión".into())}
+    if version!=expected_tag{return Err("La Nightly de VIS Nexo Rust cambió desde la confirmación. Volvé a comprobar la versión".into())}
     let release_asset=asset(release,archive)?;
     let manifest=small_file(&http,asset(release,"SHA256SUMS")?,release,64*1024)?;
     let signed=small_file(&http,asset(release,"SHA256SUMS.v2.sig")?,release,4096)?;
@@ -337,10 +337,10 @@ pub fn install(app:&AppHandle,data_root:&Path,expected_tag:&str)->Result<Install
     let destination=root.join(&version);
     if destination.exists(){
         let meta=fs::symlink_metadata(&destination).map_err(|e|e.to_string())?;
-        if meta.file_type().is_symlink()||!meta.is_dir(){return Err("La carpeta del build Horizon existente no es segura".into())}
+        if meta.file_type().is_symlink()||!meta.is_dir(){return Err("La carpeta del build VIS Nexo Rust existente no es segura".into())}
         let pinned=fs::read_to_string(destination.join(".vis-release-sha256"))
-            .map_err(|_|"Existe un build Horizon sin comprobante de instalación. No se sobrescribe automáticamente")?;
-        if pinned.trim()!=hash {return Err("Existe un build Horizon con una huella diferente. Revisá la carpeta manualmente".into())}
+            .map_err(|_|"Existe un build VIS Nexo Rust sin comprobante de instalación. No se sobrescribe automáticamente")?;
+        if pinned.trim()!=hash {return Err("Existe un build VIS Nexo Rust con una huella diferente. Revisá la carpeta manualmente".into())}
         let build=find_build(&destination)?;
         verify_managed_build(&build)?;
         return Ok(Installed{tag:version.clone(),build_dir:build.to_string_lossy().into(),archive_sha256:hash});
@@ -349,11 +349,11 @@ pub fn install(app:&AppHandle,data_root:&Path,expected_tag:&str)->Result<Install
     let scratch=root.join(format!(".vis-download-{}-{nonce}",std::process::id()));
     fs::create_dir(&scratch).map_err(|e|e.to_string())?;
     let _cleanup=TempGuard(scratch.clone());
-    emit(app,"Horizon Rust Edition",1,"Verificando firma del release oficial");
+    emit(app,"VIS Nexo Rust Rust Edition",1,"Verificando firma del release oficial");
     let archive_path=scratch.join(archive);
     stream_archive(app,&http,release_asset,release,&archive_path,&hash)?;
     let unpacked=scratch.join("unpacked");fs::create_dir(&unpacked).map_err(|e|e.to_string())?;
-    emit(app,"Instalando Horizon",83,"Descomprimiendo el juego (sin su launcher)");
+    emit(app,"Instalando VIS Nexo Rust",83,"Descomprimiendo el juego (sin su launcher)");
     if archive.ends_with(".zip"){unpack_zip(&archive_path,&unpacked)?}
     else{unpack_tar(&archive_path,&unpacked)?}
     let build=find_build(&unpacked)?;
@@ -362,9 +362,9 @@ pub fn install(app:&AppHandle,data_root:&Path,expected_tag:&str)->Result<Install
     fs::write(unpacked.join(".vis-release-sha256"),&hash).map_err(|e|e.to_string())?;
     let relative=build.strip_prefix(&unpacked).map_err(|e|e.to_string())?.to_path_buf();
     // Keep one immutable release directory; adding a new Nightly never alters old worlds.
-    fs::rename(&unpacked,&destination).map_err(|e|format!("No se pudo guardar el build de Horizon: {e}"))?;
+    fs::rename(&unpacked,&destination).map_err(|e|format!("No se pudo guardar el build de VIS Nexo Rust: {e}"))?;
     let saved=destination.join(relative);
-    emit(app,"Horizon instalado",100,"Build firmado y verificado. Configurá tu instancia para preparar Minecraft.");
+    emit(app,"VIS Nexo Rust instalado",100,"Build firmado y verificado. Configurá tu instancia para preparar Minecraft.");
     Ok(Installed{tag:version.clone(),build_dir:saved.to_string_lossy().into_owned(),archive_sha256:hash})
 }
 
@@ -388,6 +388,8 @@ struct ForkAsset {
 struct ForkRelease {
     tag_name:String,
     draft:bool,
+    #[serde(default)]
+    prerelease:bool,
     assets:Vec<ForkAsset>,
 }
 fn fork_asset_name()->Result<&'static str,String>{
@@ -396,7 +398,7 @@ fn fork_asset_name()->Result<&'static str,String>{
     #[cfg(all(target_os="windows",target_arch="x86_64"))]
     {return Ok("vis-horizon-windows-x64.zip");}
     #[allow(unreachable_code)]
-    Err("VIS Horizon portable se publica por ahora para Linux/Windows x64".into())
+    Err("VIS Nexo Rust portable se publica por ahora para Linux/Windows x64".into())
 }
 fn fork_tag_valid(tag:&str)->bool{
     tag.strip_prefix("visgame-").is_some_and(|sha|
@@ -415,33 +417,76 @@ fn fork_digest(asset:&ForkAsset)->Result<String,String>{
     }
     Ok(sha.to_ascii_lowercase())
 }
+// Shared contract parser: desktop and mobile apply exactly the same compatibility checks.
+#[path = "../../mobile/src-tauri/src/mcrust_catalog.rs"]
+mod shared_mcrust_catalog;
+fn shared_contract(http:&Client,release:&ForkRelease,archive:&str,archive_sha:&str)->Result<(),String>{
+    let manifest=fork_asset(release,"vis-mcrust-release.json")?;
+    if manifest.size==0 || manifest.size>128*1024 || manifest.browser_download_url!=format!("https://github.com/{VIS_FORK}/releases/download/{}/vis-mcrust-release.json",release.tag_name){return Err("Manifiesto compartido inválido".into());}
+    let expected=fork_digest(manifest)?;
+    let response=http.get(&manifest.browser_download_url).send().and_then(|r|r.error_for_status()).map_err(|e|e.to_string())?;
+    let mut raw=Vec::new();response.take(128*1024+1).read_to_end(&mut raw).map_err(|e|e.to_string())?;
+    if raw.len()as u64!=manifest.size || format!("{:x}",Sha256::digest(&raw))!=expected {return Err("La integridad del manifiesto compartido no coincide".into());}
+    let contract:shared_mcrust_catalog::Contract=serde_json::from_slice(&raw).map_err(|_|"Contrato del motor inválido")?;
+    contract.validate(&release.tag_name)?;
+    fork_assets_match_contract(release,&contract)?;
+    let target=contract.targets.values().find(|t|t.asset==archive)
+        .ok_or("Falta esta plataforma en el motor compartido")?;
+    if target.sha256!=archive_sha {
+        return Err("El build de PC no coincide con el motor Android".into());
+    }
+    Ok(())
+}
+// A release must contain exactly the three artifacts declared by the shared
+// manifest. Checking only the desktop archive would allow a broken/mismatched
+// Android APK to be advertised as the same engine.
+fn fork_assets_match_contract(
+    release:&ForkRelease,contract:&shared_mcrust_catalog::Contract
+)->Result<(),String>{
+    for target in contract.targets.values(){
+        let matches=release.assets.iter().filter(|a|a.name==target.asset).collect::<Vec<_>>();
+        if matches.len()!=1{
+            return Err(format!("El release no contiene exactamente un artefacto {}",target.asset));
+        }
+        let asset=matches[0];
+        let expected_url=format!(
+            "https://github.com/{VIS_FORK}/releases/download/{}/{}",
+            release.tag_name,target.asset);
+        if asset.browser_download_url!=expected_url ||
+            asset.size!=target.size || fork_digest(asset)?!=target.sha256.to_ascii_lowercase(){
+            return Err(format!("El artefacto {} difiere del motor compartido",target.asset));
+        }
+    }
+    Ok(())
+}
 fn fork_release<'a>(releases:&'a [ForkRelease],asset_name:&str)->Result<&'a ForkRelease,String>{
-    releases.iter().find(|r| !r.draft && fork_tag_valid(&r.tag_name) &&
+    releases.iter().find(|r| shared_mcrust_catalog::accepts_release(r.draft,r.prerelease) && fork_tag_valid(&r.tag_name) &&
+        r.assets.iter().any(|a|a.name=="vis-mcrust-release.json") &&
         r.assets.iter().any(|a|a.name==asset_name &&
             a.browser_download_url==format!(
                 "https://github.com/{VIS_FORK}/releases/download/{}/{}",
                 r.tag_name,asset_name) &&
             a.size>0 && a.size<=MAX_ARCHIVE && fork_digest(a).is_ok()))
-        .ok_or_else(||"El fork todavía no publicó el motor Horizon para este sistema. Comprobá GitHub Actions del fork.".to_string())
+        .ok_or_else(||"El fork todavía no publicó el motor compartido de PC y Android. Comprobá GitHub Actions del fork.".to_string())
 }
 fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
     let raw=fs::read(build.join("vis-horizon-source.json"))
         .map_err(|_|"Falta el manifiesto del build compilado en el fork")?;
-    if raw.len()>256*1024 {return Err("Manifiesto Horizon demasiado grande".into());}
+    if raw.len()>256*1024 {return Err("Manifiesto VIS Nexo Rust demasiado grande".into());}
     let data:serde_json::Value=serde_json::from_slice(&raw)
-        .map_err(|_|"Manifiesto VIS Horizon ilegible")?;
+        .map_err(|_|"Manifiesto VIS Nexo Rust ilegible")?;
     if data["source_repo"].as_str()!=Some("https://github.com/JoseDaniel03/horizon-VISNEXO.git") ||
        data["game_binary"].as_str()!=Some("horizon-official") ||
        data["minecraft_assets_included"]!=false {
-        return Err("Build Horizon no pertenece al fork VIS o incluye activos prohibidos".into());
+        return Err("Build VIS Nexo Rust no pertenece al fork VIS o incluye activos prohibidos".into());
     }
     let commit=data["source_commit"].as_str().ok_or("Falta commit del build")?;
     if commit.len()!=40 || !commit.bytes().all(|b|b.is_ascii_hexdigit()) ||
        !commit.starts_with(tag.strip_prefix("visgame-").unwrap_or("!")){
-        return Err("El commit Horizon no coincide con la versión publicada".into());
+        return Err("El commit VIS Nexo Rust no coincide con la versión publicada".into());
     }
     let hashes=data["sha256"].as_object().ok_or("El manifiesto no contiene SHA-256 de los archivos")?;
-    if hashes.len()<5 || hashes.len()>12000 {return Err("Manifiesto Horizon fuera de límites".into());}
+    if hashes.len()<5 || hashes.len()>12000 {return Err("Manifiesto VIS Nexo Rust fuera de límites".into());}
     for required in [
         "research-lock.json",
         if cfg!(target_os="windows"){"horizon-client.exe"}else{"horizon-client"},
@@ -462,12 +507,12 @@ fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
         let exporter=name.starts_with("mods/horizon/src/test/java/dev/horizonlab/parity/")
             && name.ends_with(".java");
         if !base && !dxc && !exporter{
-            return Err(format!("Archivo inesperado en el paquete Horizon: {name}"));
+            return Err(format!("Archivo inesperado en el paquete VIS Nexo Rust: {name}"));
         }
-        let expected=digest.as_str().ok_or("Huella inválida de archivo Horizon")?;
+        let expected=digest.as_str().ok_or("Huella inválida de archivo VIS Nexo Rust")?;
         if expected.len()!=64 || !expected.bytes().all(|b|b.is_ascii_hexdigit()) ||
            sha256_file(&build.join(rel))?!=expected.to_ascii_lowercase(){
-            return Err(format!("Archivo del motor Horizon no coincide: {name}"));
+            return Err(format!("Archivo del motor VIS Nexo Rust no coincide: {name}"));
         }
     }
     // Also reject extra files omitted from the manifest. The only permitted
@@ -479,23 +524,23 @@ fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
         for item in fs::read_dir(&folder).map_err(|e|e.to_string())?{
             let item=item.map_err(|e|e.to_string())?;
             count+=1;
-            if count>MAX_ITEMS{return Err("Paquete Horizon tiene demasiados archivos".into());}
+            if count>MAX_ITEMS{return Err("Paquete VIS Nexo Rust tiene demasiados archivos".into());}
             let path=item.path();
             let typ=fs::symlink_metadata(&path).map_err(|e|e.to_string())?.file_type();
-            if typ.is_symlink(){return Err("El juego Horizon contiene un enlace simbólico".into());}
+            if typ.is_symlink(){return Err("El juego VIS Nexo Rust contiene un enlace simbólico".into());}
             if typ.is_dir(){pending.push(path);continue;}
-            if !typ.is_file(){return Err("El juego Horizon contiene un objeto no permitido".into());}
+            if !typ.is_file(){return Err("El juego VIS Nexo Rust contiene un objeto no permitido".into());}
             let relative=path.strip_prefix(build).map_err(|e|e.to_string())?
-                .to_str().ok_or("Ruta no UTF-8 en Horizon")?
+                .to_str().ok_or("Ruta no UTF-8 en VIS Nexo Rust")?
                 .replace(std::path::MAIN_SEPARATOR,"/");
             if relative=="vis-horizon-source.json" || relative==GAME_FILES_STAMP{continue;}
             if !hashes.contains_key(&relative){
-                return Err(format!("Archivo Horizon sin huella declarada: {relative}"));
+                return Err(format!("Archivo VIS Nexo Rust sin huella declarada: {relative}"));
             }
             found.insert(relative);
         }
     }
-    if found.len()!=hashes.len(){return Err("Manifiesto Horizon incompleto".into());}
+    if found.len()!=hashes.len(){return Err("Manifiesto VIS Nexo Rust incompleto".into());}
     Ok(())
 }
 /// Download Horizon only after the user selects an instance. All binaries live
@@ -504,9 +549,9 @@ fn fork_metadata(build:&Path,tag:&str)->Result<(),String>{
 pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Installed,String>{
     crate::download_manager::checkpoint()?;
     if minecraft_version!="26.3" {
-        return Err("El fork Horizon disponible implementa exclusivamente Minecraft 26.3".into())
+        return Err("El fork VIS Nexo Rust disponible implementa exclusivamente Minecraft 26.3".into())
     }
-    let _guard=INSTALL_LOCK.lock().map_err(|_|"Ya hay una instalación Horizon en curso")?;
+    let _guard=INSTALL_LOCK.lock().map_err(|_|"Ya hay una instalación VIS Nexo Rust en curso")?;
     crate::instance_guard::private_paths(dir,&[".vis",".vis/horizon-engine"])?;
     let archive=fork_asset_name()?;
     let http=client()?;
@@ -517,11 +562,12 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     let tag=release.tag_name.clone();
     let asset=fork_asset(release,archive)?;
     let sha=fork_digest(asset)?;
+    shared_contract(&http,release,archive,&sha)?;
     let expected_url=format!(
         "https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}"
     );
     if asset.browser_download_url!=expected_url || asset.size==0 || asset.size>MAX_ARCHIVE {
-        return Err("Metadatos Horizon inesperados".into());
+        return Err("Metadatos VIS Nexo Rust inesperados".into());
     }
     let root=dir.join(".vis/horizon-engine");
     fs::create_dir_all(&root).map_err(|e|e.to_string())?;
@@ -529,15 +575,15 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     if final_dir.exists(){
         let record=fs::symlink_metadata(&final_dir).map_err(|e|e.to_string())?;
         if !record.is_dir() || record.file_type().is_symlink(){
-            return Err("Un archivo ocupa la carpeta de la versión Horizon".into());
+            return Err("Un archivo ocupa la carpeta de la versión VIS Nexo Rust".into());
         }
         let pinned=fs::read_to_string(final_dir.join(".vis-release-sha256"))
-            .map_err(|_|"Build previo de Horizon sin procedencia comprobable; revisión manual necesaria")?;
+            .map_err(|_|"Build previo de VIS Nexo Rust sin procedencia comprobable; revisión manual necesaria")?;
         if pinned.trim()!=sha {return Err("La publicación del fork cambió sin cambiar de versión".into());}
         let existing=find_build(&final_dir)?;
         fork_metadata(&existing,&tag)?;
         if verify_managed_build(&existing)?!=true{
-            return Err("Build Horizon previamente instalado no tiene huellas verificadas".into());
+            return Err("Build VIS Nexo Rust previamente instalado no tiene huellas verificadas".into());
         }
         return Ok(Installed{tag,build_dir:existing.to_string_lossy().into_owned(),archive_sha256:sha});
     }
@@ -547,9 +593,9 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     fs::create_dir(&scratch).map_err(|e|e.to_string())?;
     let _cleanup=TempGuard(scratch.clone());
     let archive_path=scratch.join(archive);
-    emit(app,"Motor Rust",0,"Descargando Horizon desde el fork VIS (no incluye Minecraft ni su launcher)");
+    emit(app,"Motor Rust",0,"Descargando VIS Nexo Rust desde el fork VIS (no incluye Minecraft ni su launcher)");
     let response=http.get(&expected_url).send().and_then(|r|r.error_for_status())
-        .map_err(|e|format!("No se pudo descargar Horizon portable: {e}"))?;
+        .map_err(|e|format!("No se pudo descargar VIS Nexo Rust portable: {e}"))?;
     download_stream(app,response,&archive_path,&sha,asset.size)?;
     crate::download_manager::checkpoint()?;
     if fs::metadata(&archive_path).map_err(|e|e.to_string())?.len()!=asset.size {
@@ -570,7 +616,7 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     let nested=built.strip_prefix(&unpacked).map_err(|e|e.to_string())?.to_path_buf();
     fs::rename(&unpacked,&final_dir).map_err(|e|e.to_string())?;
     let installed=final_dir.join(nested);
-    emit(app,"Motor Rust",100,"Horizon instalado dentro de la instancia. Preparando recursos oficiales.");
+    emit(app,"Motor Rust",100,"VIS Nexo Rust instalado dentro de la instancia. Preparando recursos oficiales.");
     Ok(Installed{tag,build_dir:installed.to_string_lossy().into_owned(),archive_sha256:sha})
 }
 
@@ -585,7 +631,7 @@ mod tests{
             size:25_000_000,
             digest:Some(format!("sha256:{}", "b".repeat(64)))
         };
-        let release=ForkRelease{tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![good]};
+        let release=ForkRelease{tag_name:"visgame-123456789abc".into(),draft:false,prerelease:false,assets:vec![good]};
         assert!(fork_release(&[release],"missing").is_err());
         assert!(fork_tag_valid("visgame-123456789abc"));
         assert!(!fork_tag_valid("visgame-../../bad"));
@@ -593,15 +639,55 @@ mod tests{
             "https://attacker.invalid/game.tar.gz".into(),size:25000,
             digest:Some(format!("sha256:{}", "b".repeat(64)))};
         assert!(fork_release(&[ForkRelease{
-            tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![bad.clone()]
+            tag_name:"visgame-123456789abc".into(),draft:false,prerelease:false,assets:vec![bad.clone()]
         }],name).is_err());
         bad.browser_download_url=format!(
             "https://github.com/{VIS_FORK}/releases/download/visgame-123456789abc/{name}"
         );
         bad.digest=None;
         assert!(fork_release(&[ForkRelease{
-            tag_name:"visgame-123456789abc".into(),draft:false,assets:vec![bad]
+            tag_name:"visgame-123456789abc".into(),draft:false,prerelease:false,assets:vec![bad]
         }],name).is_err());
+    }
+    #[test] fn shared_release_requires_three_matching_assets(){
+        let tag="visgame-123456789abc";
+        let mut targets=std::collections::BTreeMap::new();
+        let mut assets=Vec::new();
+        for (platform,name) in [
+            ("linux-x86_64","vis-horizon-linux-x86_64.tar.gz"),
+            ("windows-x64","vis-horizon-windows-x64.zip"),
+            ("android-arm64","vis-horizon-android-arm64.apk")
+        ] {
+            targets.insert(platform.into(),shared_mcrust_catalog::Target{
+                asset:name.into(),sha256:"a".repeat(64),size:5000,
+                package:"com.visstudios.mcrust".into(),version_code:1001,
+                certificate_sha256:"b".repeat(64)
+            });
+            assets.push(ForkAsset{name:name.into(),size:5000,digest:Some(format!("sha256:{}", "a".repeat(64))),
+                browser_download_url:format!("https://github.com/{VIS_FORK}/releases/download/{tag}/{name}")});
+        }
+        let contract=shared_mcrust_catalog::Contract{
+            schema:1,source_repo:format!("https://github.com/{VIS_FORK}.git"),
+            engine_commit:"123456789abc0000000000000000000000000000".into(),
+            minecraft:"26.3".into(),protocol:777,data_version:5023,
+            resource_pack:[97,1],data_pack:[121,0],targets
+        };
+        let mut release=ForkRelease{tag_name:tag.into(),draft:false,prerelease:false,assets};
+        contract.validate(tag).unwrap();
+        assert!(fork_assets_match_contract(&release,&contract).is_ok());
+        release.assets.pop();
+        assert!(fork_assets_match_contract(&release,&contract).is_err());
+        release.assets.push(ForkAsset{
+            name:"vis-horizon-android-arm64.apk".into(),size:5000,
+            digest:Some(format!("sha256:{}", "c".repeat(64))),
+            browser_download_url:format!("https://github.com/{VIS_FORK}/releases/download/{tag}/vis-horizon-android-arm64.apk")
+        });
+        assert!(fork_assets_match_contract(&release,&contract).is_err());
+        release.assets.last_mut().unwrap().digest=Some(format!("sha256:{}", "a".repeat(64)));
+        release.assets.push(release.assets.last().unwrap().clone());
+        assert!(fork_assets_match_contract(&release,&contract).is_err());
+        release.prerelease=true;
+        assert!(fork_release(&[release],"vis-horizon-android-arm64.apk").is_err());
     }
     #[test] fn fork_metadata_rejects_tampering_and_wrong_commit(){
         let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();

@@ -51,7 +51,7 @@ checks = {
     "Preserve legacy imported instance binaries":
         "crate::horizon_download::verify_managed_build(&folder)?;" in horizon,
     "User interface offers automatic fork downloads":
-        "Descargar Horizon al instalar" in ui
+        "Descargar VIS Nexo al instalar" in ui
         and "use-horizon-source" in ui,
     "Optional source compilers remain separate from normal installer":
         all(term in checks_script for term in

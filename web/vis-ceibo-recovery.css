@@ -1,0 +1,17 @@
+/* VIS Ceibo account recovery: compact integration within Riot-inspired profile. */
+.vis-ceibo-security { grid-column:1/-1;display:flex;flex-direction:column;gap:14px;min-width:0; }
+.vis-ceibo-section { display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;
+ border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025); }
+.vis-ceibo-section>b{font-size:.9rem}
+.vis-ceibo-section>small {color:#a6a3b8;font-size:.83rem}
+.vis-ceibo-section .muted{font-size:.82rem;margin:0}
+.vis-ceibo-input-line{display:flex;flex-wrap:wrap;gap:7px;align-items:center;max-width:100%;min-width:0;}
+.vis-ceibo-input-line input { min-width:160px;flex:1 1 180px;min-height:37px;border-radius:8px;
+ border:1px solid rgba(255,255,255,.17);background:rgba(0,0,0,.15);padding:8px 10px;color:inherit;}
+.vis-ceibo-sessions{display:flex;flex-direction:column;gap:5px}
+.vis-ceibo-session{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px;border-radius:8px;background:rgba(255,255,255,.03);}
+.vis-ceibo-session small{color:#a6a3b8;margin-right:auto}
+.vis-ceibo-recovery .auth-form{display:flex;flex-direction:column;gap:10px}
+.vis-ceibo-auth-nav{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;align-items:center}
+.vis-ceibo-recovery .muted{font-size:.79rem;text-align:center}
+@media(max-width:680px){.vis-ceibo-input-line{flex-direction:column;align-items:stretch}.vis-ceibo-input-line input{min-width:0;width:100%;flex:1 1 auto}.vis-ceibo-section .outline-btn{width:100%}}

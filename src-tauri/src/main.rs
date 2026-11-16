@@ -6,15 +6,18 @@ mod microsoft;
 mod instance_guard;
 mod instance_lock;
 mod instance_backup;
+mod world_cloud;
 mod instance_health;
 mod server_list;
 mod project_mods;
+mod mod_catalog;
 mod maintenance;
 mod cloud;
 mod team_pack;
 mod updates;
 mod ombu;
 mod horizon;
+mod portals;
 mod horizon_download;
 mod download_manager;
 mod social;
@@ -761,6 +764,54 @@ fn game_location_for_operation(
  }
  resolve_player_game_dir(s,project_id,name,source_owner)
 }
+
+#[tauri::command]
+async fn world_cloud_status(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String
+)->Result<Vec<world_cloud::WorldCloudStatus>,String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::status(&game))
+        .await.map_err(|_|"Consulta de mundos interrumpida".to_string())?
+}
+#[tauri::command]
+fn link_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    world:String,folder:String,provider:String
+)->Result<(),String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    world_cloud::link(&game,&world,&folder,&provider)
+}
+#[tauri::command]
+fn unlink_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,world:String
+)->Result<(),String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    world_cloud::unlink(&game,&world)
+}
+#[tauri::command]
+async fn backup_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,world:String
+)->Result<world_cloud::CloudBackup,String>{
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::backup(&game,&world))
+        .await.map_err(|_|"Copia del mundo interrumpida".to_string())?
+}
+#[tauri::command]
+async fn restore_world_cloud(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String,
+    world:String,confirmation:String
+)->Result<String,String>{
+    if confirmation!="RESTAURAR"{return Err("Confirmación de restauración inválida".into());}
+    let game={let s=locked(&state)?;
+        game_location_for_operation(&s,&project_id,&name,None,true)?};
+    tauri::async_runtime::spawn_blocking(move||world_cloud::restore_as_copy(&game,&world))
+        .await.map_err(|_|"Restauración de mundo interrumpida".to_string())?
+}
+
 #[tauri::command]
 async fn instance_backups(
  state:State<'_,Mutex<Backend>>,project_id:String,name:String,source_owner:Option<String>
@@ -979,15 +1030,8 @@ fn delete_instance(
         // Destructive deletion is only possible for directories created by
         // VIS's new Instancias/<name> layout. Legacy arbitrary paths are
         // deliberately restricted to unlinking the library entry.
-        let dir=minecraft::instance_dir(&s.data_root,&username,&current)?;
-        let parent=dir.parent().ok_or("La instancia no tiene carpeta padre")?;
-        if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
-            return Err("Por seguridad, los archivos de las instalaciones antiguas solo pueden eliminarse manualmente. Podés quitar la instancia de VIS conservando los mundos.".into());
-        }
-        let library=parent.parent().ok_or("Biblioteca de instancia inválida")?;
-        if instance_guard::managed_child(library,&name)?!=dir{
-            return Err("La carpeta no coincide con la instancia administrada por VIS".into());
-        }
+        let folder=minecraft::instance_dir(&s.data_root,&username,&current)?;
+        let dir=instance_guard::deletion_target(&folder,&current.name,&current.project_id,&s.data_root)?;
         for account in &s.storage.data.accounts{
             for other in s.storage.prefs(&account.username).instances{
                 if account.username==username && other.project_id==project_id && other.name==name {continue;}
@@ -997,16 +1041,6 @@ fn delete_instance(
             }
         }
         if dir.exists(){
-            let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
-            if meta.file_type().is_symlink()||!meta.is_dir(){
-                return Err("La carpeta de la instancia no es un directorio seguro".into());
-            }
-            let has_marker=dir.join(".vis/instance.json").is_file()
-                ||dir.join(".vslauncher/install.json").is_file()
-                ||dir.join(".vis/horizon.json").is_file();
-            if !has_marker && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
-                return Err("La carpeta contiene datos sin marca de instalación VIS. Solo puede quitarse de la biblioteca; no se borrarán archivos desconocidos.".into());
-            }
             // Use the same per-game guard as Java/Horizon and backup/restore.
             // Never delete a directory that another VIS process is writing to.
             let _deletion_guard=minecraft::acquire_game_run(&dir)?;
@@ -1018,8 +1052,8 @@ fn delete_instance(
     Ok(s.snapshot())
 }
 /// Explicit two-step bulk removal. Unlinking never touches Minecraft files.
-/// Physical removal is separately opted-in and allowed only for safely
-/// recognized VIS-managed Instancias/<name> directories after full preflight.
+/// Physical removal accepts only verified VIS installations, including older
+/// paths, after checking every selected folder and all other profiles.
 #[derive(Deserialize)]
 struct InstanceDeleteKey { project_id:String, name:String, #[serde(default)] source_owner:String }
 #[tauri::command]
@@ -1069,15 +1103,8 @@ fn delete_instances_batch(
     let mut folders=Vec::new();
     if erase_files {
         for instance in &chosen {
-            let dir=minecraft::instance_dir(&s.data_root,&owner,instance)?;
-            let parent=dir.parent().ok_or("Carpeta de instancia inválida")?;
-            if parent.file_name().and_then(|p|p.to_str())!=Some("Instancias"){
-                return Err("La eliminación física solo permite instancias nuevas de VIS bajo Instancias/<nombre>. Desmarcá borrar archivos para conservar las instalaciones antiguas.".into());
-            }
-            let library=parent.parent().ok_or("Biblioteca inválida")?;
-            if instance_guard::managed_child(library,&instance.name)?!=dir {
-                return Err("La carpeta seleccionada no corresponde con una instancia VIS administrada".into());
-            }
+            let source=minecraft::instance_dir(&s.data_root,&owner,instance)?;
+            let dir=instance_guard::deletion_target(&source,&instance.name,&instance.project_id,&s.data_root)?;
             // A saved game may be owned/referenced by another local account.
             for account in &s.storage.data.accounts {
                 for other in s.storage.prefs(&account.username).instances {
@@ -1085,18 +1112,6 @@ fn delete_instances_batch(
                         && other.name==instance.name {continue;}
                     let other_dir=minecraft::instance_dir(&s.data_root,&account.username,&other)?;
                     instance_guard::independent(&dir,&other_dir)?;
-                }
-            }
-            if dir.exists() {
-                let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
-                if meta.file_type().is_symlink()||!meta.is_dir(){
-                    return Err("La carpeta no es un directorio seguro".into());
-                }
-                let marked=dir.join(".vis/instance.json").is_file()
-                    ||dir.join(".vslauncher/install.json").is_file()
-                    ||dir.join(".vis/horizon.json").is_file();
-                if !marked && fs::read_dir(&dir).map_err(|e|e.to_string())?.next().is_some(){
-                    return Err("Una carpeta contiene archivos sin marca VIS. No se eliminarán; usá quitar de la biblioteca.".into());
                 }
             }
             folders.push(dir);
@@ -1324,6 +1339,86 @@ fn save_brand_name(state: State<'_, Mutex<Backend>>, name: String) -> Result<Sna
     Ok(s.snapshot())
 }
 
+// Per-VIS-account public skin cache. Only cosmetic PNG data is stored here:
+// no session token, password, Microsoft identity or third-party path.
+fn vis_skin_file(root:&Path,owner:&str)->Option<PathBuf>{
+    if !(3..=24).contains(&owner.len()) ||
+        !owner.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_'){
+        return None;
+    }
+    Some(root.join("assets").join("vis-skins").join(format!("{owner}.png")))
+}
+fn valid_vis_skin_png(bytes:&[u8])->bool{
+    if bytes.len()<33||bytes.len()>65536 ||
+       !bytes.starts_with(&[137,80,78,71,13,10,26,10])||
+       &bytes[12..16]!=b"IHDR" {return false;}
+    let width=u32::from_be_bytes([bytes[16],bytes[17],bytes[18],bytes[19]]);
+    let height=u32::from_be_bytes([bytes[20],bytes[21],bytes[22],bytes[23]]);
+    width==64&&[32,64].contains(&height)
+       && bytes[24]==8&&[2,6].contains(&bytes[25])
+       && bytes[26]==0&&bytes[27]==0&&bytes[28]==0
+}
+/// A published VIS Social skin is downloaded only by the signed-in launcher.
+/// Clear it on skin deletion; preserve each account's separate cached texture.
+#[tauri::command]
+fn cache_vis_skin(state:State<'_,Mutex<Backend>>,png:Option<String>)->Result<bool,String>{
+    let s=locked(&state)?;
+    let user=s.username()?;
+    let file=vis_skin_file(&s.data_root,user).ok_or("Nombre de cuenta VIS inválido")?;
+    let parent=file.parent().ok_or("Directorio de skin no disponible")?;
+    fs::create_dir_all(parent).map_err(|_|"No se pudo preparar el caché de skins VIS")?;
+    let assets=asset_dir(&s).canonicalize().map_err(|_|"Biblioteca de recursos VIS no disponible")?;
+    let parent=parent.canonicalize().map_err(|_|"Caché de skins VIS no disponible")?;
+    if !parent.starts_with(assets){return Err("Ubicación no permitida para skins VIS".into());}
+    if fs::symlink_metadata(&file).is_ok_and(|m|m.file_type().is_symlink()){
+        return Err("No se permite un enlace simbólico para la skin VIS".into());
+    }
+    if let Some(png)=png{
+        if png.len()>87500||!png.starts_with("data:image/png;base64,"){
+            return Err("La skin pública debe ser PNG base64 válido".into());
+        }
+        let encoded=png.strip_prefix("data:image/png;base64,").unwrap_or_default();
+        let bytes=STANDARD.decode(encoded).map_err(|_|"Skin VIS corrupta")?;
+        if !valid_vis_skin_png(&bytes){return Err("Skin VIS debe medir 64×64 o 64×32".into());}
+        let temp=parent.join(format!(".vis-skin-{}-{}.partial",user,std::process::id()));
+        let result=(||->Result<(),String>{
+            use std::io::Write;
+            let mut output=fs::OpenOptions::new().write(true).create_new(true).open(&temp)
+                .map_err(|_|"No se pudo crear un archivo temporal de skin VIS")?;
+            output.write_all(&bytes).map_err(|_|"No se pudo guardar la skin VIS")?;
+            output.sync_all().map_err(|_|"No se pudo terminar de guardar la skin VIS")?;
+            drop(output);
+            #[cfg(target_os="windows")]
+            if file.is_file(){fs::remove_file(&file).map_err(|_|"Skin VIS en uso")?;}
+            fs::rename(&temp,&file).map_err(|_|"No se pudo activar la skin VIS")?;
+            Ok(())
+        })();
+        if result.is_err(){let _=fs::remove_file(&temp);}
+        result?;
+    }else if file.is_file(){
+        fs::remove_file(&file).map_err(|_|"No se pudo quitar la skin VIS")?;
+    }
+    Ok(file.exists())
+}
+fn local_horizon_skin(s:&Backend,user:&str)->Option<PathBuf>{
+    // The Social skin cache belongs to the logged-in VIS identity, never
+    // to the owner of a shared installation.
+    if let Some(path)=vis_skin_file(&s.data_root,user){
+        if fs::symlink_metadata(&path).ok().is_some_and(|m|m.is_file()&&!m.file_type().is_symlink()&&m.len()<=65536){
+            return path.canonicalize().ok();
+        }
+    }
+    let chosen=s.storage.get(user)?.skin.as_str();
+    if chosen.is_empty(){return None;}
+    let file=PathBuf::from(chosen).canonicalize().ok()?;
+    if !file.starts_with(asset_dir(s).canonicalize().ok()?)||
+       !file.extension().and_then(|e|e.to_str()).is_some_and(|e|e.eq_ignore_ascii_case("png"))||
+       !fs::metadata(&file).ok().is_some_and(|m|m.is_file()&&m.len()<=65536){
+        return None;
+    }
+    Some(file)
+}
+
 // Minecraft Java / Fabric / Modrinth: direct service layer over the existing account and project state.
 // Admin policy is ALWAYS validated by Rust before a game process is spawned.
 fn checked_instance(s:&Backend,project_id:&str,name:&str,require_enabled:bool)->Result<(String,Instance),String>{
@@ -1355,6 +1450,32 @@ async fn minecraft_versions()->Result<Vec<minecraft::VersionChoice>,String>{
 #[tauri::command]
 async fn fabric_loaders(version:String)->Result<Vec<String>,String>{
     tauri::async_runtime::spawn_blocking(move||minecraft::get_fabric_loaders(&version)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+fn horizon_project_menu(state:State<'_,Mutex<Backend>>,project_id:String,name:String,config:Option<serde_json::Value>)->Result<(),String>{
+    let s=locked(&state)?;
+    // Editing Horizon's server/menu layout is developer-only, including on personal instances.
+    s.admin()?;
+    let(owner,instance)=checked_instance(&s,&project_id,&name,true)?;
+    if instance.engine!="horizon"{return Err("La instancia no es Horizon".into());}
+    let folder=minecraft::instance_dir(&s.data_root,&owner,&instance)?.join(".vis");
+    if folder.exists()&&fs::symlink_metadata(&folder).map_err(|e|e.to_string())?.file_type().is_symlink(){return Err("Carpeta de configuración inválida".into());}
+    fs::create_dir_all(&folder).map_err(|e|e.to_string())?;
+    let path=folder.join("menu.json");
+    if let Some(value)=config {
+        let server=value["server"].as_str().ok_or("Falta el servidor")?;
+        if server.is_empty()||server.len()>255||!server.bytes().all(|b|b.is_ascii_alphanumeric()||b".-_:[]".contains(&b)){return Err("Dirección de servidor inválida".into());}
+        let buttons=value["buttons"].as_array().ok_or("Faltan botones")?;
+        if buttons.is_empty()||buttons.len()>12||value.to_string().len()>16384{return Err("Menú demasiado grande".into());}
+        if !buttons.iter().any(|b|b["action"]=="play"){return Err("Falta el botón Jugar".into());}
+        for button in buttons {
+            if !["play","settings","quit","friends"].contains(&button["action"].as_str().unwrap_or("")){return Err("Acción de botón inválida".into());}
+            let label=button["label"].as_str().ok_or("Falta la etiqueta")?;if label.chars().count()>40||label.chars().any(char::is_control){return Err("Etiqueta inválida".into());}
+            if button["width"].as_f64().unwrap_or(0.0)<0.1{return Err("El botón es demasiado angosto".into());}
+            for key in ["x","y","width"] {let n=button[key].as_f64().ok_or("Posición inválida")?;if !(0.0..=1.0).contains(&n){return Err("Usá posiciones relativas entre 0 y 1".into());}}
+        }
+        atomic_json(&path,&value)
+    }else{if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;}Ok(())}
 }
 #[tauri::command]
 fn horizon_source_build()->Result<String,String>{
@@ -1394,7 +1515,7 @@ async fn launch_horizon(
     ms:State<'_,Mutex<microsoft::MicrosoftState>>,
     project_id:String,name:String,session_file:String,source_owner:Option<String>
 )->Result<minecraft::LaunchResult,String>{
-    let (owner,mut instance,root,visitor,active,is_ms_profile,guest) = {
+    let (owner,mut instance,root,visitor,active,is_ms_profile,guest,vis_skin) = {
         let s=locked(&state)?;
         if let Some(nick)=s.guest_name.as_ref(){
             // Guest mode may use installed game resources, but cannot consume a
@@ -1409,7 +1530,7 @@ async fn launch_horizon(
                     && i.name==name && i.project_id==project_id)
                 .ok_or("La instancia Horizon no está disponible para modo offline")?;
             (source.to_owned(),ins,s.data_root.clone(),Some(nick.clone()),
-                String::new(),false,Some(nick.clone()))
+                String::new(),false,Some(nick.clone()),None)
         }else{
             let active=s.username()?.to_owned();
             let is_ms_profile=s.storage.get(&active).is_some_and(|a|a.microsoft_linked);
@@ -1422,7 +1543,7 @@ async fn launch_horizon(
                 (other.to_owned(),ins)
             }else{checked_instance(&s,&project_id,&name,true)?};
             (owner,instance,s.data_root.clone(),from.map(|_|active.clone()),
-                active,is_ms_profile,None)
+                active.clone(),is_ms_profile,None,local_horizon_skin(&s,&active))
         }
     };
     if instance.engine!="horizon"{return Err("No es una instancia Horizon".into());}
@@ -1457,15 +1578,42 @@ async fn launch_horizon(
         let effective=session_path.as_ref()
             .map(|p|p.to_string_lossy().into_owned())
             .unwrap_or(session_file);
+        let game_dir=if let Some(player)=visitor.as_ref() {
+            minecraft::shared_game_directory(&root,&owner,&instance,player)?
+        }else{dir.clone()};
         let outcome=if let Some(player)=visitor {
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
-            horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir)
-        }else{horizon::launch(&app,&dir,&instance,&effective)};
+            horizon::launch_shared_with_skin(&app,&dir,&instance,&effective,&game_dir,vis_skin.as_deref())
+        }else{horizon::launch_with_skin(&app,&dir,&instance,&effective,vis_skin.as_deref())};
+        if let Ok(ref launched)=outcome {
+            portals::register(active,launched.pid,instance.name.clone(),instance.project_id.clone(),game_dir.join(".vis/portals.json"));
+        }
         if let Some(path)=session_path{let _=fs::remove_file(path);}
         outcome
     }).await.map_err(|e|e.to_string())?
 }
 
+#[tauri::command]
+fn portals_games(state:State<'_,Mutex<Backend>>)->Result<Vec<portals::Game>,String>{
+    let s=locked(&state)?;
+    Ok(portals::list(s.username()?))
+}
+#[tauri::command]
+async fn portals_command(state:State<'_,Mutex<Backend>>,pid:u32,action:String,code:Option<String>)->Result<serde_json::Value,String>{
+    let owner={let s=locked(&state)?;s.username()?.to_owned()};
+    let task_owner=owner.clone();
+    let result=tauri::async_runtime::spawn_blocking(move||portals::command(&task_owner,pid,&action,code.as_deref())).await.map_err(|e|e.to_string())??;
+    {let s=locked(&state)?;if s.username()?!=owner{return Err("Cambió la cuenta activa".into());}}
+    Ok(result)
+}
+
+#[tauri::command]
+async fn portals_exchange(state:State<'_,Mutex<Backend>>,pid:u32,snapshot:serde_json::Value)->Result<serde_json::Value,String>{
+    let owner={let s=locked(&state)?;s.username()?.to_owned()};let active=owner.clone();
+    let result=tauri::async_runtime::spawn_blocking(move||portals::exchange(&owner,pid,snapshot)).await.map_err(|e|e.to_string())??;
+    {let s=locked(&state)?;if s.username()?!=active{return Err("Cambió la cuenta activa".into());}}
+    Ok(result)
+}
 #[tauri::command]
 fn download_jobs(state:State<'_,Mutex<Backend>>)->Result<Vec<download_manager::DownloadJob>,String>{
     let s=locked(&state)?;
@@ -1478,7 +1626,7 @@ fn cancel_download(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,id:u64)
     download_manager::cancel(&app,s.username()?,id)
 }
 #[tauri::command]
-async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String)->Result<Snapshot,String>{
+async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,project_id:String,name:String,refresh_engine:Option<bool>)->Result<Snapshot,String>{
     let (username,instance,data_root,other_instances,curated_mods)={
         let s=locked(&state)?;
         let (u,i)=checked_instance(&s,&project_id,&name,true)?;
@@ -1501,6 +1649,8 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
         download_manager::checkpoint()?;
         if chosen.engine=="horizon" {
             let dir=minecraft::instance_dir(&data_root,&user,&chosen)?;
+            // Installation and resource preparation must not race a running world.
+            let _instance_guard=minecraft::acquire_game_run(&dir)?;
             // Lite launcher: no Horizon game in AppImage or Windows installer.
             // Fetch only when a player installs the Rust instance; the fork
             // publishes both platform binaries and does not contain Mojang IP.
@@ -1508,7 +1658,9 @@ async fn install_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,p
             // Reinstall the immutable fork engine if the old *path* vanished,
             // while preserving this instance's saves/configuration untouched.
             // Existing files with invalid hashes are never silently trusted.
-            if chosen.horizon_build_dir.is_empty()
+            // Explicit repair/update selects the latest verified three-platform
+            // release. Ordinary launches keep working with their pinned engine.
+            if refresh_engine.unwrap_or(false) || chosen.horizon_build_dir.is_empty()
                 || chosen.horizon_build_dir==horizon::SOURCE_BUILD_ID
                 || !Path::new(&chosen.horizon_build_dir).is_dir() {
                 let game=horizon_download::install_fork(&cloned_app,&dir,&chosen.version)?;
@@ -1686,6 +1838,22 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms
         .await.map_err(|e|e.to_string())??;
     if let Some(window)=app.get_webview_window("main"){let _=window.minimize();}
     Ok(result)
+}
+#[tauri::command]
+async fn mods_catalog_search(state:State<'_,Mutex<Backend>>,session:State<'_,Mutex<social::SocialSession>>,query:String,provider:String,target:mod_catalog::Target)->Result<serde_json::Value,String>{
+    {locked(&state)?.username()?;}
+    target.validate()?;
+    if provider=="curseforge" {
+        return social::social_request(state,session,"/v1/mods/search".into(),"POST".into(),Some(serde_json::json!({"provider":provider,"query":query,"version":target.minecraft,"engine":target.engine}))).await;
+    }
+    tauri::async_runtime::spawn_blocking(move||mod_catalog::search(&provider,&query,&target)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn mods_assess_local(state:State<'_,Mutex<Backend>>,project_id:String,name:String,path:String)->Result<mod_catalog::Assessment,String>{
+    let instance={let s=locked(&state)?;let(_,instance)=checked_instance(&s,&project_id,&name,false)?;instance};
+    let platform=if cfg!(target_os="windows"){"windows-x64"}else{"linux-x86_64"};
+    let target=mod_catalog::Target{engine:instance.engine,loader:instance.loader,minecraft:instance.version,platform:platform.into()};
+    tauri::async_runtime::spawn_blocking(move||mod_catalog::inspect(Path::new(&path),target)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 async fn search_modrinth(state:State<'_,Mutex<Backend>>,query:String,version:String,kind:String)->Result<Vec<minecraft::ModHit>,String>{
@@ -1876,7 +2044,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, world_cloud_status, link_world_cloud, unlink_world_cloud, backup_world_cloud, restore_world_cloud, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_realtime_ticket, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
@@ -1885,15 +2053,22 @@ fn main() {
             microsoft::microsoft_set_cape, microsoft::microsoft_hide_cape,
             microsoft::microsoft_use_skin, microsoft::microsoft_use_saved_skin,
             microsoft::microsoft_upload_skin,
+            microsoft::microsoft_publish_vis_skin,
             social::social_identity_info,
             social::social_cloud_register, social::social_cloud_login,
+            social::social_cloud_mfa_finish, social::social_cancel_pending_mfa,
             social::social_enable_cloud_password,
-            import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, save_brand_name,
-            set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
-            export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
+            social::social_recovery_start, social::social_recovery_verify_email,
+            social::social_recovery_reset, social::social_change_cloud_password,
+            social::social_rebind_device,
+            import_asset, save_cropped_asset, clear_asset, commit_profile_asset, preview_asset, cache_vis_skin, save_brand_name,
+            horizon_project_menu, portals_exchange, portals_games, portals_command, set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
+            export_worlds_instance, import_worlds_instance, launch_minecraft, mods_catalog_search, mods_assess_local, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
             fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
 }
+
+

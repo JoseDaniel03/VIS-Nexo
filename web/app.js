@@ -1,8 +1,13 @@
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 import { createSocialRemote } from './social-remote.js';
-/* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
-   VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
-   VIS Nexo 2.17 — Universe / Worlds / Horizon Rust Edition + compartir instancias offline.
+import { createDiagnosticDialog,redactDiagnostic } from './error-dialog.js';
+import { createWorldsPortals } from './worlds-portals.js';
+import {createServerVoice} from './server-voice.js';
+import {createGamePortals} from './game-portals.js';
+import {openVoiceSettings} from './voice-settings.js';
+/* VIS Nexo 2.16 — VIS Nexo library, integrity selection and version pinning.
+   VIS Nexo 2.14 — VIS Nexo diagnostics and local build discovery.
+   VIS Nexo 2.17 — Universe / Worlds / VIS Nexo Rust Edition + compartir instancias offline.
    VIS Nexo 2.6 — VIS Universe and User libraries, personal instances.
    VIS Nexo 2.3 — Projects & inline publishing.
    VIS Nexo 2.2 — motion & interaction release (Tauri 2 WebView, Rust backend unchanged).
@@ -11,6 +16,8 @@ import { createSocialRemote } from './social-remote.js';
    Desktop operations ALWAYS pass through Rust commands. Browser preview is ephemeral. */
 const root = document.querySelector('#app');
 const toastRegion = document.querySelector('#toast-region');
+const diagnostics=createDiagnosticDialog(document);
+let lastDiagnosticSignature='',lastDiagnosticAt=0;
 const T = window.__TAURI__;
 const native = !!T?.core?.invoke;
 const empty = () => ({user:null,projects:[],instances:[],friends:[],incoming_requests:[],outgoing_requests:[],messages:[],branding:{name:'VIS Nexo',launcher_logo:'',home_image:'',login_image:''},project_execution:{},recent_accounts:[],catalog_source:'',hidden_shared_instances:[],mode:native?'local':'preview'});
@@ -20,16 +27,19 @@ let accountGeneration=0;
 const pendingOperations=new Set();
 function resetAccountView(){
  accountGeneration++;
+ if(native)void serverVoice.leave();
  mcSelected=null;modResults=[];installedFiles=[];horizonChecks=[];
  bulkInstanceMode=false;bulkInstanceSelection.clear();
  cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;downloadJobs=[];teamReview=null;
   premiumSkinSync=true;premiumSkinModel='classic';
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();avatarLoads.clear();
  socialMediaQueue.length=0;publicSkinLookup=null;
+ projectCommunity=null;projectCommunityId='';projectCommunityLoading=false;projectCommunityError='';
+ ceiboSecurity=null;ceiboSessions=null;ceiboRecoveryStep='request';
  for(const path of Object.keys(assetCache))delete assetCache[path];
  previewCacheOrder.length=0;previewCacheBytes=0;previewFailed.clear();
  previewLoading.clear();
- chatWith='';chatWindowSize=100;friendFilter='';
+ chatWith='';chatWindowSize=100;friendFilter='';horizonGameRunning=false;
 }
 async function onceOperation(key,operation){
  if(pendingOperations.has(key))return false;
@@ -37,6 +47,7 @@ async function onceOperation(key,operation){
  try{return await operation();}finally{pendingOperations.delete(key);}
 }
 let page = 'home', selectedId = '', authMode='login', authProvider=native?'cloud':'local', authBusy=false, showPassword=false;
+let ceiboRecoveryKind='password',ceiboRecoveryStep='request',ceiboSecurity=null,ceiboSessions=null;
 let microsoftTicket=null, microsoftPollGeneration=0, microsoftGamertag=null;
 let premiumCosmetics=null, premiumCosmeticsBusy=false;
 let premiumSkinSync=true, premiumSkinModel='classic';
@@ -99,6 +110,9 @@ async function beginMicrosoftLogin(){
 }
 
 let socialVisible = innerWidth >= 980, socialTab='global', chatWith='', friendFilter='', activeFeed='news', dialog=null, stateEditorOpen=false;
+// World invitations are only available while VIS Nexo runs under this account.
+let horizonGameRunning=false;
+let projectCommunity=null, projectCommunityId='', projectCommunityLoading=false, projectCommunityError='';
 let wizard=null, wizardStep=0, assetCache={}, query='', contextMenu=null;
 let designerMode = false;
 // The display mode is a local UI preference; it does not change account permissions.
@@ -195,6 +209,8 @@ const iconPaths = {
   trash:'<path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',
   edit:'<path d="m15 5 4 4M4 20l4-.8L20 7a2.8 2.8 0 0 0-4-4L4 15l-.8 4Z"/>',
   shield:'<path d="M12 22s9-4.5 9-11V5l-9-3-9 3v6c0 6.5 9 11 9 11Z"/>',
+  mail:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  key:'<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-4 4 3 3m-1-5 3 3"/>',
   cloud:'<path d="M20 17a4 4 0 0 0-1.3-7.8A7 7 0 0 0 5 11a4 4 0 0 0 0 8h15"/>',
   database:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 2 4 3 9 3s9-1 9-3V5M3 12c0 2 4 3 9 3s9-1 9-3"/>',
   sliders:'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="currentColor"/><circle cx="16" cy="17" r="2" fill="currentColor"/>',
@@ -209,7 +225,26 @@ const iconPaths = {
 function I(name,size=19){return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name]||iconPaths.grid}</svg>`}
 const logo = (big=false) => `<span class="vs-mark${big?' large':''}" aria-hidden="true">${db.branding?.launcher_logo&&preview(db.branding.launcher_logo)?`<img src="${preview(db.branding.launcher_logo)}" alt=""/>`:'<span>V</span>'}</span>`;
 const msMark=()=>'<span class="ms-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
-function message(text,bad=false){ while(toastRegion.querySelectorAll('.toast').length>=3)toastRegion.querySelector('.toast')?.remove(); const d=document.createElement('div');d.className=`toast ${bad?'bad':''}`;d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(text)}</span>`;toastRegion.append(d);setTimeout(()=>d.remove(),4400);}
+function message(text,bad=false,context=null){
+ while(toastRegion.querySelectorAll('.toast').length>=3)toastRegion.querySelector('.toast')?.remove();
+ const d=document.createElement('div');d.className=`toast ${bad?'bad':''}`;
+ d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(bad?redactDiagnostic(text):text)}</span>`;
+ toastRegion.append(d);
+ if(bad){
+   const info={platform:'Windows / Linux',system:context?.system||'VIS Nexo',stage:context?.stage||'Operación del launcher',
+       error:context?.error||text,code:context?.code??'',release:context?.release||''};
+   const details=document.createElement('button');
+   details.type='button';details.className='vis-error-detail-button';details.textContent='Ver y copiar error';
+   details.addEventListener('click',()=>diagnostics.open(info));
+   d.append(details);
+   const signature=info.system+'|'+info.stage+'|'+info.error;
+   if(context?.automatic===true && (signature!==lastDiagnosticSignature || Date.now()-lastDiagnosticAt>15000)){
+     lastDiagnosticSignature=signature;lastDiagnosticAt=Date.now();
+     diagnostics.open(info);
+   }
+ }
+ setTimeout(()=>d.remove(),7400);
+}
 function closeDialog(){
  beginSurfaceDismiss(root,'.dialog',()=>{
    const target=lastDialogTrigger;
@@ -452,6 +487,7 @@ function refreshSocialSkins(snapshot){
    if(socialSkins.get(username)?.version===version)continue;
    if(version===0){
      rememberSocialMedia(socialSkins,username,{version,skin:null,head:''},45);
+     if(username===owner&&native)void command('cache_vis_skin',{png:null}).catch(()=>{});
      continue;
    }
    const key=username+':'+version;if(skinLoads.has(key))continue;
@@ -464,6 +500,11 @@ function refreshSocialSkins(snapshot){
        if(png&&(!png.startsWith('data:image/png;base64,')||png.length>87500))return;
        const head=png?await skinHeadPreview(png):'';
        if(generation!==accountGeneration||db.user?.username!==owner)return;
+       if(username===owner&&native){
+         // Only a validated PNG returned for the authenticated VIS user may
+         // become a local VIS Nexo offline texture; no token or chat is cached.
+         await command('cache_vis_skin',{png}).catch(()=>{});
+       }
        rememberSocialMedia(socialSkins,username,{version,skin:png,head},45);
        scheduleSocialRender();
      }catch{/* Invalid or unavailable skins remain placeholders. */}
@@ -550,6 +591,7 @@ const social = createSocialRemote(command, (snapshot, messages) => {
     incoming_requests:snapshot.incoming_requests||[], outgoing_requests:snapshot.outgoing_requests||[],
     messages:messages||[] };
   mergeSocialView();
+  if(page==='project'&&selectedId&&projectCommunityId!==selectedId&&!projectCommunityLoading)void loadProjectCommunity(selectedId);
   refreshSocialAvatars(snapshot);
   refreshSocialSkins(snapshot);
   scheduleSocialRender();
@@ -559,6 +601,16 @@ const social = createSocialRemote(command, (snapshot, messages) => {
   socialError = error || '';
   if (db.user) scheduleSocialRender();
 });
+const portalsWorlds=createWorldsPortals(command,social,()=>db.user?.username||'',games=>{
+ const value=window.prompt('Elegí la partida VIS Nexo:\n'+games.map((g,i)=>(i+1)+'. '+g.name).join('\n'),'1');
+ if(value===null)return null;
+ const selected=games[Number(value)-1];
+ if(!selected)throw Error('Partida inválida');
+ return selected;
+},error=>message(String(error),true));
+const serverVoice=createServerVoice((path,method,body)=>command('social_request',{path,method,body}),state=>{if(state.error)message(state.error,true);});
+const gamePortals=createGamePortals(command,social,portalsWorlds,serverVoice,()=>db,error=>{console.warn('VIS Portals:',error);},()=>void openVoiceSettings(serverVoice),running=>{if(horizonGameRunning!==running){horizonGameRunning=running;scheduleSocialRender();}});
+if(native)gamePortals.start();
 async function enableSocialCloudPassword(){
  if(!social.connected()){message('Conectá VIS Social para vincular la cuenta.',true);return;}
  const password=window.prompt('Nueva contraseña online (mínimo 10 caracteres, no uses el PIN local):');
@@ -607,7 +659,22 @@ async function selectAndUploadSocialAvatar(){
 async function connectSocial(reuseCloudSession=false) {
   if (!native || !db.user || isGuest()) return;
   try { await social.start(db.user.username,reuseCloudSession); }
-  catch (error) { message('VIS Social sin conexión: ' + String(error), true); }
+  catch (error) {
+    if(String(error).includes('VIS_CEIBO_MFA_REQUIRED')){
+      const identity=db.user?.username;
+      const code=window.prompt('VIS Ceibo requiere un segundo factor para conectar esta cuenta. Ingresá el código de tu aplicación o uno de emergencia:');
+      if(!code){void command('social_cancel_pending_mfa').catch(()=>{});return;}
+      try{
+        const snapshot=await command('social_cloud_mfa_finish',{code:code.trim()});
+        if(db.user?.username!==identity)return;
+        db=snapshot;render();
+        await social.start(identity,true);
+        message('VIS Social conectado con MFA.');
+      }catch(failure){message('MFA VIS Social: '+String(failure),true);}
+      return;
+    }
+    message('VIS Social sin conexión: ' + String(error), true);
+  }
 }
 async function apply(name,args={},success=''){
  const generation=accountGeneration;
@@ -625,7 +692,53 @@ async function apply(name,args={},success=''){
  });
 }
 function brandLabel(){return esc(db.branding?.name||'VIS Nexo');}
+function ceiboRecoveryView(){
+ const password=ceiboRecoveryKind==='password',reset=ceiboRecoveryStep==='reset'&&password;
+ return '<main class="auth-screen"><section class="auth-glass vis-ceibo-recovery">'+
+  '<div class="auth-brand">'+logo(true)+'<span>'+brandLabel()+'</span></div>'+
+  '<div class="auth-intro"><span class="kicker">VIS CEIBO / SEGURIDAD</span><h1>'+
+  (reset?'Crear nueva contraseña':password?'Olvidé mi contraseña':'Olvidé mi usuario')+'</h1>'+
+  '<p>'+(reset?'Pegá el código recibido en tu correo verificado. Nunca compartas el código.':
+     'Las instrucciones se envían solamente a correos previamente verificados. Nunca confirmamos si una cuenta existe.')+'</p></div>'+
+  (reset?'<form id="ceibo-recovery-reset-form" class="auth-form">'+
+    '<label class="field-label" for="ceibo-reset-code">Código de un solo uso</label>'+
+    '<div class="auth-input">'+I('key',17)+'<input id="ceibo-reset-code" name="code" required minlength="43" maxlength="43" autocomplete="off" spellcheck="false"/></div>'+
+    '<label class="field-label" for="ceibo-reset-new">Nueva contraseña VIS</label>'+
+    '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-new" name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
+    '<label class="field-label" for="ceibo-reset-confirm">Confirmarla</label>'+
+    '<div class="auth-input">'+I('lock',17)+'<input id="ceibo-reset-confirm" name="confirm" type="password" minlength="10" maxlength="128" required autocomplete="new-password"/></div>'+
+    '<label class="field-label" for="ceibo-reset-backup">Código MFA de emergencia (cuentas con MFA o administradoras)</label>'+
+    '<div class="auth-input">'+I('shield',17)+'<input id="ceibo-reset-backup" name="recovery_code" autocomplete="off" placeholder="Código de respaldo, si corresponde"/></div>'+
+    '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Cambiar contraseña</button></form>':
+    '<form id="ceibo-recovery-start-form" class="auth-form">'+
+    '<label class="field-label" for="ceibo-recovery-identity">'+
+     (password?'Correo verificado o @usuario VIS':'Correo electrónico verificado')+'</label>'+
+    '<div class="auth-input">'+I('mail',17)+'<input id="ceibo-recovery-identity" name="identity" required maxlength="254" autocomplete="email" placeholder="'+(password?'tu@email.com o @usuario':'tu@email.com')+'"/></div>'+
+    '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Enviar instrucciones</button></form>')+
+  '<div class="vis-ceibo-auth-nav">'+
+    (password?'<button type="button" class="auth-footer" data-action="ceibo-recovery-step">'+(reset?'Solicitar otro código':'Ya tengo el código')+'</button>':'')+
+    '<button type="button" class="auth-footer" data-action="ceibo-recovery-back">Volver al inicio de sesión</button>'+
+  '</div><p class="muted">Para cuentas Microsoft, la recuperación de contraseña se hace en Microsoft.</p>'+
+  '</section></main>';
+}
+function ceiboMfaLoginView(){
+ return '<main class="auth-screen"><section class="auth-glass vis-ceibo-recovery" aria-label="Segundo factor VIS Ceibo">'+
+ '<div class="auth-brand">'+logo(true)+'<span>'+brandLabel()+'</span></div>'+
+ '<div class="auth-intro"><span class="kicker">VIS CEIBO / SEGURIDAD</span>'+
+ '<h1>Verificación en dos pasos</h1>'+
+ '<p>La contraseña ya fue comprobada. Para entrar a tu cuenta VIS, ingresá el código de tu aplicación Authenticator o un código de emergencia de un solo uso.</p></div>'+
+ '<form id="ceibo-login-mfa-form" class="auth-form">'+
+ '<label class="field-label" for="ceibo-login-mfa-code">Código de autenticación</label>'+
+ '<div class="auth-input">'+I('shield',17)+
+ '<input id="ceibo-login-mfa-code" name="code" required autocomplete="one-time-code" maxlength="36" placeholder="6 dígitos o código de emergencia" spellcheck="false"/></div>'+
+ '<button class="primary-btn auth-submit" type="submit" '+(authBusy?'disabled':'')+'>Confirmar identidad y entrar</button>'+
+ '</form><button class="auth-footer" data-action="ceibo-login-mfa-cancel" type="button">Cancelar inicio de sesión</button>'+
+ '<p class="muted">Sin acceso al autenticador, utilizá uno de los códigos de emergencia que guardaste al activar MFA.</p>'+
+ '</section></main>';
+}
 function loginView(){
+ if(authMode==='recover')return ceiboRecoveryView();
+ if(authMode==='mfa')return ceiboMfaLoginView();
   const reg=authMode==='register', guest=authMode==='offline';
   return `<main class="auth-screen">
     <section class="auth-glass" aria-label="${guest?'Acceso offline':reg?'Crear cuenta':'Inicio de sesión'}">
@@ -654,9 +767,11 @@ function loginView(){
         ${guest?'':`<div class="field-header"><label class="field-label" for="auth-password">Contraseña</label></div>
         <div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" id="auth-password" name="password" autocomplete="${reg?'new-password':'current-password'}" placeholder="${reg?'Creá una contraseña':'Ingresá tu contraseña'}"/><button class="eye-button" type="button" data-action="toggle-password" aria-label="Mostrar u ocultar contraseña">${I(showPassword?'eyeoff':'eye',19)}</button></div>
         `}
+        ${reg&&authProvider==='cloud'?'<label class="field-label" for="auth-register-email">Correo de recuperación (recomendado)</label><div class="auth-input">'+I('mail',17)+'<input type="email" maxlength="254" id="auth-register-email" name="email" autocomplete="email" placeholder="tu@email.com" /></div>':''}
         ${reg?`<label class="field-label" for="auth-repeat">Confirmar contraseña</label><div class="auth-input">${I('lock',18)}<input required minlength="${authProvider==='cloud'?10:4}" maxlength="128" type="${showPassword?'text':'password'}" name="confirm" id="auth-repeat" autocomplete="new-password" placeholder="Repetí tu contraseña" /></div>`:''}
         <button class="primary-btn auth-submit" type="submit" ${authBusy?'disabled':''}>${authBusy?I('timer',20):I('arrow',20)}<span>${authBusy?'Validando...':guest?'Continuar sin cuenta':reg?'Crear cuenta':'Entrar al launcher'}</span></button>
       </form>`}
+      ${authProvider==='cloud'&&!reg&&!guest?'<div class="vis-ceibo-auth-nav"><button type="button" class="auth-footer" data-action="auth-forgot-password">¿Olvidaste tu contraseña?</button><button type="button" class="auth-footer" data-action="auth-forgot-username">¿Olvidaste tu usuario?</button></div>':''}
       ${authProvider==='microsoft'?'':guest?`<button class="auth-footer" data-action="auth-local" type="button">Volver al inicio de sesión</button>`:`<button class="auth-footer" data-action="switch-auth" type="button">${reg?'¿Ya tenés cuenta?':'¿Todavía no tenés cuenta?'} <strong>${reg?'Iniciá sesión':'Registrate'}</strong></button>`}
       ${!native?`<p class="auth-preview">Vista previa en navegador · Los datos de prueba no se guardan.</p>`:''}
     </section>
@@ -704,24 +819,31 @@ function socialPanel(){
  const projectFriends=socialTab==='projects'?
    projectId?friends.filter(f=>(f.shared_projects||[]).includes(projectId)):[]
    :friends;
+ const visibleFriends=projectFriends.filter(f=>(f.username+' '+(f.public_handle||'')+' '+(f.alias||'')+' '+(f.display_name||'')).toLowerCase().includes(friendFilter.toLowerCase())).sort((a,b)=>Number(b.favorite===true)-Number(a.favorite===true)||Number(b.presence==='online')-Number(a.presence==='online')||String(a.alias||a.display_name||a.username).localeCompare(String(b.alias||b.display_name||b.username)));
+ const onlineFriends=(social.online()?projectFriends:[]).filter(f=>['online','away','busy'].includes(f.presence)).length;
+ const socialConnected=social.online();
  const socialOwner=social.state()?.developer===true;
  const accountAdmin=social.state()?.role==='super_admin';
- return `<aside class="social-pane ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
- <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Amigos y mensajes</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
+ return `<aside class="social-pane portals-hub ${socialVisible?'':'is-hidden'}" aria-label="Amigos">
+ <div class="social-top"><div class="social-brand"><span class="social-title">${I('users',20)} VIS PORTALS</span><small>Tu comunidad, estés donde estés</small></div><button class="icon-btn" data-action="toggle-social" title="Ocultar panel">${I('x',18)}</button></div>
+ <div class="portals-network ${socialConnected?'is-online':'is-offline'}" role="status"><span class="dot ${socialConnected?'online':'offline'}"></span><span>${socialConnected?'Cuenta conectada · mensajes cifrados':socialMode==='connecting'?'Conectando tu cuenta…':'Sin conexión a VIS Social'}</span></div>
+ ${!socialConnected&&socialError?`<p class="portals-network-error">${esc(socialError.slice(0,240))}</p>`:''}
  <div class="social-tabs"><button class="${socialTab==='global'?'active':''}" data-action="social-global">Global</button><button class="${socialTab==='projects'?'active':''}" data-action="social-projects">Proyectos</button></div>
- <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(socialDisplayName(db.user?.username||''))}</b><span>${esc(names[db.user?.presence||'online']||'Conectado')} · Cuenta VIS</span></div></div><span class="dot ${esc(db.user?.presence||'online')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
+ <div class="social-person"><div class="person-left">${userAvatar(37)}<div><b>${esc(socialDisplayName(db.user?.username||''))}</b><span>@${esc(publicVisHandle())} · ${esc(socialConnected?(names[db.user?.presence||'online']||'Conectado'):'Sin conexión')}</span></div></div><span class="dot ${esc(socialConnected?(db.user?.presence||'online'):'offline')}"></span><button type="button" class="icon-btn" data-action="social-upload-avatar" title="Subir foto de perfil a VIS Social" aria-label="Subir foto de perfil">${I('image',14)}</button><button type="button" class="icon-btn status-edit" data-action="social-edit-status" title="Cambiar estado" aria-label="Cambiar estado">${I('edit',14)}</button>${stateEditorOpen?`<div class="status-inline"><label for="social-presence">Mi estado</label><select id="social-presence" aria-label="Cambiar estado">${['online','away','busy','invisible'].map(v=>`<option value="${v}" ${db.user?.presence===v?'selected':''}>${names[v]}</option>`).join('')}</select></div>`:''} </div>
 
+ <div class="portals-counters"><span><b>${onlineFriends}</b> disponibles</span><span><b>${projectFriends.length}</b> contactos</span><span><b>${db.incoming_requests?.length||0}</b> solicitudes</span></div>
  <div class="social-group-head"><span class="social-contacts-label">${I('users',15)} ${socialTab==='global'?'MIS CONTACTOS':'CONTACTOS POR PROYECTO'} ${db.incoming_requests?.length?`<span class="contact-notification" title="Solicitudes de amistad pendientes">${db.incoming_requests.length}</span>`:''} </span><span>${projectFriends.length}</span></div>
+ <!-- Voice controls and stop-sharing belong to the game overlay, not the global launcher sidebar. -->
+ ${social.worldInvitations().map(inv=>`<div class="request-row"><span>${esc(inv.sender)} te invita a su mundo · 26.3</span><button class="mini-add" data-action="world-join" data-id="${attr(inv.id)}">Unirme</button><button class="mini-add" data-action="world-decline" data-id="${attr(inv.id)}">Rechazar</button></div>`).join('')}
  <div class="social-search">${I('search',15)}<input id="friend-filter" value="${attr(friendFilter)}" placeholder="Filtrar amigos" aria-label="Filtrar amigos" autocomplete="off"></div>
- <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Amigos globales · el filtro por servidor se habilitará con la presencia online.</p>`:''}
+ <div class="friend-scroll" aria-live="polite">${related?`<p class="small-note">Contactos que comparten este proyecto.</p>`:''}
  ${socialTab==='projects'&&!projectId?`<p class="social-empty">Abrí un proyecto para ver contactos que también lo siguen.</p>`:''}
- ${projectFriends.filter(f=>(f.username+' '+(f.public_handle||'')+' '+(f.alias||'')+' '+(f.display_name||'')).toLowerCase().includes(friendFilter.toLowerCase())).map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${socialAvatarHtml(f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.display_name||f.username)}</b><small>${esc('@'+(f.public_handle||f.username)+' · ')}${names[f.presence]||'Desconectado'}</small></span>${socialSkins.get(f.username)?.head?`<img class="friend-skin-thumb" src="${attr(socialSkins.get(f.username).head)}" alt="Skin VIS de ${attr(f.username)}" title="Skin compartida en VIS"/>`:''}<span class="dot ${f.presence==='online'?'online':'offline'}"></span></button>`).join('')}
+ ${visibleFriends.map(f=>`<button class="friend-item ${chatWith===f.username?'selected':''}" data-action="open-chat" data-id="${attr(f.username)}" title="Clic derecho: cambiar apodo">${socialAvatarHtml(f.username,34)}<span class="friend-meta"><b>${esc(f.alias||f.display_name||f.username)}</b><small>${esc('@'+(f.public_handle||f.username)+' · ')}${esc(names[socialConnected?f.presence:'offline']||'Desconectado')}</small>${f.custom_status?`<small class="friend-custom-status">${esc(f.custom_status)}</small>`:''}</span>${socialSkins.get(f.username)?.head?`<img class="friend-skin-thumb" src="${attr(socialSkins.get(f.username).head)}" alt="Skin VIS de ${attr(f.username)}" title="Skin compartida en VIS"/>`:''}<span class="dot ${socialConnected&&['online','away','busy'].includes(f.presence)?attr(f.presence):'offline'}"></span></button>`).join('')}
+ ${visibleFriends.length===0&&projectFriends.length>0?`<p class="social-empty">No hay contactos que coincidan con tu búsqueda.</p>`:''}
  ${projectFriends.length===0&&socialTab==='global'?`<p class="social-empty">Todavía no tenés amigos. Agregá a alguien por su usuario.</p>`:''}
  ${socialTab==='projects'?`<div class="social-group-head"><span>PROYECTOS PUBLICADOS</span><span>${cloudProjects.filter(p=>p.visibility==='published').length}</span></div>
  ${cloudProjects.filter(p=>p.visibility==='published').slice(0,40).map(p=>`<div class="request-row"><span title="${attr(p.summary||'')}"><b>${esc(p.title)}</b><small> · ${esc(p.id)}</small></span><button type="button" class="mini-add" data-action="social-subscribe-project" data-id="${attr(p.id)}" data-subscribed="${!!p.subscribed}">${p.subscribed?'Dejar de seguir':'Seguir'}</button></div>`).join('')||'<p class="small-note">Aún no hay proyectos publicados en VIS Social.</p>'}
- ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button>`:''}`:''}
- ${social.connected()&&social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-developer-key" title="Consultar clave pública de la cuenta para una habilitación manual en GitHub">Identidad de desarrollador${socialOwner?' · habilitada':''}</button><button class="mini-add" type="button" data-action="social-superadmin-key" title="Preparar solicitud protegida de superadministrador, sin revelar contraseña">Identidad para superadmin${accountAdmin?' · habilitada':''}</button>`:''}
- <button class="mini-add" type="button" data-action="social-public-identity" title="Obtiene la clave pública, nunca la contraseña ni el PIN">Identidad de este dispositivo</button>${social.connected()&&!social.state()?.cloud_login_enabled?`<button class="mini-add" type="button" data-action="social-enable-cloud">Vincular contraseña online</button>`:''}
+ ${socialOwner?`<div class="social-group-head"><span>ADMINISTRACIÓN</span></div><button class="mini-add" type="button" data-action="social-register-project">Registrar proyecto</button><button class="mini-add" type="button" data-action="social-assign-staff">Permisos de proyecto</button>${accountAdmin?`<button class="mini-add" type="button" data-action="social-manage-user">Gestionar usuario</button><button class="mini-add" type="button" data-action="social-global-admin">Administradores globales</button>`:''}`:''}
  `:''}
  ${db.incoming_requests.length?`<div class="social-group-head"><span>SOLICITUDES</span><span>${db.incoming_requests.length}</span></div>${db.incoming_requests.map(u=>`<div class="request-row"><span>${esc(u)}</span><button class="mini-add" data-action="accept-friend" data-id="${attr(u)}">Aceptar</button></div>`).join('')}`:''}
  </div>
@@ -743,7 +865,7 @@ function chatDrawer(){
  const msgs=db.messages.filter(m=>(m.from===db.user?.username&&m.to===chatWith)||(m.to===db.user?.username&&m.from===chatWith));
  // Bounded DOM rendering: O(min(messages, window)), older messages stay in data.
  const visible=msgs.slice(-chatWindowSize);
- return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b><button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="1300" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
+ return `<section class="chat-drawer"><div class="chat-head"><b>${I('message',18)} ${esc(chatWith)}</b>${native&&social.connected()&&horizonGameRunning?`<button type="button" class="mini-add chat-world-invite" data-action="world-invite" data-id="${attr(chatWith)}" title="Invitar desde una partida VIS Nexo iniciada en esta sesión">Invitar a mi mundo</button>`:''}<button data-action="close-chat" class="icon-btn">${I('x',18)}</button></div><div class="chat-messages">${msgs.length>visible.length?`<button type="button" class="chat-load-older" data-action="chat-load-older">Ver mensajes anteriores (${msgs.length-visible.length})</button>`:''}${visible.map(m=>`<div class="bubble ${m.from===db.user?.username?'mine':''}">${esc(m.body)}<small class="message-date">${esc(m.created||'')}</small></div>`).join('')||'<p class="small-note">Sin mensajes todavía</p>'}</div><form id="message-form" class="chat-send"><input name="body" maxlength="1300" placeholder="Escribí un mensaje..." required/><button title="Enviar">${I('send',19)}</button></form></section>`;
 }
 function emptyHome(){return `<div class="empty-projects"><div class="empty-orbit">${I('layers',38)}</div><h3>Todavía no hay proyectos</h3><p>${isAdmin()?'Creá el primer proyecto y personalizá su identidad visual desde el administrador.':'Los proyectos publicados aparecerán acá automáticamente. Si no tenés un catálogo configurado, VIS Studios debe vincular primero la URL pública de Universe.'}</p>${isAdmin()?`<button class="outline-btn" data-action="create-project">${I('plus',17)} Crear proyecto</button>`:''}</div>`;}
 function modeSelector(){
@@ -755,7 +877,7 @@ function modeSelector(){
 function personalHomePage(){
  const items=personalInstances();
  return `<div class="content-inner home-page user-library-page">${modeSelector()}
- <div class="user-library-hero"><div><span class="page-eyebrow">BIBLIOTECA PERSONAL</span><h1>Tu Minecraft, a tu manera.</h1><p>Creá varias versiones Vanilla, Fabric o Horizon Rust, instalá mods compatibles y mantené cada mundo separado de los proyectos oficiales.</p></div>
+ <div class="user-library-hero"><div><span class="page-eyebrow">BIBLIOTECA PERSONAL</span><h1>Tu Minecraft, a tu manera.</h1><p>Creá varias versiones Vanilla, Fabric o VIS Nexo Rust, instalá mods compatibles y mantené cada mundo separado de los proyectos oficiales.</p></div>
  ${!isGuest()?`<button class="primary-btn" data-action="new-personal-instance">${I('plus',18)} Crear instancia</button>`:''}</div>
  <div class="section-heading"><div><span class="page-eyebrow">MIS PERFILES</span><h2>Instancias personales <small>${items.length}</small></h2></div><div class="vis-instance-toolbar">${items.length?`<button class="outline-btn" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar'}</button>`:''}<button class="outline-btn" data-action="go-instances">${I('layers',16)} Ver todas</button></div></div>
  ${bulkInstanceMode?bulkInstanceToolbar(items):''}
@@ -778,6 +900,77 @@ function homePage(){
  <div class="portal-footer-note">${I('shield',14)} ${db.catalog_source?'VIS Universe · Catálogo online: '+esc(db.catalog_source):'VIS Universe · Falta configurar el catálogo remoto en Configuración → Publicación.'} Los borradores locales solo se muestran al administrador.</div></div>`;
 }
 function projectCard(p){const available=isExecutionEnabled(p);return `<button class="project-card portal-game-card" data-action="open-project" data-id="${attr(p.id)}" data-context="${attr(p.id)}"><div class="project-card-cover" ${p.banner_path?bgPhoto(p.banner_path):''}><span class="project-card-watermark">${projectIcon(p)}</span><span class="availability ${available?'available':''}">${available?'Disponible':p.installable?'Pausado':'Próximamente'}</span><span class="card-hover-cta">${I('arrow',17)} Abrir proyecto</span></div><div class="project-card-info"><span class="project-card-logo">${projectIcon(p)}</span><div><strong>${esc(p.title)}</strong><small>${esc(p.subtitle||p.mc_version||'Proyecto VIS Universe')}</small></div>${I('chevron',19)}</div></button>`;}
+
+const visProjectRoles=[
+ ['creator','Creadores'],['helper','Ayudantes'],['content_creator','Creadores de contenido'],
+ ['participant','Participantes'],['guest','Invitados'],['collaborator','Colaboradores'],['mention','Menciones']
+];
+async function loadProjectCommunity(id=selectedId){
+ if(!id||!social.connected()||projectCommunityLoading)return;
+ const generation=accountGeneration;
+ projectCommunityLoading=true;projectCommunityError='';
+ try{
+   const data=await social.projectCommunity(id);
+   if(generation!==accountGeneration||selectedId!==id)return;
+   projectCommunityId=id;projectCommunity=data;
+ }catch(error){
+   if(generation!==accountGeneration||selectedId!==id)return;
+   projectCommunityId=id;projectCommunity=null;projectCommunityError=String(error);
+ }finally{
+   projectCommunityLoading=false;
+   if(generation===accountGeneration&&selectedId===id&&page==='project')render();
+ }
+}
+function projectMediaThumbnail(item){
+ if(item.provider!=='youtube')return '';
+ let video='';
+ try{
+   const url=new URL(item.url);
+   if(url.hostname==='www.youtube.com'&&url.pathname==='/watch')video=url.searchParams.get('v')||'';
+ }catch{}
+ return /^[a-zA-Z0-9_-]{11}$/.test(video)?
+   '<img loading="lazy" alt="" src="https://i.ytimg.com/vi/'+attr(video)+'/mqdefault.jpg"/>':'';
+}
+function projectCommunitySection(p){
+ const c=projectCommunityId===p.id?projectCommunity:null;
+ if(!social.connected())return '<section class="vis-project-community"><h2>'+I('users',19)+' Participantes y medios</h2><p class="muted">Conectá tu cuenta VIS Cloud para ver los roles, solicitudes y videos de este proyecto.</p></section>';
+ if(!c)return '<section class="vis-project-community"><h2>'+I('users',19)+' Participantes y medios</h2><p class="muted">'+esc(projectCommunityError||'Cargando miembros del proyecto…')+'</p><button type="button" class="outline-btn" data-action="project-community-refresh">Consultar participantes</button></section>';
+ const media=(c.media||[]).map(item=>'<article class="vis-community-media-card">'+
+  '<div class="vis-community-media-thumb">'+(projectMediaThumbnail(item)||I(item.kind==='stream'?'play':'image',28))+'</div>'+
+  '<b>'+esc(item.title)+'</b><small>'+esc(item.kind==='stream'?'Directo':'Video')+' · '+esc(item.author)+'</small>'+
+  '<div class="vis-data-actions"><button class="outline-btn" type="button" data-action="project-community-open-media" data-id="'+attr(item.id)+'">Abrir '+esc(item.provider)+'</button>'+
+  (c.can_manage||item.author===db.user?.username?'<button class="outline-btn" type="button" data-action="project-community-delete-media" data-id="'+attr(item.id)+'">Quitar</button>':'')+'</div></article>').join('');
+ const roles=visProjectRoles.map(([key,label])=>{
+   const members=(c.members||[]).filter(x=>x.member_role===key);
+   return '<div class="vis-community-role"><h3>'+esc(label)+' <small>'+members.length+'</small></h3>'+
+     (members.length?members.map(m=>'<div class="vis-community-member"><span><b>'+esc(m.display_name||m.username)+'</b> <small>@'+esc(m.public_handle||m.username)+'</small></span>'+
+        (m.can_play?'<span class="vis-access-yes">Puede jugar</span>':'')+
+        (m.presence==='online'&&m.current_game?'<small title="Estado declarado por el jugador, no verificado por el servidor">'+I('game',12)+' '+esc(m.current_game)+'</small>':'')+'</div>').join(''):'<p class="muted">Sin integrantes todavía</p>')+'</div>';
+ }).join('');
+ const join=c.role?'':'<div class="vis-community-join">'+
+   '<p>'+esc(c.admission==='open'?'Podés unirte libremente.':c.admission==='request'?'Podés solicitar una invitación para participar.':'Se requiere invitación de los responsables.')+'</p>'+
+   (c.admission!=='invite_only'?'<button class="outline-btn" data-action="project-community-request" '+(c.request_status==='pending'?'disabled':'')+'>'+
+    (c.request_status==='pending'?'Solicitud pendiente':c.admission==='open'?'Unirme al proyecto':'Solicitar unirme')+'</button>':'')+'</div>';
+ const controls=c.can_manage?'<div class="vis-community-manage">'+
+   '<button class="outline-btn" data-action="project-community-member">Asignar rol / acceso</button>'+
+   '<button class="outline-btn" data-action="project-community-remove-member">Quitar miembro</button>'+
+   '<button class="outline-btn" data-action="project-community-policy">Invitaciones y acceso</button></div>'+
+   '<div class="vis-community-requests">'+(c.pending||[]).map(x=>'<div class="vis-community-member"><span>'+esc(x.username)+
+   (x.note?'<small>'+esc(x.note)+'</small>':'')+'</span>'+
+   '<button class="outline-btn" data-action="project-community-review" data-mode="approve" data-user="'+attr(x.username)+'">Aceptar</button>'+
+   '<button class="outline-btn" data-action="project-community-review" data-mode="reject" data-user="'+attr(x.username)+'">Rechazar</button></div>').join('')+'</div>':'';
+ const postable=c.can_manage||c.role==='content_creator';
+ return '<section class="vis-project-community"><div class="vis-community-heading"><div><span class="page-eyebrow">VIS UNIVERSE / COMUNIDAD</span><h2>Participantes de '+esc(p.title)+'</h2></div>'+
+   '<button class="outline-btn" data-action="project-community-refresh">'+I('refresh',16)+' Actualizar</button></div>'+
+   '<p class="muted">Acceso: '+esc(c.play_access==='members'?'Solo usuarios autorizados':'Público')+' · Solicitudes: '+
+   esc(c.admission==='open'?'Abiertas':c.admission==='request'?'Con aprobación':'Solo por invitación')+'</p>'+
+   (c.play_access==='members'&&!c.can_play?'<p class="vis-community-permission">Todavía no tenés autorización del proyecto para jugar. El servidor también debe verificar este permiso.</p>':'')+
+   join+controls+'<div class="vis-community-roles">'+roles+'</div>'+
+   '<div class="vis-community-heading"><h2>Streams y videos</h2>'+
+   (postable?'<button class="outline-btn" data-action="project-community-add-media">'+I('plus',16)+' Vincular contenido</button>':'')+'</div>'+
+   (media?'<div class="vis-community-media-grid">'+media+'</div>':'<p class="muted">Todavía no hay directos o videos vinculados por los participantes.</p>')+'</section>';
+}
+
 function projectPage(){
  const p=currentProject();if(!p)return `<div class="content-inner">${emptyHome()}</div>`;
  const tabs=[['news','Noticias'],['patches','Notas de parche'],['updates','Actualizaciones'],['calendar','Eventos'],['community','Comunidad']].filter(([key])=>visibleSection(p,key));
@@ -788,14 +981,15 @@ function projectPage(){
  const enabled=db.project_execution?.[p.id]!==false;
  const available=p.installable&&enabled;
  const installedProject=db.instances.find(i=>compatibleProjectInstance(i,p));
+ const playBlocked=projectCommunityId===p.id&&projectCommunity?.play_access==='members'&&!projectCommunity.can_play;
  const adminActions=isAdmin()?`<div class="project-admin-actions" aria-label="Publicación rápida"><span class="admin-actions-title">${I('shield',15)} ADMINISTRACIÓN</span><button class="admin-action" data-action="quick-publish" data-kind="news" title="Publicar una noticia">${I('newspaper',16)} Noticia</button><button class="admin-action" data-action="quick-publish" data-kind="patch" title="Publicar notas de parche">${I('settings',16)} Nota de parche</button><button class="admin-action" data-action="quick-publish" data-kind="update" title="Publicar una actualización">${I('upload',16)} Actualización</button><button class="admin-action" data-action="quick-publish" data-kind="event" title="Agregar un evento al calendario">${I('calendar',16)} Evento</button><button class="admin-action light" data-action="edit-project" data-id="${attr(p.id)}" title="Editar identidad visual, recursos y configuraciones">${I('edit',16)} Editar proyecto</button></div>`:'';
  return `<div class="content-inner project-page riot-project-page project-page-v23"><section class="project-hero portal-project-hero cinematic-project-hero" ${p.banner_path?projectHeroPhoto(p.banner_path):''} data-motion="hero"><div class="project-hero-shade"></div><div class="project-hero-content"><span class="hero-tag">${I('game',16)} ${esc(p.mc_version?'MINECRAFT '+p.mc_version:'PROYECTO VIS UNIVERSE')}</span><div class="project-wordmark">${p.logo_path&&preview(p.logo_path)?`<img class="project-logo-image" src="${preview(p.logo_path)}" alt="Logo de ${attr(p.title)}"/>`:`<h1>${esc(p.title)}</h1>`}</div><p>${esc(p.description||p.subtitle||'')}</p>
- <div class="project-actions"><button class="primary-btn" ${!available?'disabled title="Disponible próximamente"':''} data-action="project-play" data-id="${attr(p.id)}">${I(available?'play':'timer',19)} ${available?(installedProject?'Jugar':'Instalar y jugar'):'Próximamente'}</button><button class="glass-btn" data-action="go-instances" title="Gestionar instancias locales">${I('settings',18)} Instancias</button>${installedProject && !installedProject.source_owner && p.engine==='java'&&p.loader==='fabric'? `<button class="glass-btn" data-action="sync-project-mods" data-project="${attr(p.id)}" data-id="${attr(installedProject.name)}" ${minecraftBusy?'disabled':''} title="Aplicar mods añadidos y quitar los retirados, sin borrar tus mundos">${I('package',18)} Actualizar mods</button>`:''}</div></div><span class="portal-hero-caption">${available?'DISPONIBLE':enabled?'EN PREPARACIÓN':'EJECUCIÓN DESHABILITADA'}</span></section>
+ <div class="project-actions"><button class="primary-btn" ${!available||playBlocked?'disabled title="'+(playBlocked?'Necesitás autorización para jugar':'Disponible próximamente')+'"':''} data-action="project-play" data-id="${attr(p.id)}">${I(available?'play':'timer',19)} ${available?(installedProject?'Jugar':'Instalar y jugar'):'Próximamente'}</button><button class="glass-btn" data-action="go-instances" title="Gestionar instancias locales">${I('settings',18)} Instancias</button>${installedProject && !installedProject.source_owner && p.engine==='java'&&p.loader==='fabric'? `<button class="glass-btn" data-action="sync-project-mods" data-project="${attr(p.id)}" data-id="${attr(installedProject.name)}" ${minecraftBusy?'disabled':''} title="Aplicar mods añadidos y quitar los retirados, sin borrar tus mundos">${I('package',18)} Actualizar mods</button>`:''}</div></div><span class="portal-hero-caption">${available?'DISPONIBLE':enabled?'EN PREPARACIÓN':'EJECUCIÓN DESHABILITADA'}</span></section>
  ${isAdmin()?`<div class="project-execution-control"><span>${I('shield',17)} Ejecución de Minecraft: <b>${p.installable?(enabled?'Habilitada':'Bloqueada'):'Proyecto no publicado para jugar'}</b></span><button class="outline-btn" data-action="toggle-project-execution" data-id="${attr(p.id)}" title="Habilitar o deshabilitar las instalaciones y el botón Jugar">${enabled?'Bloquear ejecución':'Permitir ejecución'}</button></div>`:''}
  ${adminActions}<div class="project-lower portal-project-lower ${visibleSection(p,'notes')?'':'full-content'}"><section class="project-main"><div class="project-content-head"><div><span class="page-eyebrow">CENTRO DE NOVEDADES</span><h2>Lo último de ${esc(p.title)}</h2></div></div><div class="feed-tabs">${tabs.map(([v,label])=>`<button class="${feed===v?'active':''}" data-action="feed-tab" data-id="${v}">${label}</button>`).join('')}</div>
  ${!tabs.length?quietEmpty('Secciones ocultas','El administrador todavía no habilitó las secciones de novedades.'):posts.length?`<div class="news-list portal-news">${posts.map(post=>`<article class="news-item"><div class="news-icon">${I(isCalendar?'calendar':post.kind==='patch'?'settings':post.kind==='update'?'upload':'bell',21)}</div><div class="news-content"><small>${esc(isCalendar?post.date:(post.date||'Publicación'))}</small><h3>${esc(post.title)}</h3><p>${esc(isCalendar?post.description:post.body)}</p></div>${isAdmin()?`<div class="news-admin"><button class="icon-btn" data-action="edit-publication" data-kind="${isCalendar?'event':post.kind}" data-index="${post._index}" aria-label="Editar ${isCalendar?'evento':'publicación'}" title="Editar">${I('edit',16)}</button><button class="icon-btn danger" data-action="remove-publication" data-kind="${isCalendar?'event':post.kind}" data-index="${post._index}" aria-label="Eliminar ${isCalendar?'evento':'publicación'}" title="Eliminar">${I('trash',16)}</button></div>`:''}</article>`).join('')}</div>`:quietEmpty(isCalendar?'Todavía no hay eventos':'Todavía no hay publicaciones',isCalendar?'El calendario aparecerá cuando se publiquen eventos.':'Las novedades, parches y notas aparecerán acá cuando estén disponibles.')}</section>
- ${visibleSection(p,'notes')?`<aside class="project-details"><h3>${I('info',17)} Acerca de este proyecto</h3><div class="detail-line"><span>Estado</span><strong>${available?'Disponible':'Próximamente'}</strong></div><div class="detail-line"><span>Minecraft</span><strong>${esc(p.mc_version||'Sin configurar')} · ${esc(p.engine==='horizon'?'Rust / Horizon':(p.loader||'Vanilla'))}</strong></div><div class="detail-line"><span>Perfiles</span><strong>${p.versions?.length||0}</strong></div><div class="detail-line"><span>Mods del proyecto</span><strong>${(p.modrinth_mods||[]).length}</strong></div><div class="project-micro-info">Minecraft Java: instalación y ejecución local disponibles desde Instancias. Para servidores premium se requiere Microsoft.</div>${p.community_url?`<button class="outline-btn full" data-action="open-community" data-id="${attr(p.id)}">${I('external',17)} Comunidad</button>`:''}</aside>`:''}</div>
- </div>`;
+ ${visibleSection(p,'notes')?`<aside class="project-details"><h3>${I('info',17)} Acerca de este proyecto</h3><div class="detail-line"><span>Estado</span><strong>${available?'Disponible':'Próximamente'}</strong></div><div class="detail-line"><span>Minecraft</span><strong>${esc(p.mc_version||'Sin configurar')} · ${esc(p.engine==='horizon'?'Rust / VIS Nexo':(p.loader||'Vanilla'))}</strong></div><div class="detail-line"><span>Perfiles</span><strong>${p.versions?.length||0}</strong></div><div class="detail-line"><span>Mods del proyecto</span><strong>${(p.modrinth_mods||[]).length}</strong></div><div class="project-micro-info">Minecraft Java: instalación y ejecución local disponibles desde Instancias. Para servidores premium se requiere Microsoft.</div>${p.community_url?`<button class="outline-btn full" data-action="open-community" data-id="${attr(p.id)}">${I('external',17)} Comunidad</button>`:''}</aside>`:''}</div>
+ ${projectCommunitySection(p)}</div>`;
 }
 function quietEmpty(title,desc){return `<div class="quiet-empty">${I('layers',25)}<h3>${esc(title)}</h3><p>${esc(desc)}</p></div>`;}
 async function loadPremiumCosmetics(){
@@ -857,6 +1051,65 @@ function premiumCosmeticsPanel(){
    '</section>';
 }
 
+
+async function refreshCeiboSecurity(){
+ if(!social.connected())return;
+ const generation=accountGeneration,username=db.user?.username;
+ try{
+   const [info,mfa]=await Promise.all([social.accountInfo(),social.ceiboMfaStatus()]);
+   if(generation!==accountGeneration||db.user?.username!==username)return;
+   ceiboSecurity={...info.account,mfa};render();
+ }catch(error){if(generation===accountGeneration)message('Seguridad Ceibo: '+String(error),true);}
+}
+function displayRecoveryCodes(codes,warning=''){
+ if(!Array.isArray(codes)||!codes.length)return;
+ // Never write one-time recovery codes to disk or the social chat history.
+ const result=codes.join('\n');
+ window.prompt((warning||'Guardá estos códigos FUERA del launcher. Solo se muestran una vez.')+
+   '\nCopiá los ocho códigos de recuperación:',result);
+}
+function ceiboSecuritySection(){
+ const email=ceiboSecurity?.verified_email||'Sin verificar';
+ const mfa=ceiboSecurity?.mfa;
+ const sessions=ceiboSessions?.sessions||[];
+ return '<section class="surface-card vis-ceibo-security">'+
+   '<div class="card-heading">'+I('shield',20)+' VIS Ceibo · Seguridad y recuperación</div>'+
+   '<p class="muted">Vinculá un correo verificado para recuperar tu contraseña y usuario. Las cuentas administradoras necesitan además MFA y códigos de emergencia.</p>'+
+   (!social.connected()?'<p>Conectá tu cuenta VIS Cloud para configurar la recuperación.</p>'+
+    '<button class="outline-btn" data-action="social-retry">Conectar VIS Social</button>':
+    '<div class="vis-ceibo-section"><b>Correo verificado</b><small>'+esc(email)+'</small>'+
+      '<div class="vis-ceibo-input-line"><input type="email" id="ceibo-email-input" maxlength="254" placeholder="tu@email.com" autocomplete="email"/>'+
+      '<button class="outline-btn" type="button" data-action="ceibo-email-request">Vincular / cambiar correo</button>'+
+      '<button class="outline-btn" type="button" data-action="ceibo-email-verify">Verificar código</button></div>'+
+      '<p class="muted">Al cambiar un correo ya verificado, se pide la aprobación del correo viejo y del nuevo.</p></div>'+
+    '<div class="vis-ceibo-section"><b>Autenticación en dos pasos</b><small>'+
+      (mfa?.enrolled?'Activada · clave protegida en el servidor': 'Sin configurar')+
+      (mfa?.verified_for_seconds?' · Verificación reciente':'')+'</small>'+
+      '<div class="profile-quick-actions">'+
+      (mfa?.enrolled?'<button class="outline-btn" data-action="ceibo-mfa-verify">Verificar segundo factor</button>'+
+       '<button class="outline-btn" data-action="ceibo-mfa-rotate">Regenerar códigos de recuperación</button>':
+       '<button class="outline-btn" data-action="ceibo-mfa-setup">Configurar app de autenticación</button>')+
+      '</div></div>'+
+    '<div class="vis-ceibo-section"><b>Dispositivos y sesiones</b>'+
+      '<div class="profile-quick-actions"><button class="outline-btn" data-action="ceibo-sessions-refresh">Ver sesiones activas</button>'+
+      '<button class="outline-btn" data-action="ceibo-rebind-device">Autorizar este dispositivo</button>'+
+      '<button class="outline-btn" data-action="ceibo-logout-all">Cerrar todas las sesiones</button></div>'+
+      (sessions.length?'<div class="vis-ceibo-sessions">'+sessions.map(entry=>
+        '<div class="vis-ceibo-session"><span>'+esc(entry.auth_method==='password'?'Contraseña VIS':'Dispositivo local')+
+         (entry.current?' · Esta sesión':'')+'</span><small>'+esc(new Date(entry.created_at*1000).toLocaleString())+'</small>'+
+         '<button class="outline-btn" data-action="ceibo-revoke-session" data-id="'+attr(entry.session_id)+'">Cerrar</button></div>').join('')+'</div>':'')+
+      '</div>'+
+    '<div class="vis-ceibo-section"><b>Cambiar contraseña online</b>'+
+      '<p class="muted">Confirmá tu contraseña actual. Si usás MFA, ingresá un código nuevo de tu app. Se cerrarán todas las sesiones.</p>'+
+      '<form id="ceibo-change-password-form" class="vis-ceibo-input-line">'+
+      '<input type="password" name="current_password" required minlength="10" maxlength="128" placeholder="Contraseña actual" autocomplete="current-password"/>'+
+      '<input type="password" name="password" required minlength="10" maxlength="128" placeholder="Nueva contraseña" autocomplete="new-password"/>'+
+      '<input type="password" name="confirm" required minlength="10" maxlength="128" placeholder="Repetir contraseña" autocomplete="new-password"/>'+
+      '<input type="text" name="mfa_code" maxlength="30" placeholder="Código MFA (si está activo)" autocomplete="one-time-code"/>'+
+      '<button type="submit" class="outline-btn">Actualizar contraseña</button></form></div>'
+   )+'</section>';
+}
+
 function profilePage(){
  if(isGuest())return '<div class="content-inner"><div class="page-heading"><h1>Modo offline</h1></div>'+
    '<section class="surface-card"><p>Las cuentas offline pueden usar juegos instalados, sin identidad social.</p>'+
@@ -872,9 +1125,10 @@ function profilePage(){
  const hiddenRows=hidden.map(i=>'<div class="request-row"><span>'+esc(i.name)+' · '+esc(i.source_owner)+'</span>'+
    '<button type="button" class="outline-btn" data-action="show-shared-instance" data-id="'+attr(i.name)+
    '" data-project="'+attr(i.project_id)+'" data-source="'+attr(i.source_owner)+'">Restaurar</button></div>').join('');
- const gameRows=skins.slice(0,3).map(i=>'<div class="vis-profile-game"><span>'+I('game',17)+
-   ' '+esc(i.name)+'</span><small>'+esc(i.engine==='horizon'?'Horizon Rust':'Java / '+(i.loader||'Vanilla'))+
-   ' · '+esc(i.version)+'</small></div>').join('');
+ const gameRows=skins.slice(0,3).map(i=>'<div class="vis-profile-game"><span>'+
+   (publicSkin?.head?'<img class="vis-game-profile-head" src="'+attr(publicSkin.head)+'" alt="Skin VIS"/>':I('game',17))+
+   ' '+esc(i.name)+'</span><small>'+esc(i.engine==='horizon'?'VIS Nexo Rust':'Java / '+(i.loader||'Vanilla'))+
+   ' · '+esc(i.version)+' · Skin VIS'+(publicSkin?.skin?' disponible':' no publicada')+'</small></div>').join('');
  return '<div class="content-inner profile-page profile-v21">'+
   '<header class="profile-page-head"><div><span class="page-eyebrow">CUENTA Y APARIENCIA</span>'+
   '<h1>Mi perfil</h1><p>Todo lo importante de tu identidad y tus juegos, en un solo lugar.</p></div>'+
@@ -894,7 +1148,7 @@ function profilePage(){
   '<div class="profile-overview"><div><strong>'+skins.length+'</strong><span>Instancias propias</span></div>'+
    '<div><strong>'+db.friends.length+'</strong><span>Amigos VIS</span></div>'+
    '<div><strong>'+(publicSkin?.skin?'Publicada':localSkin?'Local':'Sin skin')+'</strong><span>Skin VIS</span></div></div>'+
-  '<div class="profile-v21-grid">'+
+  '<div class="profile-v21-grid">'+ceiboSecuritySection()+
    '<section class="surface-card profile-identity-card">'+
     '<div class="card-heading">'+I('users',20)+' Comunidad e identidad</div>'+
     '<p class="muted">Compartí tu @usuario VIS. Podés cambiarlo sin perder amigos ni chats. Tu ID permanente es distinta del nombre oficial de Minecraft.</p>'+
@@ -913,7 +1167,7 @@ function profilePage(){
    '</section>'+
    '<section class="surface-card profile-skin-card">'+
     '<div class="card-heading">'+I('game',20)+' Mi skin en VIS</div>'+
-    '<p class="muted">La skin se guarda en VIS Nexo. Con Microsoft Premium también podés publicarla en el perfil oficial de Minecraft Java; elegí el modelo antes de importar.</p>'+
+    '<p class="muted">Una sola skin VIS para tus perfiles Java y VIS Nexo Rust en el launcher. Si la subís a Minecraft Premium también se verá dentro de Java; mostrarla dentro de McRust todavía requiere integrar su renderizador de texturas.</p>'+
     '<div class="profile-skin-visual">'+
       (localSkin?'<img class="profile-skin-sheet" src="'+attr(localSkin)+'" alt="Textura PNG local de Minecraft"/>':
        '<div class="profile-skin-placeholder">'+I('game',32)+'<span>Sin skin local</span></div>')+
@@ -931,6 +1185,7 @@ function profilePage(){
       '<button class="primary-btn" data-action="publish-vis-skin" '+(!skinPath||!connected||skinSharingBusy?'disabled':'')+'>'+
         I('cloud',15)+' '+(skinSharingBusy?'Publicando…':'Compartir skin VIS')+'</button>'+
       (publicSkin?.skin?'<button class="subtle-btn" data-action="remove-vis-skin">'+I('trash',15)+' Dejar de compartir</button>':'')+
+      (publicSkin?.skin&&microsoftGamertag?'<button class="outline-btn" data-action="premium-sync-vis-skin" '+(premiumCosmeticsBusy?'disabled':'')+'>'+I('game',15)+' Aplicar skin VIS a Java Premium</button>':'')+
     '</div>'+
    '</section>'+
    '<section class="surface-card profile-library-card">'+
@@ -943,7 +1198,7 @@ function profilePage(){
    '</section>'+
    '<section class="surface-card profile-security-card">'+
     '<div class="card-heading">'+I('shield',20)+' Cuenta y privacidad</div>'+
-    '<p class="muted">La cuenta VIS controla amigos, mensajes y apariencia del launcher. Microsoft se utiliza exclusivamente para autenticar Minecraft Java y Horizon.</p>'+
+    '<p class="muted">La cuenta VIS controla amigos, mensajes y apariencia del launcher. Microsoft se utiliza exclusivamente para autenticar Minecraft Java y VIS Nexo.</p>'+
     '<div class="profile-status-rows"><div><span>Acceso</span><strong>'+
        esc(microsoftGamertag?'Microsoft Premium':db.mode==='offline'?'Offline':'VIS')+'</strong></div>'+
        '<div><span>Skin pública</span><strong>'+esc(publicSkin?.skin?'Visible para usuarios VIS':'No publicada')+'</strong></div></div>'+
@@ -1019,9 +1274,11 @@ function selectedMcInstance(){
      ||(libraryMode==='user'?personalInstances():officialInstances()).find(i=>!i.source_owner)||null;
 }
 function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const allow=i.project_id===PERSONAL_PROJECT_ID || isExecutionEnabled(p);
- return `<article class="instance-card">${bulkInstanceMode&&!isGuest()?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" data-source="${attr(i.source_owner||'')}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual">${I('game',27)}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'Horizon Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · ${i.share_game_data!==false?'mundos y servidores compartidos':'datos separados por cuenta'}</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
+ const ownHead=db.user?.username?socialSkins.get(db.user.username)?.head:'';
+ const skinCard=ownHead?'<img class="vis-instance-skin-head" alt="Skin VIS de tu cuenta" src="'+attr(ownHead)+'"/>':I('game',27);
+ return `<article class="instance-card">${bulkInstanceMode&&!isGuest()?`<label class="bulk-instance-choice"><input type="checkbox" data-action="bulk-instance-toggle" data-project="${attr(i.project_id)}" data-id="${attr(i.name)}" data-source="${attr(i.source_owner||'')}" ${bulkInstanceSelection.has(instanceSelectionKey(i))?'checked':''} aria-label="Seleccionar ${attr(i.name)} para quitar"/><span>Seleccionar</span></label>`:''}<div class="instance-visual" title="Skin de tu cuenta VIS (vista previa del launcher)">${skinCard}</div><div class="instance-descriptor"><h3>${esc(i.name)}</h3><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':i.project_id))} · ${esc(i.version||'Sin versión')} · ${esc(i.engine==='horizon'?'VIS Nexo Rust':(i.loader||'vanilla'))} ${esc(i.loader_version||'')} · ${(i.ram_mb/1024).toFixed(1)} GB RAM</p>${i.source_owner?`<small>Instalada por ${esc(i.source_owner)} · ${i.share_game_data!==false?'mundos y servidores compartidos':'datos separados por cuenta'}</small>`:''}<span class="instance-notice ${i.installed?'mc-ok':''}">${i.installed?'Instalación preparada':'Sin instalar'}${allow?'':' · Bloqueado por el administrador'}</span></div>
  <div class="mc-instance-actions">${isGuest()||i.source_owner?'':`<button class="outline-btn" data-action="manage-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('settings',16)} Mods y archivos</button>
- <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?'Reparar':'Instalar'}</button>`}
+ <button class="outline-btn" data-action="install-minecraft" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" ${!allow||minecraftBusy?'disabled':''}>${I('upload',16)} ${i.installed?(i.engine==='horizon'?'Actualizar / reparar':'Reparar'):'Instalar'}</button>`}
  ${!isGuest()?`<button class="outline-btn" data-action="instance-data-tools" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}">${I('database',16)} Datos</button>`:''}
  <button class="icon-btn" data-action="open-instance-folder" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir carpeta de juego de esta instancia" aria-label="Abrir carpeta de ${attr(i.name)}">${I('folder',17)}</button>
  <button class="icon-btn" data-action="open-instance-resource-folder" data-kind="resourcepacks" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner||'')}" title="Abrir resourcepacks de esta instancia" aria-label="Abrir resourcepacks de ${attr(i.name)}">${I('image',17)}</button>
@@ -1029,7 +1286,7 @@ function instanceLine(i){const p=db.projects.find(p=>p.id===i.project_id);const 
  ${i.source_owner&&!isGuest()&&i.share_game_data!==false?`<button class="outline-btn" data-action="recover-legacy-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}" title="Recuperar mundos y servidores guardados en antiguas carpetas separadas de tu perfil">${I('refresh',15)} Recuperar datos antiguos</button>`:''}
  ${i.source_owner&&!isGuest()?`<button class="outline-btn" data-action="hide-shared-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}" title="Solo oculta de tu biblioteca, no borra los mundos">${I('x',15)} Ocultar</button><button class="outline-btn" data-action="shared-ram" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" data-source="${attr(i.source_owner)}">${I('settings',16)} RAM</button>`:''}
  ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="export-worlds-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Exportar instancia completa a ZIP" aria-label="Exportar ${attr(i.name)}">${I('upload',16)}</button>`}
- ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="duplicate-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Duplicar configuración sin copiar mundos" aria-label="Duplicar ${attr(i.name)}">${I('layers',16)}</button><button class="icon-btn" data-action="edit-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Ajustar instancia">${I('edit',16)}</button><button class="outline-btn danger" data-action="delete-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Quitar instancia; por defecto conserva mundos">${I('trash',16)} Quitar</button>`}</div></article>`;
+ ${isGuest()||i.source_owner?'':`<button class="icon-btn" data-action="duplicate-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Duplicar configuración sin copiar mundos" aria-label="Duplicar ${attr(i.name)}">${I('layers',16)}</button>${i.engine==='horizon'&&isAdmin()?`<button class="outline-btn" data-action="horizon-menu" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">Menú del juego</button>`:''}<button class="icon-btn" data-action="edit-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Ajustar instancia">${I('edit',16)}</button><button class="outline-btn danger" data-action="delete-instance" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}" title="Quitar instancia; por defecto conserva mundos">${I('trash',16)} Quitar</button>`}</div></article>`;
 }
 function minecraftExitNotice(){
  if(!lastMinecraftExit || lastMinecraftExit.success)return '';
@@ -1041,7 +1298,7 @@ function minecraftExitNotice(){
  <button class="outline-btn" data-action="dismiss-launch-diagnostic">Cerrar diagnóstico</button>
  </section>`;
 }
-function instancesPage(){const items=isGuest()?db.instances:(libraryMode==='user'?personalInstances():officialInstances());return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">MINECRAFT / INSTANCIAS</span><h1>${libraryMode==='user'?'Mis instancias':'Instancias de Universe'}</h1><p>${isGuest()?'Instancias instaladas por los perfiles VIS de esta computadora. Todos los perfiles ven los mismos mundos y servidores de una instancia compartida, salvo que se configure lo contrario.':'Instalá Minecraft Java (Vanilla/Fabric) o prepará Horizon Rust Edition sin utilizar su launcher.'}</p></div><div class="vis-instance-toolbar">${!isGuest()&&items.length?`<button class="outline-btn ${bulkInstanceMode?'danger':''}" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar para quitar'}</button>`:''}${isGuest()?'':`<button class="outline-btn" data-action="import-worlds-instance">${I('upload',18)} Importar ZIP VIS</button>`}<button class="primary-btn" data-action="open-instance" ${!isGuest()&&(libraryMode==='user'||db.projects.length)?'':'disabled'}>${I('plus',18)} Nueva instancia</button></div></div>
+function instancesPage(){const items=isGuest()?db.instances:(libraryMode==='user'?personalInstances():officialInstances());return `<div class="content-inner"><div class="page-heading"><div><span class="page-eyebrow">MINECRAFT / INSTANCIAS</span><h1>${libraryMode==='user'?'Mis instancias':'Instancias de Universe'}</h1><p>${isGuest()?'Instancias instaladas por los perfiles VIS de esta computadora. Todos los perfiles ven los mismos mundos y servidores de una instancia compartida, salvo que se configure lo contrario.':'Instalá Minecraft Java (Vanilla/Fabric) o prepará VIS Nexo Rust Edition sin utilizar su launcher.'}</p></div><div class="vis-instance-toolbar">${!isGuest()&&items.length?`<button class="outline-btn ${bulkInstanceMode?'danger':''}" data-action="bulk-instance-mode">${I('trash',16)} ${bulkInstanceMode?'Cancelar selección':'Seleccionar para quitar'}</button>`:''}${isGuest()?'':`<button class="outline-btn" data-action="import-worlds-instance">${I('upload',18)} Importar ZIP VIS</button>`}<button class="primary-btn" data-action="open-instance" ${!isGuest()&&(libraryMode==='user'||db.projects.length)?'':'disabled'}>${I('plus',18)} Nueva instancia</button></div></div>
  ${bulkInstanceMode&&!isGuest()?bulkInstanceToolbar(items):''}
  ${minecraftBusy?`<div class="mc-progress" id="minecraft-progress">${I('upload',16)} ${esc(installProgress?.detail||'Preparando descarga...')}</div>`:''}
  <aside class="vis-smart-tip">${I('info',17)} <div><strong>VIS Smart Install</strong><span>Si ya tenés esta versión en Minecraft oficial, CurseForge, Prism o VIS Worlds, se intentarán copiar únicamente los archivos comprobados por SHA-1. El resto se descarga normalmente.</span></div></aside>
@@ -1060,7 +1317,7 @@ function bulkInstanceDeleteDialog(){
  const keys=[...bulkInstanceSelection];
  const instances=(db.instances||[]).filter(i=>keys.includes(instanceSelectionKey(i)));
  const hasShared=instances.some(i=>!!i.source_owner);
- const rows=instances.map(i=>'<li><strong>'+esc(i.name)+'</strong><small> · '+esc(i.engine==='horizon'?'Horizon Rust':'Minecraft Java')+
+ const rows=instances.map(i=>'<li><strong>'+esc(i.name)+'</strong><small> · '+esc(i.engine==='horizon'?'VIS Nexo Rust':'Minecraft Java')+
    ' · '+esc(i.source_owner?'Compartida por '+i.source_owner:'Propia')+'</small></li>').join('');
  return '<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-medium" role="alertdialog" aria-modal="true" aria-label="Confirmar eliminación múltiple">'+
  '<header class="modal-head"><div><span class="page-eyebrow">OPERACIÓN IRREVERSIBLE SI BORRÁS ARCHIVOS</span><h2>Quitar '+instances.length+
@@ -1069,7 +1326,7 @@ function bulkInstanceDeleteDialog(){
  '<div class="modal-body bulk-delete-body"><p>Revisá las instancias seleccionadas:</p>'+
  '<ul class="bulk-instance-summary">'+rows+'</ul>'+
  '<label class="toggle-line large"><span><b>Borrar también los mundos y archivos del disco</b>'+
- '<small>De forma predeterminada, los mundos se conservan. Si activás esta opción, el borrado es irreversible y solo se permite en Instancias/&lt;nombre&gt; administradas por VIS. Cerrá Minecraft antes.</small></span>'+
+ '<small>Si activás esta opción, se eliminarán mundos y archivos de carpetas propias con una instalación VIS verificable, incluso antiguas. No se borran carpetas compartidas ni ajenas. Cerrá Minecraft antes.</small></span>'+
  '<input type="checkbox" id="bulk-delete-files" '+(hasShared?'disabled':'')+'/></label>'+
  '<label class="bulk-confirm-label">Escribí <strong>CONFIRMAR</strong> para continuar'+
  '<input id="bulk-delete-confirm-input" type="text" spellcheck="false" autocomplete="off" placeholder="CONFIRMAR" maxlength="20" aria-label="Escribir CONFIRMAR" autofocus/></label>'+
@@ -1080,8 +1337,8 @@ function bulkInstanceDeleteDialog(){
 function minecraftPage(){if(isGuest())return `<div class="content-inner"><div class="page-heading"><h1>Minecraft offline</h1><p>Solo inicio de instancias ya instaladas, sin autenticación Microsoft.</p></div><button class="primary-btn" data-action="go-instances">Ver instancias disponibles</button></div>`;const i=selectedMcInstance();const p=db.projects.find(x=>x.id===i?.project_id);
  return `<div class="content-inner mc-manager"><div class="page-heading"><div><span class="page-eyebrow">VIS WORLDS · MOTORES</span><h1>Centro de Minecraft</h1><p>Buscá mods compatibles, importá tus JARs y administrá recursos sin abrir carpetas a mano.</p></div><button class="outline-btn" data-action="go-instances">${I('layers',16)} Instancias</button></div>
  ${!i?quietEmpty('Primero creá una instancia','Desde Instancias elegí un proyecto, la versión oficial de Minecraft y Fabric o Vanilla.'):
- `<section class="surface-card mc-profile-card"><div><span class="page-eyebrow">PERFIL ACTIVO</span><h2>${esc(i.name)}</h2><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':'Proyecto'))} · Minecraft ${esc(i.version)} · ${esc(i.engine==='horizon'?'Horizon Rust':i.loader==='fabric'?'Fabric '+(i.loader_version||''):'Vanilla')}</p></div><select id="mc-active-instance" aria-label="Seleccionar instancia">${db.instances.filter(x=>!x.source_owner).map(x=>`<option value="${attr(x.project_id+'|'+x.name)}" ${x===i?'selected':''}>${esc(x.name)} · ${esc(x.version)}</option>`).join('')}</select></section>
- ${i.engine==='horizon'?`<section class="surface-card vis-horizon-diagnostic"><div class="card-heading">${I('info',20)} Diagnóstico de Horizon</div><p>Este motor usa <strong>horizon-client</strong> directamente. Los mods .hmod/.hnmod no funcionan como JARs Fabric; su instalador especializado está pendiente.</p><button class="outline-btn" data-action="horizon-check" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('check',17)} Comprobar requisitos y recursos</button>
+ `<section class="surface-card mc-profile-card"><div><span class="page-eyebrow">PERFIL ACTIVO</span><h2>${esc(i.name)}</h2><p>${esc(p?.title||(i.project_id===PERSONAL_PROJECT_ID?'Biblioteca personal':'Proyecto'))} · Minecraft ${esc(i.version)} · ${esc(i.engine==='horizon'?'VIS Nexo Rust':i.loader==='fabric'?'Fabric '+(i.loader_version||''):'Vanilla')}</p></div><select id="mc-active-instance" aria-label="Seleccionar instancia">${db.instances.filter(x=>!x.source_owner).map(x=>`<option value="${attr(x.project_id+'|'+x.name)}" ${x===i?'selected':''}>${esc(x.name)} · ${esc(x.version)}</option>`).join('')}</select></section>
+ ${i.engine==='horizon'?`<section class="surface-card vis-horizon-diagnostic"><div class="card-heading">${I('info',20)} Diagnóstico de VIS Nexo</div><p>Este motor usa <strong>horizon-client</strong> directamente. Los mods .hmod/.hnmod no funcionan como JARs Fabric; su instalador especializado está pendiente.</p><button class="outline-btn" data-action="horizon-check" data-id="${attr(i.name)}" data-project="${attr(i.project_id)}">${I('check',17)} Comprobar requisitos y recursos</button>
  ${horizonChecks.length?`<ul class="vis-horizon-check-list">${horizonChecks.map(c=>`<li class="vis-horizon-check-item ${c.status==='ok'?'vis-horizon-success':c.status==='missing'?'vis-horizon-missing':'vis-horizon-manual'}"><strong>${esc(c.label)}</strong><small>${esc(c.detail)}</small></li>`).join('')}</ul>`:''}</section>`:''}
  ${i.engine==='horizon'?'':`<div class="mc-manager-grid"><section class="surface-card"><div class="card-heading">${I('search',20)} Explorar Modrinth</div>
  <form id="modrinth-search-form" class="mc-search-form"><div class="mc-filter-row"><select name="kind" id="mc-mod-kind"><option value="mod" ${modKind==='mod'?'selected':''} ${i.loader==='fabric'?'':'disabled'}>Mods Fabric</option><option value="resourcepack" ${modKind==='resourcepack'?'selected':''}>Resource packs</option><option value="shader" ${modKind==='shader'?'selected':''}>Shaders</option></select><span class="mc-version-chip">MC ${esc(i.version)}</span></div><div class="mc-search-box"><input name="query" maxlength="120" placeholder="Sodium, Fabric API, Iris..." value="${attr(modSearchQuery)}" aria-label="Buscar mods"/><button class="primary-btn" ${!native?'title="Requiere Tauri"':''}>${I('search',17)} Buscar</button></div></form>
@@ -1219,7 +1476,7 @@ function downloadsHistorySection(){
  const jobs=downloadJobs.filter(j=>j.owner===db.user?.username).slice(0,8);
  return '<section class="surface-card wide vis-download-history">'+
    '<div class="card-heading">'+I('download',20)+' VIS Download Manager</div>'+
-   '<p class="muted">Instalaciones de Minecraft Java y Horizon de esta sesión. Una instalación a la vez. Cancelar detiene la próxima operación segura sin borrar archivos verificados.</p>'+
+   '<p class="muted">Instalaciones de Minecraft Java y VIS Nexo de esta sesión. Una instalación a la vez. Cancelar detiene la próxima operación segura sin borrar archivos verificados.</p>'+
    '<button class="outline-btn" data-action="refresh-downloads">'+I('refresh',16)+' Actualizar estado</button>'+
    (jobs.length?jobs.map(job=>'<div class="detail-line"><span>'+esc(job.label)+
      ' · '+esc(job.stage)+'</span><strong>'+esc(downloadStatusName(job.status))+'</strong></div>').join(''):
@@ -1268,12 +1525,12 @@ function projectWizard(){
  const stepLabels=['Datos','Identidad visual','Novedades','Revisar'];
  const a=wizard||newProject();
  const curatedIds=a.modrinth_mods||[];
- const step0=`<div class="wiz-fields"><div class="form-pair"><label>Nombre del proyecto<input data-field="title" maxlength="80" value="${attr(a.title)}" placeholder="Nombre del proyecto" autofocus/></label><label>Versión de Minecraft<input list="mc-version-catalog" data-field="mc_version" value="${attr(a.mc_version)}" placeholder="1.21.4"/><datalist id="mc-version-catalog">${minecraftVersions.map(v=>`<option value="${attr(v.id)}">${esc(v.kind)}</option>`).join('')}</datalist></label></div><div class="form-pair"><label>Motor del proyecto<select data-field="engine" id="vis-project-engine"><option value="java" ${(a.engine||'java')==='java'?'selected':''}>Minecraft Java Edition</option><option value="horizon" ${a.engine==='horizon'?'selected':''}>Minecraft Rust Edition — Horizon</option></select></label><label>Modloader<select data-field="loader" id="vis-project-loader" ${a.engine==='horizon'?'disabled':''}><option value="vanilla" ${(a.loader||'vanilla')==='vanilla'?'selected':''}>Vanilla</option><option value="fabric" ${a.loader==='fabric'?'selected':''}>Fabric</option><option value="horizon" ${a.loader==='horizon'?'selected':''}>Horizon nativo</option></select></label></div><label id="vis-project-fabric" class="${a.loader==='fabric'&&a.engine!=='horizon'?'':'hidden'}">Fabric Loader<input data-field="loader_version" id="vis-project-loader-version" list="mc-fabric-catalog" value="${attr(a.loader_version||'')}" placeholder="Versión oficial de Fabric Loader"/><datalist id="mc-fabric-catalog">${fabricLoaders.map(v=>`<option value="${attr(v)}"></option>`).join('')}</datalist></label><div class="project-mod-set"><div class="manage-row-head"><h3>${I('package',17)} Mods del proyecto</h3><span>${curatedIds.length} / 32</span></div>
+ const step0=`<div class="wiz-fields"><div class="form-pair"><label>Nombre del proyecto<input data-field="title" maxlength="80" value="${attr(a.title)}" placeholder="Nombre del proyecto" autofocus/></label><label>Versión de Minecraft<input list="mc-version-catalog" data-field="mc_version" value="${attr(a.mc_version)}" placeholder="1.21.4"/><datalist id="mc-version-catalog">${minecraftVersions.map(v=>`<option value="${attr(v.id)}">${esc(v.kind)}</option>`).join('')}</datalist></label></div><div class="form-pair"><label>Motor del proyecto<select data-field="engine" id="vis-project-engine"><option value="java" ${(a.engine||'java')==='java'?'selected':''}>Minecraft Java Edition</option><option value="horizon" ${a.engine==='horizon'?'selected':''}>Minecraft Rust Edition — VIS Nexo</option></select></label><label>Modloader<select data-field="loader" id="vis-project-loader" ${a.engine==='horizon'?'disabled':''}><option value="vanilla" ${(a.loader||'vanilla')==='vanilla'?'selected':''}>Vanilla</option><option value="fabric" ${a.loader==='fabric'?'selected':''}>Fabric</option><option value="horizon" ${a.loader==='horizon'?'selected':''}>VIS Nexo nativo</option></select></label></div><label id="vis-project-fabric" class="${a.loader==='fabric'&&a.engine!=='horizon'?'':'hidden'}">Fabric Loader<input data-field="loader_version" id="vis-project-loader-version" list="mc-fabric-catalog" value="${attr(a.loader_version||'')}" placeholder="Versión oficial de Fabric Loader"/><datalist id="mc-fabric-catalog">${fabricLoaders.map(v=>`<option value="${attr(v)}"></option>`).join('')}</datalist></label><div class="project-mod-set"><div class="manage-row-head"><h3>${I('package',17)} Mods del proyecto</h3><span>${curatedIds.length} / 32</span></div>
  <p class="muted">Los mods elegidos se descargan desde Modrinth dentro de cada instancia, con sus dependencias. Podés agregar o quitar mods al actualizar este proyecto; el launcher preserva los archivos personales.</p>
  ${a.engine==='java'&&a.loader==='fabric'? `<div class="project-mod-search"><input id="project-mod-query" value="${attr(projectModQuery)}" placeholder="Buscar mods compatibles en Modrinth" aria-label="Buscar mods"/><button type="button" class="outline-btn" data-action="project-search-mods">${I('search',15)} Buscar</button></div>
  <div class="project-mod-selected">${curatedIds.map(id=>`<div class="project-mod-item"><span>${I('package',14)} ${esc(projectModResults.find(x=>x.id===id)?.title||id)}</span><button type="button" data-action="project-remove-mod" data-id="${attr(id)}" title="Quitar mod del proyecto">${I('x',14)} Quitar</button></div>`).join('')||'<p class="muted">Todavía no elegiste mods.</p>'}</div>
  <div class="project-mod-results">${projectModResults.slice(0,15).map(mod=>`<div class="project-mod-item"><span><b>${esc(mod.title)}</b><small>${esc(mod.id)} · ${esc(mod.description||'').slice(0,115)}</small></span><button type="button" data-action="project-add-mod" data-id="${attr(mod.id)}" ${curatedIds.includes(mod.id)?'disabled':''}>${I('plus',14)} Añadir</button></div>`).join('')}</div>`:
- `<p class="muted">Para proyectos con mods seleccioná Java + Fabric. Horizon y Vanilla no cargan mods Fabric.</p>
+ `<p class="muted">Para proyectos con mods seleccioná Java + Fabric. VIS Nexo y Vanilla no cargan mods Fabric.</p>
  ${curatedIds.length?`<p class="muted">Hay ${curatedIds.length} mods guardados; quitá esos mods antes de cambiar el motor.</p>`:''}`}
  </div><p class="muted">Estos parámetros los configura VIS STUDIOS una sola vez. Los jugadores solo eligen una carpeta y la RAM.</p><label>Versiones o perfiles (separadas por coma)<input data-field="versions_csv" value="${attr((a.versions||[]).join(', '))}" placeholder="Ej. Survival, Optimizador, 26.3"/></label><label>Subtítulo<input data-field="subtitle" maxlength="180" value="${attr(a.subtitle)}" placeholder="Una frase breve sobre el proyecto"/></label><label>Descripción<textarea data-field="description" maxlength="2000" rows="4" placeholder="Descripción del proyecto">${esc(a.description)}</textarea></label><label class="toggle-line large"><span><b>Permitir configuración de instancias</b><small>Habilita la configuración, instalación y ejecución de Minecraft en este proyecto.</small></span><input type="checkbox" data-field="installable" ${a.installable?'checked':''}/></label></div>`;
  const assets=[['banner_path','banner','Banner del proyecto','Panorámico · 16:9 recomendado'],['logo_path','logo','Logo','PNG o WebP transparente'],['icon_path','icon','Icono de sidebar','Cuadrado · mínimo 128 × 128']];
@@ -1380,19 +1637,19 @@ function instanceDialog(){const a=dialog?.data||{};const p=db.projects.find(p=>p
  <form id="instance-form" class="modal-body wiz-fields"><label>Nombre de la instancia<input name="name" required maxlength="60" value="${attr(a.name||'')}" placeholder="Mi instancia"/></label><label>Biblioteca<select name="project_id" id="instance-project" required>
  <option value="${PERSONAL_PROJECT_ID}" ${a.project_id===PERSONAL_PROJECT_ID?'selected':''}>Mi biblioteca · Personal</option>
  ${isAdmin()?db.projects.map(x=>`<option value="${attr(x.id)}" ${a.project_id===x.id?'selected':''}>VIS Universe · ${esc(x.title)}</option>`).join(''):''}</select></label>
- <label>Motor de juego<select name="engine" id="mc-instance-engine"><option value="java" ${(a.engine||'java')==='java'?'selected':''}>Minecraft Java Edition</option><option value="horizon" ${a.engine==='horizon'?'selected':''}>Minecraft Rust Edition — Horizon</option></select></label>
+ <label>Motor de juego<select name="engine" id="mc-instance-engine"><option value="java" ${(a.engine||'java')==='java'?'selected':''}>Minecraft Java Edition</option><option value="horizon" ${a.engine==='horizon'?'selected':''}>Minecraft Rust Edition — VIS Nexo</option></select></label>
  <div class="form-pair"><label>Versión de Minecraft<select id="mc-version-channel" aria-label="Canal del catálogo"><option value="release" ${minecraftVersionChannel==='release'?'selected':''}>Versiones estables (incluidas anteriores)</option><option value="snapshot" ${minecraftVersionChannel==='snapshot'?'selected':''}>Snapshots (últimas 60)</option></select><input list="mc-version-catalog" id="mc-instance-version" name="version" required value="${attr(a.version||p?.mc_version||'')}" placeholder="Seleccioná del catálogo oficial"/><datalist id="mc-version-catalog">${versionSuggestions(a.version||p?.mc_version||'').map(v=>`<option value="${attr(v.id)}">${esc(v.kind)}</option>`).join('')}</datalist></label><label>RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${attr(a.ram_mb||4096)}"/><small>Memoria máxima de Minecraft, no del launcher.</small><span class="instance-ram-presets">${[2048,4096,6144,8192].map(mb=>`<button type="button" data-action="instance-ram-preset" data-size="${mb}" aria-label="${mb/1024} GB RAM">${mb/1024} GB</button>`).join('')}</span></label></div>
- <div class="form-pair"><label>Modloader<select name="loader" id="mc-instance-loader"><option value="horizon" ${a.loader==='horizon'?'selected':''}>Horizon (Rust)</option><option value="vanilla" ${(a.loader||'vanilla')==='vanilla'?'selected':''}>Minecraft Vanilla</option><option value="fabric" ${a.loader==='fabric'?'selected':''}>Fabric</option></select></label><label id="fabric-version-field" class="${a.loader==='fabric'?'':'hidden'}">Versión de Fabric Loader<input list="mc-fabric-catalog" id="fabric-loader-version" name="loader_version" value="${attr(a.loader_version||'')}" placeholder="Versión estable"/><datalist id="mc-fabric-catalog">${fabricLoaders.map(v=>`<option value="${attr(v)}"></option>`).join('')}</datalist></label></div>
+ <div class="form-pair"><label>Modloader<select name="loader" id="mc-instance-loader"><option value="horizon" ${a.loader==='horizon'?'selected':''}>VIS Nexo (Rust)</option><option value="vanilla" ${(a.loader||'vanilla')==='vanilla'?'selected':''}>Minecraft Vanilla</option><option value="fabric" ${a.loader==='fabric'?'selected':''}>Fabric</option></select></label><label id="fabric-version-field" class="${a.loader==='fabric'?'':'hidden'}">Versión de Fabric Loader<input list="mc-fabric-catalog" id="fabric-loader-version" name="loader_version" value="${attr(a.loader_version||'')}" placeholder="Versión estable"/><datalist id="mc-fabric-catalog">${fabricLoaders.map(v=>`<option value="${attr(v)}"></option>`).join('')}</datalist></label></div>
  <section id="vis-horizon-fields" class="vis-horizon-fields ${a.engine==='horizon'?'':'hidden'}"><div class="vis-smart-tip">${I('info',17)} Elegí la carpeta de tu instancia. VIS descarga y prepara los recursos de Minecraft 26.3; después podés abrir el juego con <b>Jugar</b>. La primera preparación puede tardar varios minutos. Requiere una copia legítima de Minecraft Java.</div>
- <details><summary>Opciones avanzadas de Horizon</summary><label>Motor Horizon<div class="folder-row"><input id="horizon-build-dir" name="horizon_build_dir" value="${attr(a.horizon_build_dir||'vis:source')}" placeholder="vis:source (descargar desde el fork)"/><button type="button" data-action="use-horizon-source" title="Descarga automática cuando instales el proyecto">${I('check',18)}</button></div></label><div class="vis-horizon-download-options"><button type="button" class="primary-btn" data-action="use-horizon-source">${I('download',16)} Descargar Horizon al instalar</button><button type="button" class="outline-btn vis-horizon-find" data-action="detect-horizon-build">${I('search',16)} Builds anteriores (opcional)</button></div><div id="vis-horizon-library" class="vis-horizon-library" role="region" aria-label="Builds antiguos de Horizon" aria-live="polite" hidden></div><p class="vis-horizon-download-note">VIS descarga la versión portable del motor desde el fork horizon-VISNEXO para tu sistema. El motor se instala dentro de esta instancia, sin Horizon Launcher ni compiladores. Minecraft 26.3 y sus recursos oficiales se descargan por separado desde Mojang para una cuenta propietaria.</p>
+ <details><summary>Opciones avanzadas de VIS Nexo</summary><label>Motor VIS Nexo<div class="folder-row"><input id="horizon-build-dir" name="horizon_build_dir" value="${attr(a.horizon_build_dir||'vis:source')}" placeholder="vis:source (descargar desde el fork)"/><button type="button" data-action="use-horizon-source" title="Descarga automática cuando instales el proyecto">${I('check',18)}</button></div></label><div class="vis-horizon-download-options"><button type="button" class="primary-btn" data-action="use-horizon-source">${I('download',16)} Descargar VIS Nexo al instalar</button><button type="button" class="outline-btn vis-horizon-find" data-action="detect-horizon-build">${I('search',16)} Builds anteriores (opcional)</button></div><div id="vis-horizon-library" class="vis-horizon-library" role="region" aria-label="Builds antiguos de VIS Nexo" aria-live="polite" hidden></div><p class="vis-horizon-download-note">VIS descarga la versión portable del motor desde el fork horizon-VISNEXO para tu sistema. El motor se instala dentro de esta instancia, sin VIS Nexo Launcher ni compiladores. Minecraft 26.3 y sus recursos oficiales se descargan por separado desde Mojang para una cuenta propietaria.</p>
  <label>Carpeta Minecraft Java 26.3 instalada<div class="folder-row"><input id="horizon-minecraft-dir" name="horizon_minecraft_dir" value="${attr(a.horizon_minecraft_dir||'')}" placeholder=".../.minecraft"/><button type="button" data-action="pick-horizon-minecraft">${I('folder',18)}</button></div></label>
  <label>Server JAR oficial 26.3<div class="folder-row"><input id="horizon-server-jar" name="horizon_server_jar" value="${attr(a.horizon_server_jar||'')}" placeholder=".../server.jar"/><button type="button" data-action="pick-horizon-server">${I('folder',18)}</button></div></label>
- </details><p class="form-notice">Instalar descarga el motor Rust del fork y prepara Minecraft 26.3 dentro de esta carpeta. Jugar abre Horizon directamente; con una sesión Microsoft válida puede utilizar la identidad premium.</p></section>
- <label>${a.game_dir?'Carpeta actual de esta instancia':'Carpeta biblioteca (VIS creará Instancias/nombre)'}<div class="folder-row"><input id="instance-folder-path" name="game_dir" required value="${attr(a.game_dir||'')}" placeholder="Seleccioná la carpeta base, por ejemplo SSD2/Juegos"/><button type="button" data-action="pick-folder" title="Elegir carpeta">${I('folder',20)}</button><button type="button" class="outline-btn" data-action="check-instance-destination" title="Comprobar que toda la instalación se guardará dentro de esta carpeta">${I('shield',15)} Verificar</button></div><div id="instance-destination-report" role="status" aria-live="polite" class="instance-destination-report"></div></label><details class="instance-layout-hint"><summary>${I('folder',15)} Ver carpetas que VIS instalará</summary><code>Mi instancia/.vis/runtime/versions/</code><code>Mi instancia/.vis/runtime/libraries/</code><code>Mi instancia/.vis/runtime/assets/</code><code>Mi instancia/.vis/java-runtimes/</code><code>Mi instancia/mods/ y saves/</code><small>Horizon también integra .vis/horizon-engine y .vis/minecraft-base. Nunca escribe en .minecraft global.</small></details><label>Instalación existente para reutilizar (opcional)<div class="folder-row"><input id="instance-reuse-path" name="reuse_source" value="${attr(a.reuse_source||'')}" placeholder="Detección automática si está vacío"/><button type="button" data-action="pick-reuse-folder" title="Elegir carpeta de origen sin modificarla">${I('folder',20)}</button></div><small class="muted">VIS examina carpetas conocidas de Minecraft y otras instancias. Esta ruta adicional solo se lee; nunca se sobrescribe.</small></label>
+ </details><p class="form-notice">Instalar descarga el motor Rust del fork y prepara Minecraft 26.3 dentro de esta carpeta. Jugar abre VIS Nexo directamente; con una sesión Microsoft válida puede utilizar la identidad premium.</p></section>
+ <label>${a.game_dir?'Carpeta actual de esta instancia':'Carpeta biblioteca (VIS creará Instancias/nombre)'}<div class="folder-row"><input id="instance-folder-path" name="game_dir" required value="${attr(a.game_dir||'')}" placeholder="Seleccioná la carpeta base, por ejemplo SSD2/Juegos"/><button type="button" data-action="pick-folder" title="Elegir carpeta">${I('folder',20)}</button><button type="button" class="outline-btn" data-action="check-instance-destination" title="Comprobar que toda la instalación se guardará dentro de esta carpeta">${I('shield',15)} Verificar</button></div><div id="instance-destination-report" role="status" aria-live="polite" class="instance-destination-report"></div></label><details class="instance-layout-hint"><summary>${I('folder',15)} Ver carpetas que VIS instalará</summary><code>Mi instancia/.vis/runtime/versions/</code><code>Mi instancia/.vis/runtime/libraries/</code><code>Mi instancia/.vis/runtime/assets/</code><code>Mi instancia/.vis/java-runtimes/</code><code>Mi instancia/mods/ y saves/</code><small>VIS Nexo también integra .vis/horizon-engine y .vis/minecraft-base. Nunca escribe en .minecraft global.</small></details><label>Instalación existente para reutilizar (opcional)<div class="folder-row"><input id="instance-reuse-path" name="reuse_source" value="${attr(a.reuse_source||'')}" placeholder="Detección automática si está vacío"/><button type="button" data-action="pick-reuse-folder" title="Elegir carpeta de origen sin modificarla">${I('folder',20)}</button></div><small class="muted">VIS examina carpetas conocidas de Minecraft y otras instancias. Esta ruta adicional solo se lee; nunca se sobrescribe.</small></label>
  <label>Nick dentro de Minecraft (máximo 16 caracteres)<input name="player_name" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" value="${attr(a.player_name||'')}" placeholder="Por defecto, usuario local"/></label><input type="hidden" name="java_path" value="${attr(a.java_path||'')}"/><p class="muted">VIS instala un Java privado dentro de la instancia.</p>
  <p class="form-notice">${I('users',16)} Los archivos del motor se instalan una sola vez. Podés compartir los mundos y los servidores guardados de esta instancia con las distintas cuentas VIS, sin compartir sus sesiones Microsoft.</p>
  <label class="toggle-line large"><span><b>Compartir los datos de esta instancia entre cuentas</b><small>Recomendado: mismos mundos, servidores, presentación inicial, resource packs y ajustes al cambiar de usuario. Desmarcalo si querés datos de juego separados.</small></span><input type="checkbox" name="share_game_data" ${a.share_game_data!==false?'checked':''}/></label>
- <label class="toggle-line large"><span><b>Protección: copia automática al iniciar</b><small>Opcional. Si hay mundos o ajustes guardados, crea como máximo una copia cada 24 horas y conserva las últimas tres. Se realiza antes de iniciar Java/Horizon y puede tardar con mundos grandes. Nunca borra las copias manuales; si falla, VIS detiene ese inicio.</small></span><input type="checkbox" name="auto_backup" ${a.auto_backup?'checked':''}/></label>
+ <label class="toggle-line large"><span><b>Protección: copia automática al iniciar</b><small>Opcional. Si hay mundos o ajustes guardados, crea como máximo una copia cada 24 horas y conserva las últimas tres. Se realiza antes de iniciar Java/VIS Nexo y puede tardar con mundos grandes. Nunca borra las copias manuales; si falla, VIS detiene ese inicio.</small></span><input type="checkbox" name="auto_backup" ${a.auto_backup?'checked':''}/></label>
  <label class="toggle-line large"><span><b>Pantalla completa</b><small>Se aplica al iniciar Minecraft Java.</small></span><input type="checkbox" name="fullscreen" ${a.fullscreen?'checked':''}/></label><p class="form-notice">${I('info',16)} VIS Smart Install busca copias locales verificadas (otras instancias y launchers conocidos), y solo descarga de Mojang/Fabric lo que falta. Minecraft, Java, el motor Rust, los recursos y los registros se guardan dentro de la carpeta de la instancia. Si falta Java, usamos Temurin verificado con SHA-256. Las cuentas locales solo permiten jugar sin autenticación oficial. Las cuentas Premium usan la sesión Microsoft verificada.</p></form>
  <footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="outline-btn" data-action="submit-instance">${I('check',17)} Guardar</button><button class="primary-btn" data-action="submit-install-instance">${I('play',17)} ${a.installed?'Guardar y jugar':'Crear, instalar y jugar'}</button></footer></div></div>`;
 }
@@ -1407,14 +1664,16 @@ function projectInstallDialog(){
  const folder=dialog?.folder??existing?.game_dir??'';
  const ram=dialog?.ram??existing?.ram_mb??4096;
  return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-medium" role="dialog" aria-modal="true" aria-label="Instalar proyecto"><header class="modal-head"><div><span class="page-eyebrow">VIS UNIVERSE / INSTALAR Y JUGAR</span><h2>${esc(p.title)}</h2></div><button class="icon-btn" data-action="close-modal" aria-label="Cerrar">${I('x',19)}</button></header>
- <form id="vis-project-install-form" class="modal-body wiz-fields"><p class="vis-smart-tip">${I('game',16)} <strong>${esc(p.engine==='horizon'?'Horizon Rust Edition':'Minecraft Java Edition')} · ${esc(p.mc_version)} · ${esc(p.loader||'Vanilla')}</strong><br>Motor, versión y mods establecidos por VIS STUDIOS. VIS Smart Install reutilizará los archivos válidos.</p>
+ <form id="vis-project-install-form" class="modal-body wiz-fields"><p class="vis-smart-tip">${I('game',16)} <strong>${esc(p.engine==='horizon'?'VIS Nexo Rust Edition':'Minecraft Java Edition')} · ${esc(p.mc_version)} · ${esc(p.loader||'Vanilla')}</strong><br>Motor, versión y mods establecidos por VIS STUDIOS. VIS Smart Install reutilizará los archivos válidos.</p>
  <label>Carpeta biblioteca (VIS creará Instancias/nombre)<div class="folder-row"><input name="game_dir" id="vis-project-install-folder" value="${attr(folder)}" placeholder="Elegí una carpeta base, por ejemplo SSD2/Juegos" required/><button type="button" data-action="pick-project-folder" title="Elegir carpeta">${I('folder',19)}</button></div></label>
  <label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(ram)||4096}" required/></label>
- <p class="muted">Las instalaciones compartidas aparecen en todos los perfiles locales compatibles. Los mundos se mantienen separados. Minecraft Rust funciona en modo local; se requiere una copia legítima de Minecraft Java. Microsoft Premium ya está integrado para Minecraft Java y Horizon.</p></form>
+ <p class="muted">Las instalaciones compartidas aparecen en todos los perfiles locales compatibles. Los mundos se mantienen separados. Minecraft Rust funciona en modo local; se requiere una copia legítima de Minecraft Java. Microsoft Premium ya está integrado para Minecraft Java y VIS Nexo.</p></form>
  <footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="confirm-project-install">${I('play',17)} Crear, instalar y jugar</button></footer></div></div>`;
 }
 async function projectPlay(projectId){
  const p=db.projects.find(p=>p.id===projectId);if(!p)return;
+ if(projectCommunityId===projectId&&projectCommunity?.play_access==='members'&&!projectCommunity.can_play)
+   return message('Este proyecto requiere una invitación o autorización para jugar.',true);
  if(!isExecutionEnabled(p))return message('VIS STUDIOS todavía no habilitó este proyecto.',true);
  const match=db.instances.find(i=>compatibleProjectInstance(i,p)&&(!isGuest()?!i.source_owner:true))||db.instances.find(i=>compatibleProjectInstance(i,p));
  if(match){await performLaunch(projectId,match.name,match.source_owner||'');return;}
@@ -1424,6 +1683,8 @@ async function projectPlay(projectId){
 async function projectInstallAndPlay(){
  const form=document.querySelector('#vis-project-install-form');if(!(form instanceof HTMLFormElement)||!form.reportValidity())return;
  const data=new FormData(form);const projectId=dialog?.projectId;
+ if(projectCommunityId===projectId&&projectCommunity?.play_access==='members'&&!projectCommunity.can_play)
+   return message('Todavía no tenés autorización para jugar en este proyecto.',true);
  let gameDir=String(data.get('game_dir')||'').trim();const ramMb=Number(data.get('ram_mb'));
  try {
    const selectedProject=db.projects.find(p=>p.id===projectId);
@@ -1439,7 +1700,27 @@ async function projectInstallAndPlay(){
 }
 function sharedRamDialog(){const i=db.instances.find(i=>i.project_id===dialog?.projectId&&i.name===dialog?.name&&i.source_owner===dialog?.sourceOwner);return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="dialog" aria-modal="true" aria-label="RAM de instancia compartida"><header class="modal-head"><h2>RAM de ${esc(i?.name||'Instancia')}</h2><button class="icon-btn" data-action="close-modal">${I('x',17)}</button></header><form id="shared-ram-form" class="modal-body"><label>Memoria RAM (MB)<input name="ram_mb" type="number" min="1024" max="32768" step="256" value="${Number(i?.ram_mb)||4096}" required/></label><p class="muted">Este ajuste de RAM es exclusivo de tu perfil VIS. Los mundos y servidores siguen la política compartida de esta instancia.</p></form><footer class="modal-footer"><button type="button" class="subtle-btn" data-action="close-modal">Cancelar</button><button type="button" class="primary-btn" data-action="save-shared-ram">Guardar RAM</button></footer></div></div>`;}
 function confirmDialog(){return `<div class="modal-backdrop" data-action="modal-backdrop"><div class="dialog modal-small" role="alertdialog" aria-modal="true"><header class="modal-head"><h2>Confirmar eliminación</h2><button class="icon-btn" data-action="close-modal">${I('x',18)}</button></header><div class="modal-body"><p>¿Querés quitar <strong>${esc(dialog.label)}</strong> de VIS Nexo? Por defecto <b>se conservan todos los mundos y archivos del disco</b>.</p>
- ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los archivos del disco</b><small>Irreversible. Disponible solo para instalaciones administradas por VIS en Instancias/&lt;nombre&gt;. Cerrá el juego antes.</small></span><input type="checkbox" id="delete-instance-files"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
+ ${dialog.kind==='instance'?`<label class="toggle-line large"><span><b>Borrar también los mundos y archivos del disco</b><small>Irreversible. Solo se borrarán carpetas propias con marcadores VIS verificables, incluidas versiones antiguas. Cerrá Minecraft antes.</small></span><input type="checkbox" id="delete-instance-files"></label><label class="bulk-confirm-label">Para borrar archivos escribí <strong>BORRAR</strong><input id="delete-instance-confirm" type="text" autocomplete="off" spellcheck="false" maxlength="12" placeholder="BORRAR" aria-label="Confirmación para borrar archivos"></label>`:''}</div><footer class="modal-footer"><button class="subtle-btn" data-action="close-modal">Cancelar</button><button class="danger-btn" data-action="confirm-delete">${I('trash',17)} Quitar de VIS</button></footer></div></div>`;}
+
+function instanceWorldCloudSection(d){
+ if(d.sourceOwner)return '<section><h3>'+I('cloud',17)+' Nube</h3><p class="muted">Las copias de nube se vinculan desde la cuenta propietaria de la instancia.</p></section>';
+ const worlds=d.worldCloud||[];
+ const labels={grey:'Sin vincular',green:'Guardada en carpeta',orange:'Actualización pendiente',red:'Error'};
+ return '<section class="vis-cloud-worlds"><h3>'+I('cloud',17)+' Nube · mundos</h3>'+
+ '<p class="muted">Elegí una carpeta de OneDrive, Google Drive, Dropbox o Nextcloud que ya sincronices con su aplicación oficial. VIS guarda copias ZIP por mundo; el verde comprueba la copia LOCAL, no que la nube haya confirmado la subida. No se guardan contraseñas ni tokens.</p>'+
+ '<label>Carpeta gestionada por <select id="vis-world-provider"><option value="onedrive">OneDrive</option><option value="google_drive">Google Drive</option><option value="dropbox">Dropbox</option><option value="nextcloud">Nextcloud</option><option value="other">Otra carpeta sincronizada</option></select></label>'+
+ (worlds.length?worlds.map(w=>
+ '<div class="vis-cloud-world-row"><div class="vis-cloud-world-info"><b>'+esc(w.world)+'</b>'+
+ '<span class="vis-world-cloud-state is-'+attr(w.status)+'"><i aria-hidden="true"></i>'+esc(labels[w.status]||'Error')+'</span>'+
+ '<small>'+esc(w.detail||'')+'</small></div><div class="vis-data-actions">'+
+ '<button class="outline-btn" type="button" data-action="world-cloud-link" data-world="'+attr(w.world)+'">'+I('folder',14)+' Vincular</button>'+
+ (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-save" data-world="'+attr(w.world)+'">'+I('cloud',14)+' Nube</button>':'')+
+ (w.status!=='grey'?'<button class="outline-btn" type="button" data-action="world-cloud-unlink" data-world="'+attr(w.world)+'">Desvincular</button>':'')+
+ (w.bytes>0?'<button class="outline-btn" type="button" data-action="world-cloud-restore" data-world="'+attr(w.world)+'">Restaurar copia</button>':'')+
+ '</div></div>').join(''):'<p class="muted">Todavía no se detectaron mundos con level.dat en esta instancia.</p>')+
+ '</section>';
+}
+
 function instanceDataDialog(){
  const d=dialog||{},backups=d.backups||[],health=d.health;
  const foreign=!!d.sourceOwner;
@@ -1473,7 +1754,7 @@ function instanceDataDialog(){
    '<label>Escribí RESTAURAR<input id="instance-data-restore-word" type="text" autocomplete="off" placeholder="RESTAURAR"/></label>'+
    '<button class="outline-btn" data-action="instance-data-restore">'+I('refresh',15)+' Restaurar copia</button>':
    foreign?'<p class="muted">La restauración de esta instancia corresponde a su propietario.</p>':'')+
- '</section>'+
+ '</section>'+instanceWorldCloudSection(d)+
  '<section><h3>'+I('shield',17)+' Diagnóstico</h3>'+
  (health?'<p>Mundos detectados: <strong>'+Number(health.worlds||0)+'</strong> · Mundos válidos: <strong>'+Number(health.valid_worlds||0)+'</strong></p>'+
  '<p>Servidores guardados: '+(health.servers_file?'Sí':'Sin lista')+
@@ -1503,11 +1784,12 @@ async function openInstanceData(projectId,name,sourceOwner){
  await onceOperation('instance-data-open:'+JSON.stringify([projectId,name,sourceOwner]),async()=>{
   try{
     const params={projectId,name,sourceOwner:sourceOwner||null};
-    const [backups,health]=await Promise.all([
-       command('instance_backups',params),command('inspect_instance_data',params)
+    const [backups,health,worldCloud]=await Promise.all([
+       command('instance_backups',params),command('inspect_instance_data',params),
+       sourceOwner?Promise.resolve([]):command('world_cloud_status',{projectId,name})
     ]);
     if(generation!==accountGeneration)return;
-    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,merge:null,
+    dialog={type:'instance-data',projectId,name,sourceOwner:sourceOwner||'',backups,health,worldCloud,merge:null,
       autoBackup:!sourceOwner&&!!db.instances.find(i=>!i.source_owner&&i.project_id===projectId&&i.name===name)?.auto_backup};
     render();
   }catch(error){if(generation===accountGeneration)message('No se pudieron consultar los datos: '+String(error),true);}
@@ -1641,6 +1923,8 @@ function navigate(to,id='') {
    if(to==='project')activeFeed='news';
    contextMenu=null;render();
    if(to==='project'&&native&&db.user)void refreshAssets().catch(()=>{});
+   if(to==='project'&&social.connected())void loadProjectCommunity(id||selectedId);
+   if(to==='profile'&&social.connected())void refreshCeiboSecurity();
    root.querySelector('#main-scroll')?.scrollTo(0,0);
  },{reducedMotion:prefs.reducedMotion});
 }
@@ -1726,7 +2010,7 @@ function validateStep(){
  if(wizardStep===0){
    if(!wizard.title?.trim()){message('Poné un nombre al proyecto.',true);return false;}
    if(wizard.title.length>80){message('El nombre es demasiado largo.',true);return false;}
-   if(wizard.modrinth_mods?.length && !(wizard.engine==='java'&&wizard.loader==='fabric')){message('Los mods requieren Java con Fabric. Quitalos antes de cambiar a Vanilla/Horizon.',true);return false;}
+   if(wizard.modrinth_mods?.length && !(wizard.engine==='java'&&wizard.loader==='fabric')){message('Los mods requieren Java con Fabric. Quitalos antes de cambiar a Vanilla/VIS Nexo.',true);return false;}
  }
  return true;
 }
@@ -1785,6 +2069,65 @@ root.addEventListener('submit',async event=>{
  const form=event.target;
  if(!(form instanceof HTMLFormElement))return;
  event.preventDefault();const formData=new FormData(form);
+
+ if(form.id==='ceibo-recovery-start-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     await command('social_recovery_start',{kind:ceiboRecoveryKind,identity:String(formData.get('identity')||'')});
+     message('Si existe una cuenta vinculada a un correo verificado, recibirás instrucciones.');
+     if(ceiboRecoveryKind==='password'){ceiboRecoveryStep='reset';render();}
+   }catch(error){message('Recuperación: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
+ if(form.id==='ceibo-recovery-reset-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     await command('social_recovery_reset',{
+       code:String(formData.get('code')||'').trim(),
+       password:String(formData.get('password')||''),
+       confirm:String(formData.get('confirm')||''),
+       recoveryCode:String(formData.get('recovery_code')||'').trim()
+     });
+     ceiboRecoveryStep='request';authMode='login';render();
+     message('Contraseña restablecida. Iniciá sesión con la nueva clave.');
+   }catch(error){message('No se pudo restablecer la contraseña: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
+ if(form.id==='ceibo-change-password-form'){
+   const password=String(formData.get('password')||'');
+   const confirm=String(formData.get('confirm')||'');
+   if(password!==confirm)return message('Las nuevas contraseñas no coinciden.',true);
+   if(!window.confirm('Cambiar la contraseña cerrará todas las sesiones actuales. ¿Continuar?'))return;
+   try{
+     await command('social_change_cloud_password',{
+       currentPassword:String(formData.get('current_password')||''),
+       password,confirm,mfaCode:String(formData.get('mfa_code')||'').trim()
+     });
+     await social.stop();resetAccountView();db=await command('logout');
+     authMode='login';authProvider='cloud';page='home';render();
+     message('Contraseña modificada. Volvé a ingresar.');
+   }catch(error){message('Contraseña VIS: '+String(error),true);}
+   return;
+ }
+
+ if(form.id==='ceibo-login-mfa-form'){
+   if(authBusy)return;
+   authBusy=true;
+   try{
+     const code=String(formData.get('code')||'').trim();
+     db=await command('social_cloud_mfa_finish',{code});
+     resetAccountView();page='home';authMode='login';render();
+     void refreshAssets().catch(()=>{});
+     message('Segundo factor validado. Bienvenido a VIS Nexo.');
+     if(native)void connectSocial(true);
+   }catch(error){message('Verificación MFA: '+String(error),true);}
+   finally{authBusy=false;}
+   return;
+ }
  if(form.id==='auth-form'){
   if(authBusy)return;
   const username=String(formData.get('username')||''),password=String(formData.get('password')||'');
@@ -1794,14 +2137,27 @@ root.addEventListener('submit',async event=>{
    if(cloud){
      if(authMode==='register')db=await command('social_cloud_register',{
        username,password,confirm:String(formData.get('confirm')||'')});
-     else db=await command('social_cloud_login',{identifier:username,password});
+     else{
+       const login=await command('social_cloud_login',{identifier:username,password});
+       if(!login){
+         authMode='mfa';authBusy=false;render();return;
+       }
+       db=login;
+     }
    } else {
      db=authMode==='offline'?await command('login_offline',{nickname:String(formData.get('nickname')||'')}):
        await command(authMode==='register'?'register':'login',
          authMode==='register'?{username,password,confirm:String(formData.get('confirm')||'')}:{username,password});
    }
+   const email=cloud&&authMode==='register'?String(formData.get('email')||'').trim():'';
    resetAccountView();page='home';render();void refreshAssets().catch(()=>{});message(`Sesión iniciada · ${db.user?.username}`);
-   if(native&&db.mode!=='offline')void connectSocial(cloud);
+   if(native&&db.mode!=='offline')void (async()=>{
+     await connectSocial(cloud);
+     if(email&&social.connected()){
+       try{await social.ceiboAccountEmail(email);message('Te enviamos un código para verificar el correo. Podés ingresarlo desde Mi perfil.');}
+       catch(error){message('No se pudo enviar la verificación de correo: '+String(error),true);}
+     }
+   })();
   }catch(e){message(String(e),true)}finally{authBusy=false;}
   return;
  }
@@ -1817,10 +2173,18 @@ root.addEventListener('submit',async event=>{
  }
  if(form.id==='message-form'){
   const body=String(formData.get('body')||'');
-  if(!body||!chatWith)return;
+  const recipient=chatWith, account=db.user?.username;
+  if(!body.trim()||!recipient)return;
   if(!social.connected()){message('VIS Social sin conexión: mensaje no enviado.',true);return;}
-  try {await social.sendMessage(chatWith,body);}
-  catch(e){message(String(e),true);}
+  try {
+   await social.sendMessage(recipient,body);
+   // Live updates can replace the form during await; keep drafts written after Send.
+   const input=root.querySelector('#message-form [name="body"]');
+   if(db.user?.username===account&&chatWith===recipient&&input?.value===body){
+    input.value='';
+    input.focus({preventScroll:true});
+   }
+  }catch(e){message(String(e),true);}
   return;
  }
  if(form.id==='cloud-catalog-form'){try{await command('configure_cloud_catalog',{url:String(formData.get('url')||'').trim()});message('Catálogo configurado');await refreshCloudCatalog();}catch(e){message(String(e),true);}return;}
@@ -1900,6 +2264,21 @@ root.addEventListener('click',async event=>{
  const act=button.dataset.action,id=button.dataset.id||'',projectId=button.dataset.project||'';
  if(['create-project','edit-project','edit-avatar','open-instance','edit-instance','delete-instance','delete-project'].includes(act))lastDialogTrigger=button;
  if(act==='modal-backdrop'){if(event.target===button)closeDialog();return;}
+
+ if(act==='ceibo-login-mfa-cancel'){
+   if(native)void command('social_cancel_pending_mfa').catch(()=>{});
+   authMode='login';authProvider='cloud';authBusy=false;render();return;
+ }
+ if(act==='auth-forgot-password'||act==='auth-forgot-username'){
+   authProvider='cloud';authMode='recover';ceiboRecoveryKind=act==='auth-forgot-password'?'password':'username';
+   ceiboRecoveryStep='request';render();return;
+ }
+ if(act==='ceibo-recovery-back'){
+   authMode='login';authProvider='cloud';ceiboRecoveryStep='request';render();return;
+ }
+ if(act==='ceibo-recovery-step'){
+   ceiboRecoveryStep=ceiboRecoveryStep==='request'?'reset':'request';render();return;
+ }
  if(act==='auth-microsoft'){void beginMicrosoftLogin();return;}
  if(act==='microsoft-copy-code'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.user_code,'Código Microsoft');return;}
  if(act==='microsoft-copy-url'){if(microsoftTicket)await copyMicrosoftText(microsoftTicket.verification_uri,'Enlace Microsoft');return;}
@@ -1940,6 +2319,84 @@ root.addEventListener('click',async event=>{
  else if(act==='sidebar-instance'){mcSelected={projectId:projectId||PERSONAL_PROJECT_ID,name:id};navigate('instances');}
  else if(act==='open-project')navigate('project',id);
  else if(act==='go-profile')navigate('profile');
+
+ else if(act==='ceibo-email-request'){
+   if(!social.connected())return message('Conectá VIS Cloud para verificar el correo.',true);
+   const email=document.getElementById('ceibo-email-input')?.value?.trim()||'';
+   if(!email)return message('Ingresá un correo electrónico válido.',true);
+   try{const result=await social.ceiboAccountEmail(email);
+     message(result.already_verified?'Este correo ya está verificado.':
+       result.dual_approval?'Revisá ambos correos: anterior y nuevo.':'Revisá tu correo e ingresá el código de verificación.');
+   }catch(error){message('Correo Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-email-verify'){
+   const code=window.prompt('Pegá el código de verificación recibido por correo:');
+   if(!code)return;
+   try{
+     const result=await command('social_recovery_verify_email',{code:code.trim()});
+     message(result.verified?'Correo verificado correctamente.':'Código confirmado. Falta aprobar desde el otro correo.');
+     await refreshCeiboSecurity();
+   }catch(error){message('Verificación Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-setup'){
+   if(!social.connected())return;
+   try{
+     const setup=await social.ceiboMfaSetup();
+     window.prompt('Configurá tu aplicación Authenticator con esta clave TOTP. Copiala y no la compartas:',setup.secret);
+     const code=window.prompt('Ingresá el código de 6 dígitos que muestra tu aplicación de autenticación:');
+     if(!code)return;
+     const confirmed=await social.ceiboMfaConfirm(code.trim());
+     displayRecoveryCodes(confirmed.recovery_codes,confirmed.warning);
+     message('Segundo factor habilitado. Guardá tus códigos fuera de VIS Nexo.');
+     await refreshCeiboSecurity();
+   }catch(error){message('MFA: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-verify'){
+   if(!social.connected())return;
+   const input=window.prompt('Código de 6 dígitos o código de emergencia MFA:');
+   if(!input)return;
+   try{await social.ceiboMfaVerify(input.trim());message('Verificación de seguridad aceptada por 10 minutos.');
+     await refreshCeiboSecurity();
+   }catch(error){message('MFA: '+String(error),true);}
+ }
+ else if(act==='ceibo-mfa-rotate'){
+   if(!social.connected())return;
+   if(!window.confirm('Generar códigos nuevos invalidará todos los anteriores. ¿Continuar?'))return;
+   try{
+     const result=await social.ceiboMfaRotate();
+     displayRecoveryCodes(result.recovery_codes,result.warning);
+     message('Códigos de emergencia nuevos generados.');
+   }catch(error){message('Códigos de recuperación: '+String(error),true);}
+ }
+ else if(act==='ceibo-sessions-refresh'){
+   if(!social.connected())return;
+   try{ceiboSessions=await social.ceiboSessions();render();}
+   catch(error){message('Sesiones Ceibo: '+String(error),true);}
+ }
+ else if(act==='ceibo-revoke-session'){
+   if(!social.connected()||!id)return;
+   if(!window.confirm('¿Cerrar esta sesión de VIS Ceibo?'))return;
+   try{
+     await social.ceiboRevokeSession(id);
+     ceiboSessions=await social.ceiboSessions().catch(()=>null);render();
+     message('Sesión revocada.');
+   }catch(error){message('Revocar sesión: '+String(error),true);}
+ }
+ else if(act==='ceibo-logout-all'){
+   if(!social.connected())return;
+   if(!window.confirm('Esto cerrará TODAS las sesiones VIS Ceibo, incluida la actual. ¿Confirmar?'))return;
+   try{
+     await social.ceiboRevokeSession();
+     await social.stop();resetAccountView();db=await command('logout');
+     authMode='login';authProvider='cloud';page='home';render();message('Todas las sesiones fueron revocadas.');
+   }catch(error){message('Cerrar sesiones: '+String(error),true);}
+ }
+ else if(act==='ceibo-rebind-device'){
+   if(!native||!social.connected())return message('Necesitás iniciar sesión VIS Cloud con contraseña.',true);
+   try{await command('social_rebind_device');message('La identidad de este dispositivo volvió a vincularse.');
+   }catch(error){message('Dispositivo: '+String(error),true);}
+ }
+
  else if(act==='go-instances')navigate('instances');
  else if(act==='go-minecraft'){navigate('minecraft');void refreshInstalledFiles();}
  else if(act==='go-settings')navigate('settings');
@@ -1987,12 +2444,36 @@ root.addEventListener('click',async event=>{
  else if(act==='toggle-social'){if(socialVisible){beginSurfaceDismiss(root,'.social-pane',()=>{socialVisible=false;render();},{reducedMotion:prefs.reducedMotion});}else{socialVisible=true;render();}}
  else if(act==='social-global'){socialTab='global';render();}
  else if(act==='social-projects'){socialTab='projects';render();}
+ else if(act==='voice-settings'){await openVoiceSettings(serverVoice);}
+ else if(act==='horizon-menu'){
+   if(!isAdmin())return message('Esta herramienta es exclusiva de administradores.',true);
+   const server=window.prompt('Servidor asignado (vacío para recuperar el menú normal):','');
+   if(server!==null)try{
+    let config=null;
+    if(server.trim()){
+     const initial={server:server.trim(),buttons:[{action:'play',label:'Jugar',x:.5,y:.42,width:.6},{action:'settings',label:'Ajustes',x:.5,y:.58,width:.6},{action:'quit',label:'Salir',x:.5,y:.74,width:.6}]};
+     const text=window.prompt('Editá los botones: action, label, x, y, width (posiciones entre 0 y 1):',JSON.stringify(initial));
+     if(text===null)return;config=JSON.parse(text);
+    }
+    await command('horizon_project_menu',{projectId,name:id,config});message('Menú guardado. Se aplica al volver a iniciar VIS Nexo.');
+   }catch(error){message(String(error),true);}
+ }
+ else if(act==='world-invite'){
+  if(!native||!social.connected()||!horizonGameRunning||!chatWith||id!==chatWith)
+   return message('Iniciá una partida VIS Nexo desde VIS Nexo para invitar a este contacto.',true);
+  try{await portalsWorlds.invite(id);message('Invitación enviada desde tu partida VIS Nexo.');}
+  catch(error){message(String(error),true);}
+ }
+ else if(act==='world-join'){try{await portalsWorlds.join(id);message('Conectando al mundo de tu amigo…');}catch(error){message(String(error),true);}}
+ else if(act==='world-decline'){try{await social.declineWorld(id);}catch(error){message(String(error),true);}}
+ else if(act==='world-stop'){try{await portalsWorlds.stop();message('Dejaste de compartir el mundo.');}catch(error){message(String(error),true);}}
  else if(act==='open-chat'){chatWith=id;chatWindowSize=100;social.setChatActive(true);render();}
  else if(act==='chat-load-older'){chatWindowSize=Math.min(10000,chatWindowSize+100);render();}
  else if(act==='close-chat'){beginSurfaceDismiss(root,'.chat-drawer',()=>{chatWith='';social.setChatActive(false);render();},{reducedMotion:prefs.reducedMotion});}
  else if(act==='social-upload-avatar'){void selectAndUploadSocialAvatar();}
  else if(act==='social-enable-cloud'){void enableSocialCloudPassword();}
  else if(act==='social-developer-key'){
+  if(!social.state()?.developer)return message('Opción reservada a desarrolladores autorizados.',true);
   try{
    const {account}=await social.accountInfo();
    if(!account?.cloud_credential_public_key)throw Error('Esta cuenta todavía no tiene credencial cloud.');
@@ -2004,6 +2485,7 @@ root.addEventListener('click',async event=>{
   }catch(error){message(String(error),true);}
  }
  else if(act==='social-superadmin-key'){
+  if(social.state()?.role!=='super_admin')return message('Opción reservada a la supercuenta.',true);
   try{
    const {account}=await social.accountInfo();
    if(!account?.cloud_credential_public_key)
@@ -2019,6 +2501,8 @@ root.addEventListener('click',async event=>{
   }catch(error){message(String(error),true);}
  }
  else if(act==='social-public-identity'){
+  if(social.state()?.role!=='super_admin'&&!social.state()?.developer)
+   return message('Solo personal autorizado puede acceder a esta identidad técnica.',true);
   if(!native){message('La identidad se muestra desde VIS Nexo nativo.',true);return;}
   try{
     const info=await command('social_identity_info');
@@ -2066,6 +2550,18 @@ root.addEventListener('click',async event=>{
    else await social.setAccountRole(username,choice);
    message('Permiso actualizado en el servidor');
   }catch(e){message(String(e),true);}
+ }
+ else if(act==='social-global-admin'){
+   if(social.state()?.role!=='super_admin')return message('Se requiere la supercuenta.',true);
+   const username=window.prompt('Nombre técnico de la cuenta VIS Cloud (no el @alias):');
+   if(!username)return;
+   const operation=window.prompt('grant (autorizar administrador global) o revoke (revocar)','grant');
+   if(operation!=='grant'&&operation!=='revoke')return message('Operación inválida.',true);
+   if(!window.confirm((operation==='grant'?'Otorgar':'Revocar')+' administración global a '+username+'?'))return;
+   try{
+     await social.globalAdmin(username,operation==='grant');
+     message('Permiso global actualizado. No modifica el alias ni la identidad del usuario.');
+   }catch(error){message('Administradores: '+String(error),true);}
  }
  else if(act==='social-edit-status'){stateEditorOpen=!stateEditorOpen;render();}
  else if(act==='premium-refresh'){await loadPremiumCosmetics();}
@@ -2140,6 +2636,12 @@ root.addEventListener('click',async event=>{
  else if(act==='edit-profile'){dialog={type:'edit-profile'};render();}
  else if(act==='publish-vis-skin'){void publishLocalSkin();}
  else if(act==='remove-vis-skin'){void removePublicSkin();}
+ else if(act==='premium-sync-vis-skin'){
+   const skin=db.user?.username?socialSkins.get(db.user.username)?.skin:null;
+   if(!skin||!microsoftGamertag)return message('Conectá tu Minecraft Premium y publicá la skin VIS antes de sincronizarla.',true);
+   if(!window.confirm('¿Querés reemplazar tu skin oficial de Minecraft Java por la skin VIS publicada? Este cambio afecta a tu cuenta Microsoft y a los demás jugadores.'))return;
+   void changePremiumCosmetic('microsoft_publish_vis_skin',{png:skin,variant:premiumSkinModel});
+ }
  else if(act==='skin-lookup'){
    const username=window.prompt('Usuario VIS cuya skin querés ver (no gamertag):','');
    if(username!==null&&username.trim())void lookupPublicSkin(username);
@@ -2217,6 +2719,66 @@ root.addEventListener('click',async event=>{
    const ok=await apply('configure_shared_ram',{sourceOwner:dialog.sourceOwner,projectId:dialog.projectId,name:dialog.name,ramMb},'Memoria de este perfil actualizada');
    if(ok){dialog=null;render();}
  }
+ else if(act==='project-community-refresh'){await loadProjectCommunity(selectedId);}
+ else if(act==='project-community-request'){
+   try{
+     const result=await social.requestProjectJoin(selectedId);
+     message(result.status==='member'?'Ya participás en el proyecto.':'Solicitud enviada al equipo del proyecto.');
+     await loadProjectCommunity(selectedId);
+   }catch(error){message('Solicitud: '+String(error),true);}
+ }
+ else if(act==='project-community-policy'){
+   if(!projectCommunity?.can_manage)return;
+   const admission=window.prompt('Solicitudes: open, request, invite_only',projectCommunity.admission);
+   if(admission===null)return;
+   const access=window.prompt('Permisos para jugar: public o members',projectCommunity.play_access);
+   if(access===null)return;
+   try{await social.setProjectPolicy(selectedId,admission,access);await loadProjectCommunity(selectedId);message('Política actualizada.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-member'||act==='project-community-remove-member'){
+   if(!projectCommunity?.can_manage)return;
+   const username=window.prompt('Usuario VIS Cloud al que asignar permisos:');
+   if(!username)return;
+   const remove=act==='project-community-remove-member';
+   const role=remove?'participant':window.prompt('Rol: creator, helper, content_creator, participant, guest, collaborator, mention','participant');
+   if(!role)return;
+   const canPlay=!remove&&window.confirm('¿Autorizar a este usuario para jugar en proyectos con acceso restringido?');
+   try{
+     await social.projectMember(selectedId,username,role,canPlay,remove?'revoke':'grant');
+     await loadProjectCommunity(selectedId);message(remove?'Miembro quitado':'Miembro y acceso actualizados.');
+   }catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-review'){
+   if(!projectCommunity?.can_manage)return;
+   const username=button.dataset.user,mode=button.dataset.mode;
+   try{await social.reviewProjectJoin(selectedId,username,mode);await loadProjectCommunity(selectedId);message('Solicitud revisada.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-add-media'){
+   const title=window.prompt('Título del directo o video:');if(!title)return;
+   const url=window.prompt('URL pública de YouTube o Twitch:');if(!url)return;
+   const kind=window.confirm('¿Es un stream/directo? (Cancelar = video)')?'stream':'video';
+   try{await social.projectMedia(selectedId,'add',{title,url,kind});await loadProjectCommunity(selectedId);message('Contenido vinculado al proyecto.');}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-delete-media'){
+   const item=projectCommunity?.media?.find(x=>x.id===id);if(!item)return;
+   if(!window.confirm('¿Quitar este contenido del proyecto?'))return;
+   try{await social.projectMedia(selectedId,'delete',{id});await loadProjectCommunity(selectedId);}
+   catch(error){message(String(error),true);}
+ }
+ else if(act==='project-community-open-media'){
+   const item=projectCommunity?.media?.find(x=>x.id===id);
+   if(!item)return;
+   try{
+     const url=new URL(item.url);
+     if(url.protocol!=='https:'||!['www.youtube.com','youtu.be','www.twitch.tv','twitch.tv','clips.twitch.tv'].includes(url.hostname))
+       throw Error('Origen de video no permitido');
+     if(native)await T.opener.openUrl(url.toString());
+     else window.open(url.toString(),'_blank','noopener,noreferrer');
+   }catch(error){message('No se pudo abrir el contenido: '+String(error),true);}
+ }
  else if(act==='project-play'){await projectPlay(id);}
  else if(act==='confirm-project-install'){await projectInstallAndPlay();}
  else if(act==='pick-project-folder'){
@@ -2266,7 +2828,7 @@ root.addEventListener('click',async event=>{
    if(!native||!T?.dialog?.open)return message('Elegí rutas desde VIS Nexo instalado.',true);
    const field=act==='pick-horizon-build'?'horizon-build-dir':act==='pick-horizon-minecraft'?'horizon-minecraft-dir':'horizon-server-jar';
    const chosen=await T.dialog.open({directory:act!=='pick-horizon-server',multiple:false,
-     title:act==='pick-horizon-server'?'Seleccionar server.jar oficial de Minecraft':'Seleccionar carpeta de Horizon / Minecraft'});
+     title:act==='pick-horizon-server'?'Seleccionar server.jar oficial de Minecraft':'Seleccionar carpeta de VIS Nexo / Minecraft'});
    if(chosen){const input=document.getElementById(field);if(input)input.value=chosen;}
  }
  else if(act==='toggle-project-execution'){if(isAdmin())await apply('set_project_execution',{projectId:id,enabled:db.project_execution?.[id]===false},'Política de ejecución actualizada');}
@@ -2275,16 +2837,16 @@ root.addEventListener('click',async event=>{
  else if(act==='horizon-check'){
    try{horizonChecks=await command('horizon_diagnostics',{projectId,name:id});render();
      const problems=horizonChecks.filter(c=>c.status==='missing').length;
-     message(problems?`${problems} requisito(s) pendientes. Revisá el diagnóstico de Horizon.`:'Diagnóstico Horizon completado. Ya podés jugar en modo local.',!!problems);
+     message(problems?`${problems} requisito(s) pendientes. Revisá el diagnóstico de VIS Nexo.`:'Diagnóstico VIS Nexo completado. Ya podés jugar en modo local.',!!problems);
    }catch(e){message(String(e),true)}
  }
  else if(act==='use-horizon-source'){
    const input=document.getElementById('horizon-build-dir');
    if(input)input.value='vis:source';
-   message('Horizon se descargará desde el fork VIS al pulsar Instalar. No se incluye en el launcher.');
+   message('VIS Nexo se descargará desde el fork VIS al pulsar Instalar. No se incluye en el launcher.');
  }
  else if(act==='detect-horizon-build'){
-   if(!native)return message('La biblioteca de Horizon necesita VIS Nexo instalado.',true);
+   if(!native)return message('La biblioteca de VIS Nexo necesita VIS Nexo instalado.',true);
    try{
      const managed=await command('horizon_installed_builds');
      const local=await command('horizon_local_builds');
@@ -2303,13 +2865,13 @@ root.addEventListener('click',async event=>{
          const bad=entry.integrity==='modified'||entry.integrity==='incomplete';
          return `<div class="vis-horizon-build ${bad?'is-unsafe':''}"><div><strong>${esc(entry.tag)}</strong><span class="vis-horizon-build-status">${esc(status)}</span><small title="${attr(entry.build_dir)}">${esc(entry.detail||entry.build_dir)}</small></div><button type="button" class="outline-btn" data-action="select-horizon-build" data-index="${index}" ${bad?'disabled title="Archivos ausentes o modificados"':''}>Utilizar</button></div>`;
        }).join('');
-   }catch(e){message('No se pudo leer la biblioteca Horizon: '+String(e),true)}
+   }catch(e){message('No se pudo leer la biblioteca VIS Nexo: '+String(e),true)}
  }
  else if(act==='select-horizon-build'){
    const index=Number(button.dataset.index);
    const selected=horizonLibraryBuilds[index];
    if(!Number.isInteger(index)||!selected)return message('Selección de build inválida.',true);
-   if(['modified','incomplete'].includes(selected.integrity))return message('No es seguro utilizar ese build. Reinstalá Horizon.',true);
+   if(['modified','incomplete'].includes(selected.integrity))return message('No es seguro utilizar ese build. Reinstalá VIS Nexo.',true);
    if(selected.integrity!=='verified' && !window.confirm('Este build no posee una verificación de integridad reciente de VIS. ¿Querés seleccionarlo igualmente?'))return;
    const input=document.getElementById('horizon-build-dir');
    if(input)input.value=selected.build_dir;
@@ -2317,6 +2879,37 @@ root.addEventListener('click',async event=>{
  }
  else if(act==='instance-data-tools'){
    await openInstanceData(projectId,id,button.dataset.source||'');
+ }
+ else if(['world-cloud-link','world-cloud-save','world-cloud-restore','world-cloud-unlink'].includes(act)){
+   const d=dialog,world=button.dataset.world||'',generation=accountGeneration;
+   if(!native||d?.type!=='instance-data'||d.sourceOwner||!world)return;
+   await onceOperation('cloud-world:'+JSON.stringify([d.projectId,d.name,world]),async()=>{
+     try{
+       const params={projectId:d.projectId,name:d.name,world};
+       if(act==='world-cloud-link'){
+         if(!T?.dialog?.open)throw Error('Selector de carpetas no disponible');
+         const provider=document.getElementById('vis-world-provider')?.value||'other';
+         const folder=await T.dialog.open({directory:true,multiple:false,title:'Elegí tu carpeta de nube ya sincronizada'});
+         if(typeof folder!=='string'||!folder)return;
+         await command('link_world_cloud',{...params,folder,provider});
+         message('Carpeta vinculada; guardá la primera copia del mundo con Nube.');
+       }else if(act==='world-cloud-unlink'){
+         if(!window.confirm('Desvincular Nube para '+world+'? Las copias guardadas no se eliminan.'))return;
+         await command('unlink_world_cloud',params);
+         message('Nube desvinculada del mundo; se conservaron los respaldos externos.');
+       }else if(act==='world-cloud-save'){
+         const backup=await command('backup_world_cloud',params);
+         message('Mundo copiado a carpeta sincronizada: '+fmtBytes(backup.bytes));
+       }else{
+         if(!window.confirm('Se restaurará una COPIA con nombre nuevo; el mundo actual no se reemplazará. ¿Continuar?'))return;
+         const restored=await command('restore_world_cloud',{...params,confirmation:'RESTAURAR'});
+         message('Mundo restaurado como '+restored+'. Se conservó el original.');
+       }
+       if(generation!==accountGeneration||dialog!==d)return;
+       d.worldCloud=await command('world_cloud_status',{projectId:d.projectId,name:d.name});
+       if(generation===accountGeneration&&dialog===d)render();
+     }catch(error){if(generation===accountGeneration)message('Nube: '+String(error),true);}
+   });
  }
  else if(act==='instance-data-backup')await runInstanceDataAction('backup');
  else if(act==='instance-data-toggle-auto-backup'){
@@ -2442,6 +3035,8 @@ root.addEventListener('click',async event=>{
   if(dialog?.kind==='project'){const ok=await apply('delete_project',{projectId:dialog.projectId},'Proyecto eliminado');if(ok){dialog=null;selectedId='';page='home';render();}}
   else if(dialog?.kind==='instance'){
    const eraseFiles=document.getElementById('delete-instance-files')?.checked===true;
+   if(eraseFiles&&document.getElementById('delete-instance-confirm')?.value!=='BORRAR')
+     return message('Escribí BORRAR para confirmar el borrado de mundos y archivos.',true);
    const ok=await apply('delete_instance',{projectId:dialog.projectId,name:dialog.name,eraseFiles},
      eraseFiles?'Instancia y sus archivos VIS eliminados':'Instancia quitada de la biblioteca; los mundos siguen en el disco');
    if(ok){dialog=null;mcSelected=null;render();}
@@ -2532,7 +3127,7 @@ async function performInstall(projectId,name){
  if(!native)return message('La instalación real requiere ejecutar el cliente Tauri.',true);
  if(minecraftBusy)return;
  minecraftBusy=true;installProgress={detail:'Iniciando instalación',completed:0,total:1};render();
- try{db=await command('install_minecraft',{projectId,name});message('Minecraft se instaló correctamente.');}
+ try{const instance=db.instances.find(i=>i.project_id===projectId&&i.name===name);const refreshEngine=instance?.engine==='horizon'&&!!instance.installed;db=await command('install_minecraft',{projectId,name,refreshEngine});message(refreshEngine?'Motor Rust actualizado y recursos verificados.':'Minecraft se instaló correctamente.');}
  catch(e){message(String(e),true)}finally{minecraftBusy=false;installProgress=null;render();}
 }
 async function performLaunch(projectId,name,sourceOwner=''){
@@ -2607,7 +3202,13 @@ async function boot(){
    }).catch(()=>{});
   T.event.listen('minecraft-process-exited',e=>{
     lastMinecraftExit=e.payload;
-    if(!e.payload.success)message(`Minecraft finalizó con error (${e.payload.exit_code??'sin código'}). Revisá el log: ${e.payload.log_file}`,true);
+    if(!e.payload.success)message('Minecraft se cerró con un error. Abrí el diagnóstico para copiar el informe.',true,{
+      system:'Minecraft Java / McRust',
+      stage:'Ejecución del juego',
+      error:e.payload.error||'El proceso terminó inesperadamente',
+      code:e.payload.exit_code??'Sin código',
+      automatic:true
+    });
     else message('Minecraft se cerró correctamente.');
     if(page==='minecraft'||page==='instances')render();
   }).catch(()=>{});
@@ -2622,3 +3223,5 @@ async function boot(){
  if(native){void checkAppUpdate(true);void refreshCloudCatalog(true);}
 }
 boot();
+
+

@@ -20,10 +20,10 @@ checks={
  'optional profile data isolation retained': 'pub fn private_shared_game_directory' in mc and '.vis/players' in mc,
  'old instance settings remain compatible': 'default_shared_game_data' in accounts,
  'legacy world and server recovery': 'pub fn shared_recovery' in mc and 'SHARED_RESTORE_FILES' in mc,
- 'UI engine selector': 'mc-instance-engine' in ui and 'Minecraft Rust Edition — Horizon' in ui,
+ 'UI engine selector': 'mc-instance-engine' in ui and 'Minecraft Rust Edition — VIS Nexo' in ui,
  'UI shared instance labels': 'Instalada por' in ui,
  'Horizon installer routed to adapter': 'horizon::prepare(&cloned_app' in main,
- 'Horizon launch routed to adapter': 'horizon::launch(&app' in main,
+ 'Horizon launch routed to adapter': 'horizon::launch_with_skin(&app' in main and 'horizon::launch_shared_with_skin(&app' in main,
 }
 for k,v in checks.items():print(('OK' if v else 'FAIL'),k)
 if not all(checks.values()):raise SystemExit(1)
