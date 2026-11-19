@@ -83,12 +83,54 @@ fn check_hnmod(path:&Path)->Result<(),String>{
     Ok(())
 }
 
+/// GitHub Actions wraps every artifact in an extra ZIP. Read ONLY our named
+/// .hnmod, bounded to 64 MiB, without extracting arbitrary ZIP paths.
+struct TempNative(PathBuf);
+impl Drop for TempNative {
+    fn drop(&mut self){let _=fs::remove_file(&self.0);}
+}
+fn extract_artifact(file:&Path,game_dir:&Path)->Result<TempNative,String>{
+    regular_file(file)?;
+    if fs::metadata(file).map_err(|e|e.to_string())?.len()>MAX_ARCHIVE {
+        return Err("VSClient: el ZIP de GitHub supera el límite de seguridad".into());
+    }
+    let mut archive=ZipArchive::new(File::open(file).map_err(|e|e.to_string())?)
+        .map_err(|e|format!("VSClient: artifact ZIP inválido: {e}"))?;
+    if archive.len()>MAX_ITEMS {
+        return Err("VSClient: demasiadas entradas en el ZIP de GitHub".into())
+    }
+    let position=archive.file_names().enumerate()
+        .find(|(_,name)|["VSClient-MCRust-0.4.1.hnmod",
+                          "dist/VSClient-MCRust-0.4.1.hnmod"].contains(name))
+        .map(|(i,_)|i)
+        .ok_or("VSClient: el ZIP de GitHub no contiene VSClient-MCRust-0.4.1.hnmod")?;
+    let mut entry=archive.by_index(position).map_err(|e|e.to_string())?;
+    if entry.size()>MAX_ARCHIVE {
+        return Err("VSClient: .hnmod comprimido demasiado grande".into())
+    }
+    let scratch=game_dir.join(".vis");
+    if scratch.is_symlink(){return Err("VSClient: carpeta temporal insegura".into())}
+    fs::create_dir_all(&scratch).map_err(|e|e.to_string())?;
+    let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let path=scratch.join(format!(".vsclient-import-{}-{stamp}.hnmod",std::process::id()));
+    let guard=TempNative(path);
+    let mut output=OpenOptions::new().create_new(true).write(true).open(&guard.0)
+        .map_err(|e|e.to_string())?;
+    let size=std::io::copy(&mut entry.take(MAX_ARCHIVE+1),&mut output)
+        .map_err(|e|format!("VSClient: no se pudo extraer el .hnmod: {e}"))?;
+    output.sync_all().map_err(|e|e.to_string())?;
+    if size>MAX_ARCHIVE{return Err("VSClient: el .hnmod supera los 64 MiB".into())}
+    Ok(guard)
+}
+
 fn source(instance:&Path,game_dir:&Path)->Result<Option<PathBuf>,String>{
     // Support copying just one .hnmod into the root of a portable instance.
-    // The GitHub Actions outer ZIP is intentionally not accepted.
+    // The outer GitHub Actions ZIP is supported as a single dropped file.
     for folder in [game_dir,instance] {
         for rel in ["VSClient-MCRust-0.4.1.hnmod","vsclient.hnmod",
-                    "mods/VSClient-MCRust-0.4.1.hnmod","mods/vsclient.hnmod",NATIVE_FILE] {
+                    "mods/VSClient-MCRust-0.4.1.hnmod","mods/vsclient.hnmod",
+                    "VSClient-MCRust-0.4.1-HNMOD.zip",
+                    "mods/VSClient-MCRust-0.4.1-HNMOD.zip",NATIVE_FILE] {
             let path=folder.join(rel);
             if path.exists() {
                 regular_file(&path)?;
@@ -148,8 +190,14 @@ fn enable(game_dir:&Path)->Result<(),String>{
 /// in a signed/verified game binary; it cannot supply executable new code.
 /// No .hnmod means the normal game starts unchanged.
 pub fn prepare(instance:&Path,game_dir:&Path,build:&Path)->Result<bool,String>{
+    if !game_dir.is_dir() || game_dir.is_symlink() {
+        return Err("Carpeta de la instancia Horizon no válida".into())
+    }
     let Some(file)=source(instance,game_dir)? else{return Ok(false)};
-    check_hnmod(&file)?;
+    let imported=(file.extension().and_then(|e|e.to_str())==Some("zip"))
+        .then(||extract_artifact(&file,game_dir)).transpose()?;
+    let file=imported.as_ref().map_or(file.as_path(),|f|f.0.as_path());
+    check_hnmod(file)?;
     let engine:Value=serde_json::from_slice(&fs::read(build.join("vis-horizon-source.json"))
         .map_err(|_|"No se pudo comprobar la procedencia del motor Rust")?)
         .map_err(|_|"Manifiesto del motor Rust inválido")?;
@@ -158,9 +206,6 @@ pub fn prepare(instance:&Path,game_dir:&Path,build:&Path)->Result<bool,String>{
             "VSClient {VERSION} detectado, pero este motor McRust no lo trae compilado. \
              Actualizá el motor VIS con VSClient integrado; no se puede ejecutar Rust arbitrario desde un .hnmod."
         ));
-    }
-    if !game_dir.is_dir() || game_dir.is_symlink() {
-        return Err("Carpeta de la instancia Horizon no válida".into())
     }
     let target=game_dir.join(NATIVE_FILE);
     if file!=target {
