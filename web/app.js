@@ -1107,6 +1107,7 @@ function teamPublishSection(){
  ${installed.length?installed.map(i=>`<option value="${attr(JSON.stringify([i.project_id,i.name]))}">${esc(i.project_id)} · ${esc(i.name)} (${esc(i.version)})</option>`).join(''):
  '<option value="">Instalá una instancia propia de un proyecto</option>'}</select></label>
  <label class="toggle-line"><span><b>Resource packs, shaders y datapacks</b><small>Solo recursos redistribuibles, máximo 32 MiB por ZIP.</small></span><input type="checkbox" name="include_packs"/></label>
+ <label class="toggle-line"><span><b>Mods propios (JAR)</b><small>Opcional para proyectos Java + Fabric. Incluí únicamente contenido propio o con permiso explícito de redistribución; nunca secretos. Se verifica SHA-256 por archivo y requiere revisión previa.</small></span><input type="checkbox" name="include_custom_mods"/></label>
  <label class="toggle-line"><span><b>Servidores guardados</b><small>Incluirá IP/direcciones de servers.dat; desactivado inicialmente.</small></span><input type="checkbox" name="include_servers"/></label>
  <label class="toggle-line"><span><b>Waypoints y mapas</b><small>Puede revelar coordenadas privadas; desactivado inicialmente.</small></span><input type="checkbox" name="include_waypoints"/></label>
  <button class="outline-btn" type="submit" data-team-action="preview" ${!installed.length?'disabled':''}>Revisar archivos a compartir</button>
@@ -1847,7 +1848,7 @@ root.addEventListener('submit',async event=>{
    if(!Array.isArray(ids)||ids.length!==2||ids.some(x=>typeof x!=='string'||!x))
      return message('Seleccioná una instancia del proyecto.',true);
    const [projectId,name]=ids;
-   const options={include_packs:formData.has('include_packs'),
+   const options={include_packs:formData.has('include_packs'),include_custom_mods:formData.has('include_custom_mods'),
      include_servers:formData.has('include_servers'),include_waypoints:formData.has('include_waypoints')};
    const signature=JSON.stringify([projectId,name,options]);
    const action=event.submitter?.dataset.teamAction||'preview';
