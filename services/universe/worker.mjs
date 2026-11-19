@@ -7,9 +7,19 @@ export default { fetch: async function universeServe(request, env) {
   const assetPattern=/^\/assets\/([a-f0-9]{64})\.(png|jpg|webp)$/;
   const packagePattern=/^\/packs\/([a-z0-9][a-z0-9_-]{0,99})\/([a-f0-9]{64})\.zip$/;
   const packageMatch=packagePattern.exec(url.pathname);
+  const releasesPath=/^\/releases\/([a-z0-9][a-z0-9_-]{0,99})\.json$/.exec(url.pathname);
+  const validRelease=value=>typeof value==="string" && value.length>0 && value.length<=40 &&
+    value!=="." && value!==".." && /^[a-zA-Z0-9._-]+$/.test(value);
   if(request.method==="GET" && url.pathname==="/catalog.json"){
     const object=await env.UNIVERSE.get("catalog.json");
     return object?new Response(object.body,{headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-cache, max-age=0"}}):reply({format_version:1,projects:[]});
+  }
+  // Historial público: solo releases con paquetes comprobados SHA-256.
+  if(request.method==="GET" && releasesPath){
+    const projectId=releasesPath[1];
+    const object=await env.UNIVERSE.get("releases-index/"+projectId+".json");
+    return object?new Response(object.body,{headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-cache, max-age=0","X-Content-Type-Options":"nosniff"}}):
+      reply({project_id:projectId,releases:[]});
   }
   if(request.method==="GET" && assetPattern.test(url.pathname)){
     const object=await env.UNIVERSE.get(url.pathname.slice(1));
@@ -41,14 +51,16 @@ export default { fetch: async function universeServe(request, env) {
       engine:request.headers.get("x-vis-engine"),
       minecraft_version:request.headers.get("x-vis-minecraft-version"),
       loader:request.headers.get("x-vis-loader"),
-      loader_version:request.headers.get("x-vis-loader-version")||""
+      loader_version:request.headers.get("x-vis-loader-version")||"",
+      release_version:request.headers.get("x-vis-release-version")||""
     };
     if(!["java","horizon"].includes(release.engine)
       ||!["vanilla","fabric","horizon"].includes(release.loader)
       ||!(/^[a-zA-Z0-9._+-]{1,40}$/.test(release.minecraft_version||""))
       ||!(/^[a-zA-Z0-9._+-]{0,50}$/.test(release.loader_version))
       ||(release.engine==="horizon"&&(release.loader!=="horizon"||release.minecraft_version!=="26.3"))
-      ||(release.engine==="java"&&release.loader==="horizon"))
+      ||(release.engine==="java"&&release.loader==="horizon")
+      ||(release.release_version!==""&&!validRelease(release.release_version)))
       return reply({error:"Invalid project version or loader"},400);
     const limit=32*1024*1024,header=Number(request.headers.get("Content-Length")||0);
     if(header>limit)return reply({error:"Pack exceeds 32 MiB"},413);
@@ -90,7 +102,27 @@ export default { fetch: async function universeServe(request, env) {
     value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));
   }catch{return reply({error:"Invalid JSON"},400);}
   if(value?.format_version!==1||!Array.isArray(value.projects)||value.projects.length>100)return reply({error:"Invalid publication"},400);
-  const ids=new Set(),out=[];
+  const ids=new Set(),out=[],releaseWrites=[];
+  const lockedRoots=p=>p && (p.lock_mods||p.lock_resourcepacks||p.lock_shaderpacks||p.lock_datapacks||p.lock_config);
+  const safeProtection=p=>{
+    if(p==null)return true;
+    if(typeof p!=="object"||Array.isArray(p))return false;
+    const version=p.release_version||"";
+    if(version!==""&&!validRelease(version))return false;
+    const hashes=p.file_hashes||{};
+    if(!hashes||typeof hashes!=="object"||Array.isArray(hashes)||Object.keys(hashes).length>1500)return false;
+    const locked=new Set([...Object.entries({
+      mods:p.lock_mods,resourcepacks:p.lock_resourcepacks,shaderpacks:p.lock_shaderpacks,
+      datapacks:p.lock_datapacks,config:p.lock_config,defaultconfigs:p.lock_config
+    })].filter(([,value])=>value).map(([key])=>key));
+    for(const [path,digest] of Object.entries(hashes)){
+      const pieces=path.split("/");
+      if(pieces.length<2||!locked.has(pieces[0])||pieces.some(x=>!x||x==="."||x===".."||x.length>255)||path.includes("\\")||
+        typeof digest!=="string"||!/^[a-fA-F0-9]{64}$/.test(digest))return false;
+    }
+    if(p.verify_on_launch&&lockedRoots(p)&&!p.sealed)return false;
+    return true;
+  };
   async function publishImage(path){
     if(typeof path!=="string"||!path)return "";
     const existing=/^\/assets\/([a-f0-9]{64})\.(png|jpg|webp)$/.exec(new URL(path,url.origin).pathname);
@@ -115,13 +147,15 @@ export default { fetch: async function universeServe(request, env) {
       (input.engine==="horizon"&&(input.loader!=="horizon"||input.mc_version!=="26.3"))||
       !Array.isArray(input.posts)||input.posts.length>100||!Array.isArray(input.calendar)||input.calendar.length>100||
       input.posts.some(x=>!x||typeof x.title!=="string"||x.title.length>120||typeof x.body!=="string"||x.body.length>4000)||
-      input.calendar.some(x=>!x||typeof x.title!=="string"||x.title.length>120||typeof x.description!=="string"||x.description.length>4000))
+      input.calendar.some(x=>!x||typeof x.title!=="string"||x.title.length>120||typeof x.description!=="string"||x.description.length>4000)||
+      !safeProtection(input.protection))
       return reply({error:"Invalid project"},400);
     ids.add(input.id);
     const project=structuredClone(input);
     try{for(const field of ["banner_path","logo_path","icon_path"])project[field]=await publishImage(project[field]);}
     catch{return reply({error:"Invalid project image"},400);}
     const version=new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14);
+    const releaseVersion=project.protection?.release_version||"";
     let packageInfo={url:"",sha256:"",size_bytes:0};
     const pointer=await env.UNIVERSE.get("team-packages/"+project.id+".json");
     if(pointer){
@@ -135,17 +169,42 @@ export default { fetch: async function universeServe(request, env) {
             &&candidate.engine===project.engine
             &&candidate.minecraft_version===project.mc_version
             &&candidate.loader===project.loader
-            &&candidate.loader_version===(project.loader_version||"")){
+            &&candidate.loader_version===(project.loader_version||"")
+            &&(candidate.release_version||"")===releaseVersion){
           packageInfo=candidate;
         }
       }catch{return reply({error:"Invalid team package metadata"},500);}
     }
     out.push({id:project.id,name:project.title,description:project.description,version,
-      minecraft_version:project.mc_version,loader:project.loader,
+      release_version:releaseVersion,minecraft_version:project.mc_version,loader:project.loader,
       bundle_url:packageInfo.url,sha256:packageInfo.sha256,size_bytes:packageInfo.size_bytes,project});
+    if(releaseVersion && packageInfo.sha256){
+      const indexKey="releases-index/"+project.id+".json";
+      const saved=await env.UNIVERSE.get(indexKey);
+      let history;
+      try{history=saved?JSON.parse(await saved.text()):{project_id:project.id,releases:[]};}
+      catch{return reply({error:"Release history corrupted"},500);}
+      if(history?.project_id!==project.id||!Array.isArray(history.releases)||history.releases.length>50)
+        return reply({error:"Invalid release history"},500);
+      const existing=history.releases.find(x=>x.version===releaseVersion);
+      if(existing && existing.sha256!==packageInfo.sha256)
+        return reply({error:"This release version is immutable. Choose a new release_version"},409);
+      if(!existing){
+        if(history.releases.length>=50)return reply({error:"Release history limit reached"},409);
+        history.releases.unshift({
+          version:releaseVersion,sha256:packageInfo.sha256,size_bytes:packageInfo.size_bytes,
+          bundle_url:packageInfo.url,engine:project.engine,minecraft_version:project.mc_version,
+          loader:project.loader,loader_version:project.loader_version||"",published_at:version
+        });
+        releaseWrites.push([indexKey,JSON.stringify(history)]);
+      }
+    }
   }
   const doc=JSON.stringify({format_version:1,projects:out});
   if(new TextEncoder().encode(doc).length>2*1024*1024)return reply({error:"Catalog too large"},413);
+  for(const [key,history] of releaseWrites){
+    await env.UNIVERSE.put(key,history,{httpMetadata:{contentType:"application/json; charset=utf-8"}});
+  }
   await env.UNIVERSE.put("catalog.json",doc,{httpMetadata:{contentType:"application/json; charset=utf-8"}});
   return reply({ok:true,projects:out.length});
 } };
