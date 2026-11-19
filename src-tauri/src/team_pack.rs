@@ -337,6 +337,35 @@ fn fingerprint_archive(path:&Path)->Result<(String,u64),String>{
     }
     Ok((format!("{:x}",digest.finalize()),total))
 }
+/// Revert only the NEW files from a failed import. Never remove a file if
+/// another process changed it after the copy: report manual recovery instead.
+fn rollback_new_files(game:&Path,added:&[(String,String)])->Result<(),String>{
+    let mut errors=Vec::new();
+    for (relative,hash) in added.iter().rev(){
+        if let Err(err)=crate::instance_guard::private_paths(game,&[relative.as_str()]){
+            errors.push(format!("{relative}: {err}"));
+            continue;
+        }
+        let target=game.join(relative);
+        let meta=match fs::symlink_metadata(&target){
+            Ok(meta)=>meta,
+            Err(e) if e.kind()==std::io::ErrorKind::NotFound=>continue,
+            Err(e)=>{errors.push(format!("{relative}: {e}"));continue;}
+        };
+        if meta.file_type().is_symlink()||!meta.is_file(){
+            errors.push(format!("{relative}: tipo de archivo modificado"));
+            continue;
+        }
+        match fingerprint_file(&target){
+            Ok((actual,_)) if &actual==hash=>{
+                if let Err(e)=fs::remove_file(&target){errors.push(format!("{relative}: {e}"));}
+            },
+            Ok(_)=>errors.push(format!("{relative}: modificado externamente, se conservó")),
+            Err(e)=>errors.push(format!("{relative}: {e}"))
+        }
+    }
+    if errors.is_empty(){Ok(())}else{Err(errors.join("; "))}
+}
 // The first import is additive only. Existing user configs, options,
 // worlds, servers and modified mods are never replaced by team defaults.
 pub fn apply(game:&Path,archive:&Path,project:&GameProject,
@@ -406,6 +435,7 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
     crate::instance_guard::private_paths(game,&[".vslauncher",
         &format!(".vslauncher/{stage_name}")])?;
     fs::create_dir_all(&stage).map_err(|e|e.to_string())?;
+    let mut added=Vec::<(String,String)>::new();
     let outcome=(||->Result<TeamApplyReport,String>{
         let mut eligible=Vec::new();
         let mut archive_paths=HashSet::new();
@@ -464,12 +494,24 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
                 return Err(format!("No se pudo instalar un archivo de equipo: {e}"));
             }
             installed+=1;
+            // Keep a digest for safe rollback if a later file fails to copy.
+            let digest=by_name.get(&relative)
+                .ok_or("Archivo de equipo no declarado durante la instalación")?.sha256.clone();
+            added.push((relative,digest));
         }
         Ok(TeamApplyReport{project_id:project.id.clone(),installed,preserved,
             modrinth_mods:manifest.modrinth_project_ids.len()})
     })();
-    let _=fs::remove_dir_all(stage);
-    outcome
+    // Staging was verified before committing. If the commit fails midway,
+    // undo only files introduced in this operation; user files are preserved.
+    let rollback=if outcome.is_err(){rollback_new_files(game,&added)}else{Ok(())};
+    let _=fs::remove_dir_all(&stage);
+    match (outcome,rollback){
+        (Err(cause),Err(recovery))=>Err(format!(
+            "Instalación interrumpida: {cause}. Recuperación incompleta: {recovery}. Revisá los archivos antes de ejecutar Minecraft."
+        )),
+        (outcome,_)=>outcome,
+    }
 }
 #[cfg(test)]
 mod tests{
@@ -516,6 +558,21 @@ mod tests{
         assert_eq!(again.installed,0);
         assert_eq!(fs::read(dest.join("config/test.json")).unwrap(),b"user settings");
         let _=fs::remove_dir_all(root);
+    }
+    #[test]fn failed_import_rollback_only_deletes_unchanged_new_files(){
+        let dir=std::env::temp_dir().join(format!("vis-team-rollback-{}",std::process::id()));
+        let _=fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("mods")).unwrap();
+        fs::write(dir.join("mods/added.jar"),b"package").unwrap();
+        fs::write(dir.join("mods/user.jar"),b"personal").unwrap();
+        let hash=fingerprint_file(&dir.join("mods/added.jar")).unwrap().0;
+        rollback_new_files(&dir,&[("mods/added.jar".into(),hash)]).unwrap();
+        assert!(!dir.join("mods/added.jar").exists());
+        assert_eq!(fs::read(dir.join("mods/user.jar")).unwrap(),b"personal");
+        fs::write(dir.join("mods/added.jar"),b"edited outside VIS").unwrap();
+        assert!(rollback_new_files(&dir,&[("mods/added.jar".into(),"a".repeat(64))]).is_err());
+        assert_eq!(fs::read(dir.join("mods/added.jar")).unwrap(),b"edited outside VIS");
+        let _=fs::remove_dir_all(&dir);
     }
     #[test]fn project_ids_and_secret_paths(){
         assert!(safe_id("virgoland"));
