@@ -9,6 +9,7 @@ mod instance_backup;
 mod instance_health;
 mod server_list;
 mod project_mods;
+mod project_guard;
 mod maintenance;
 mod cloud;
 mod team_pack;
@@ -462,6 +463,24 @@ fn save_project(state: State<'_, Mutex<Backend>>, mut project: GameProject) -> R
         return Err("Los mods de proyecto requieren Minecraft Java con Fabric; Horizon usa su propio motor".into());
     }
     if project.installable && project.mc_version.trim().is_empty(){return Err("Seleccioná la versión del juego antes de habilitar el proyecto".into());}
+    // Nunca aceptar el sello ni hashes que mande el WebView.
+    project_guard::validate(&project.protection)?;
+    let old=s.catalog.projects.iter().find(|p|p.id==project.id);
+    if let Some(previous)=old {
+        let a=&previous.protection;let b=&project.protection;
+        let same=a.lock_mods==b.lock_mods && a.lock_resourcepacks==b.lock_resourcepacks
+            && a.lock_shaderpacks==b.lock_shaderpacks && a.lock_datapacks==b.lock_datapacks
+            && a.lock_config==b.lock_config && a.lock_version==b.lock_version
+            && a.verify_on_launch==b.verify_on_launch
+            && a.release_version==b.release_version
+            && previous.engine==project.engine && previous.mc_version==project.mc_version
+            && previous.loader==project.loader && previous.loader_version==project.loader_version
+            && previous.modrinth_mods==project.modrinth_mods;
+        if same {
+            project.protection.file_hashes=a.file_hashes.clone();
+            project.protection.sealed=a.sealed;
+        } else {project.protection.file_hashes.clear();project.protection.sealed=false;}
+    }else{project.protection.file_hashes.clear();project.protection.sealed=false;}
     if project.id.is_empty() { project.id = slug(&project.title); }
     if project.id.is_empty() || slug(&project.id) != project.id { return Err("ID de proyecto inválido".into()); }
     let mut next = s.catalog.clone();
@@ -481,6 +500,60 @@ fn delete_project(state: State<'_, Mutex<Backend>>, project_id: String) -> Resul
     if next.projects.len() == prev { return Err("Proyecto inexistente".into()); }
     s.save_catalog(next)?;
     Ok(s.snapshot())
+}
+/// Sellar archivos de una instancia propia usando la cuenta administradora local.
+#[tauri::command]
+async fn seal_project_instance(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String
+)->Result<Snapshot,String>{
+    let (owner,instance,project,root)={
+        let s=locked(&state)?;let owner=s.admin()?.to_string();
+        let project=s.catalog.projects.iter().find(|p|p.id==project_id)
+            .ok_or("El proyecto local no existe")?.clone();
+        let instance=s.storage.prefs(&owner).instances.into_iter()
+            .find(|i|i.project_id==project_id&&i.name==name&&i.source_owner.is_empty())
+            .ok_or("Elegí una instancia propia y oficial del proyecto")?;
+        if instance.engine!=project.engine||instance.version!=project.mc_version
+            ||instance.loader!=project.loader||instance.loader_version!=project.loader_version{
+            return Err("La instancia no coincide con la versión y el loader configurados".into());
+        }
+        (owner,instance,project,s.data_root.clone())
+    };
+    let dir=minecraft::instance_dir(&root,&owner,&instance)?;
+    let for_guard=project.protection.clone();
+    let files=tauri::async_runtime::spawn_blocking(move||{
+        let _locked=instance_lock::try_lock(&dir)?;
+        project_guard::snapshot(&dir,&for_guard)
+    }).await.map_err(|e|e.to_string())??;
+    let mut s=locked(&state)?;s.admin()?;
+    let mut next=s.catalog.clone();
+    let item=next.projects.iter_mut().find(|p|p.id==project_id).ok_or("Proyecto eliminado")?;
+    if item.protection!=project.protection||item.engine!=project.engine
+        ||item.mc_version!=project.mc_version||item.loader!=project.loader
+        ||item.loader_version!=project.loader_version||item.modrinth_mods!=project.modrinth_mods{
+        return Err("El proyecto cambió mientras se verificaban los archivos. Reintentá".into());
+    }
+    item.protection.file_hashes=files;
+    item.protection.sealed=true;
+    s.save_catalog(next)?;
+    Ok(s.snapshot())
+}
+/// Comprobación explícita que usa el mismo código que el inicio del juego.
+#[tauri::command]
+async fn verify_project_instance(
+    state:State<'_,Mutex<Backend>>,project_id:String,name:String
+)->Result<usize,String>{
+    let (owner,instance,project,root)={
+        let s=locked(&state)?;
+        let (owner,instance)=checked_instance(&s,&project_id,&name,false)?;
+        let project=s.project(&project_id).ok_or("Proyecto no publicado")?.clone();
+        (owner,instance,project,s.data_root.clone())
+    };
+    tauri::async_runtime::spawn_blocking(move||{
+        let dir=minecraft::instance_dir(&root,&owner,&instance)?;
+        project_guard::verify(&dir,&project,&instance.engine,&instance.version,
+            &instance.loader,&instance.loader_version)
+    }).await.map_err(|e|e.to_string())?
 }
 /// Resolve a new instance's dedicated subdirectory without creating files.
 /// Already installed instances keep their existing paths when edited.
@@ -1426,6 +1499,7 @@ async fn launch_horizon(
                 active,is_ms_profile,None)
         }
     };
+    let protected_project={let s=locked(&state)?;s.project(&project_id).cloned()};
     if instance.engine!="horizon"{return Err("No es una instancia Horizon".into());}
     let credential=if guest.is_some() {
         None
@@ -1447,6 +1521,9 @@ async fn launch_horizon(
     }
     tauri::async_runtime::spawn_blocking(move||{
         let dir=minecraft::instance_dir(&root,&owner,&instance)?;
+        if let Some(ref project)=protected_project{
+            project_guard::verify(&dir,project,&instance.engine,&instance.version,&instance.loader,&instance.loader_version)?;
+        }
         // Only the owner opts into backups. Visitors and guests cannot write
         // snapshots of somebody else's shared game without permission.
         if instance.auto_backup && instance.installed && visitor.is_none(){
@@ -1570,6 +1647,7 @@ async fn sync_project_mods(
            project.loader!=ins.loader || project.loader_version!=ins.loader_version {
             return Err("La versión/motor del proyecto cambió: prepará una instancia nueva sin borrar la anterior".into());
         }
+        if project.protection.lock_mods && s.storage.get(&username).is_none_or(|a|a.role!=Role::Admin){return Err("VIS Studios bloqueó la sincronización manual de mods".into());}
         (username,ins,s.data_root.clone(),project.modrinth_mods.clone())
     };
     tauri::async_runtime::spawn_blocking(move||
@@ -1648,6 +1726,7 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms
         };
         (owner,ins,s.data_root.clone(),guest_name,project_mod_list)
     };
+    let protected_project={let s=locked(&state)?;s.project(&project_id).cloned()};
     if ins.engine=="horizon" {return Err("Las instancias Horizon requieren cuenta Microsoft; usá el motor Horizon en VIS Worlds".into())}
     let launch_app=app.clone();
     let active={let s=locked(&state)?;s.active_user.clone()};
@@ -1668,6 +1747,10 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms
             let dir=minecraft::instance_dir(&data_root,&owner,&ins)?;
             instance_backup::create_if_due(&dir)?;
         }
+        if let Some(ref project)=protected_project{
+            let dir=minecraft::instance_dir(&data_root,&owner,&ins)?;
+            project_guard::verify(&dir,project,&ins.engine,&ins.version,&ins.loader,&ins.loader_version)?;
+        }
         if shared || guest_name.is_some() {
             let player=guest_name.or(active).ok_or("Falta el perfil que ejecuta la instancia")?;
             if let Some(ref premium)=credential{
@@ -1677,7 +1760,7 @@ async fn launch_minecraft(app:tauri::AppHandle,state:State<'_,Mutex<Backend>>,ms
             }
         } else {
             if let Some(mods)=project_mod_list.as_ref() {
-                project_mods::sync(&data_root,&owner,&ins,mods)?;
+                if !protected_project.as_ref().is_some_and(|p|p.protection.lock_mods){project_mods::sync(&data_root,&owner,&ins,mods)?;}
             }
             if let Some(ref premium)=credential{
                 minecraft::launch_premium(&launch_app,&data_root,&owner,&ins,premium)
@@ -1696,13 +1779,13 @@ async fn search_modrinth(state:State<'_,Mutex<Backend>>,query:String,version:Str
 }
 #[tauri::command]
 async fn install_modrinth(state:State<'_,Mutex<Backend>>,project_id:String,name:String,mod_id:String,kind:String)->Result<Vec<String>,String>{
-    let (user,ins,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;(u,i,s.data_root.clone())};
+    let (user,ins,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::install_modrinth(&root,&user,&ins,&mod_id,&kind))
       .await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 async fn import_instance_file(state:State<'_,Mutex<Backend>>,project_id:String,name:String,path:String,kind:String)->Result<minecraft::InstalledFile,String>{
-    let (u,i,root)={let s=locked(&state)?;let (u,i)=checked_instance(&s,&project_id,&name,false)?;(u,i,s.data_root.clone())};
+    let (u,i,root)={let s=locked(&state)?;let (u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::import_local(&root,&u,&i,Path::new(&path),&kind))
         .await.map_err(|e|e.to_string())?
 }
@@ -1714,13 +1797,13 @@ async fn list_instance_files(state:State<'_,Mutex<Backend>>,project_id:String,na
 }
 #[tauri::command]
 async fn toggle_instance_file(state:State<'_,Mutex<Backend>>,project_id:String,name:String,kind:String,file:String)->Result<String,String>{
-    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;(u,i,s.data_root.clone())};
+    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::toggle_local(&root,&u,&i,&kind,&file))
         .await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 async fn remove_instance_file(state:State<'_,Mutex<Backend>>,project_id:String,name:String,kind:String,file:String)->Result<(),String>{
-    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;(u,i,s.data_root.clone())};
+    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::remove_local(&root,&u,&i,&kind,&file))
         .await.map_err(|e|e.to_string())?
 }
@@ -1877,7 +1960,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_state, legacy_cleanup_preview, legacy_cleanup_apply, register, login, login_offline, logout, update_presence, set_avatar_preset,
-            save_project, delete_project, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
+            save_project, delete_project, seal_project_instance, verify_project_instance, save_instance, suggest_instance_directory, preview_instance_destination, ensure_project_instance, configure_shared_ram, instance_folder, open_instance_location, recover_shared_instance, instance_backups, set_instance_auto_backup, backup_instance_data, restore_instance_data, inspect_instance_data, repair_instance_data, merge_shared_servers, delete_instance, delete_instances_batch, set_shared_hidden, sync_project_mods,
             request_friend, accept_friend, send_message,
             social::social_connect, social::social_request, social::social_realtime_ticket, social::social_disconnect,
             microsoft::microsoft_begin, microsoft::microsoft_poll,
