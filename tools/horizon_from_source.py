@@ -106,7 +106,7 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     # horizon-client development binary. Keep support for old checkouts.
     official_manifest = checkout / 'crates/horizon-official/Cargo.toml'
     official = tomllib.loads(official_manifest.read_text(encoding='utf-8')) if official_manifest.is_file() else {}
-    vsclient_native = (official.get('features', {}).get('vis-vsclient') == []
+    vsclient_native = ('vis-vsclient' in official.get('features', {})
         and (checkout / 'integrations/vsclient-horizon/api/src/lib.rs').is_file())
     game_binary = 'horizon-official' if official_manifest.is_file() else 'horizon-client'
     if not update and is_valid(output, sha, vsclient_native):
