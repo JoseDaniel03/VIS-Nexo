@@ -19,6 +19,7 @@ pub struct PublishedProject {
     pub name: String,
     #[serde(default)] pub description: String,
     pub version: String,
+    #[serde(default)] pub release_version: String,
     #[serde(default)] pub minecraft_version: String,
     #[serde(default)] pub loader: String,
     #[serde(default)] pub bundle_url: String,
@@ -33,6 +34,24 @@ pub struct CloudCatalog {
 }
 #[derive(Deserialize)]
 struct Manifest { format_version: u32, projects: Vec<PublishedProject> }
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ProjectRelease {
+    pub version:String,
+    pub sha256:String,
+    pub size_bytes:u64,
+    pub bundle_url:String,
+    pub engine:String,
+    pub minecraft_version:String,
+    pub loader:String,
+    pub loader_version:String,
+    pub published_at:String,
+}
+#[derive(Deserialize)]
+struct ReleaseIndex { project_id:String, releases:Vec<ProjectRelease> }
+fn valid_release(s:&str)->bool{
+    !s.is_empty() && s.len()<=40 && s!="." && s!=".." &&
+    s.bytes().all(|b|b.is_ascii_alphanumeric() || b"._-".contains(&b))
+}
 fn client() -> Result<Client,String> {
     Client::builder().timeout(Duration::from_secs(40))
       .redirect(reqwest::redirect::Policy::custom(|attempt|{
@@ -89,12 +108,18 @@ pub fn fetch(data_root:&Path) -> Result<CloudCatalog,String> {
         if let Some(detail)=&project.project {
             if detail.id!=project.id || detail.title!=project.name || detail.mc_version!=project.minecraft_version
                 || detail.loader!=project.loader || !["java","horizon"].contains(&detail.engine.as_str())
+                || crate::project_guard::validate(&detail.protection).is_err()
+                || (detail.protection.verify_on_launch && crate::project_guard::has_locked_files(&detail.protection) && !detail.protection.sealed)
+                || detail.protection.release_version!=project.release_version
                 || detail.posts.len()>100 || detail.calendar.len()>100
                 || detail.description.len()>2000 || detail.notes.len()>5000
                 || [&detail.banner_path,&detail.logo_path,&detail.icon_path].iter()
                   .any(|url|!url.is_empty() && !approved_url(url)) {
                 return Err("Datos del proyecto publicado incorrectos".into());
             }
+        }
+        if !project.release_version.is_empty() && !valid_release(&project.release_version){
+            return Err("La versión propia de la publicación es inválida".into());
         }
         if !project.bundle_url.is_empty() {
             if !approved_url(&project.bundle_url) || project.sha256.len()!=64 || !project.sha256.bytes().all(|c|c.is_ascii_hexdigit())
@@ -103,39 +128,108 @@ pub fn fetch(data_root:&Path) -> Result<CloudCatalog,String> {
     }
     Ok(CloudCatalog { source:url,projects:manifest.projects })
 }
-pub fn download(data_root:&Path,id:&str)->Result<String,String>{
-    if !clean_id(id){return Err("Identificador de proyecto inválido".into())}
-    // Recheck public manifest rather than trust any URL supplied by the webview.
-    let catalog=fetch(data_root)?;
-    let p=catalog.projects.iter().find(|p|p.id==id).ok_or("Proyecto no publicado")?;
-    if p.bundle_url.is_empty(){return Err("Este proyecto no tiene un paquete publicado".into())}
-    let expected=p.sha256.to_lowercase();
+fn download_verified(data_root:&Path,id:&str,file_id:&str,bundle_url:&str,
+    expected_hash:&str,expected_size:u64)->Result<String,String>{
+    if !clean_id(id)||file_id.is_empty()||file_id.len()>90
+      ||!file_id.bytes().all(|b|b.is_ascii_alphanumeric()||b"._-".contains(&b))
+      ||!approved_url(bundle_url)||expected_hash.len()!=64
+      ||!expected_hash.bytes().all(|b|b.is_ascii_hexdigit())
+      ||expected_size==0||expected_size>MAX_BUNDLE_BYTES {
+        return Err("La release publicada no tiene un archivo verificable".into());
+    }
     let directory=data_root.join("project-packages").join(id);
     fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
-    let file_name=format!("{}.zip",p.version);
-    let destination=directory.join(file_name);
-    if destination.is_file() && fs::metadata(&destination).is_ok_and(|m|m.len()==p.size_bytes) {
-        let mut stream=File::open(&destination).map_err(|e|e.to_string())?;
+    let destination=directory.join(format!("{file_id}.zip"));
+    let expected=expected_hash.to_ascii_lowercase();
+    if destination.is_file() && fs::metadata(&destination).is_ok_and(|m|m.len()==expected_size){
+        let mut file=File::open(&destination).map_err(|e|e.to_string())?;
         let mut digest=Sha256::new();let mut buf=[0u8;65536];
-        loop {let n=stream.read(&mut buf).map_err(|e|e.to_string())?;if n==0{break}digest.update(&buf[..n]);}
-        if format!("{:x}",digest.finalize())==expected{return Ok(destination.to_string_lossy().into_owned())}
+        loop{let n=file.read(&mut buf).map_err(|e|e.to_string())?;
+            if n==0{break;}digest.update(&buf[..n]);}
+        if format!("{:x}",digest.finalize())==expected{
+            return Ok(destination.to_string_lossy().into_owned());
+        }
     }
     let partial=destination.with_extension("part");
     let outcome=(||->Result<(),String>{
-        let mut response=client()?.get(&p.bundle_url).send().and_then(|res|res.error_for_status()).map_err(|e|format!("Archivo remoto: {e}"))?;
-        if response.content_length().is_some_and(|n|n>MAX_BUNDLE_BYTES){return Err("Paquete demasiado grande".into())}
+        let mut response=client()?.get(bundle_url).send().and_then(|r|r.error_for_status())
+            .map_err(|e|format!("Archivo remoto: {e}"))?;
+        if response.content_length().is_some_and(|n|n>expected_size){
+            return Err("La descarga es mayor que la release autorizada".into());
+        }
         let mut out=File::create(&partial).map_err(|e|e.to_string())?;
-        let mut hasher=Sha256::new();let mut total=0;let mut buffer=[0u8;65536];
-        loop {let read=response.read(&mut buffer).map_err(|e|e.to_string())?;if read==0{break}
-            total+=read as u64;if total>MAX_BUNDLE_BYTES || total>p.size_bytes {return Err("Tamaño de descarga no coincide con el manifiesto".into())}
-            hasher.update(&buffer[..read]);out.write_all(&buffer[..read]).map_err(|e|e.to_string())?;
+        let mut digest=Sha256::new();let mut read_total=0u64;let mut buf=[0u8;65536];
+        loop{
+            let n=response.read(&mut buf).map_err(|e|e.to_string())?;
+            if n==0{break;}
+            read_total=read_total.checked_add(n as u64).ok_or("Archivo demasiado grande")?;
+            if read_total>expected_size{return Err("Descarga excede el tamaño autorizado".into());}
+            digest.update(&buf[..n]);out.write_all(&buf[..n]).map_err(|e|e.to_string())?;
         }
         out.flush().map_err(|e|e.to_string())?;drop(out);
-        if total!=p.size_bytes || format!("{:x}",hasher.finalize())!=expected{return Err("SHA-256 o tamaño incorrecto: no se aceptó el archivo".into())}
-        fs::rename(&partial,&destination).map_err(|e|e.to_string())?;Ok(())
+        if read_total!=expected_size||format!("{:x}",digest.finalize())!=expected{
+            return Err("La release no coincide con SHA-256 y tamaño publicados".into());
+        }
+        fs::rename(&partial,&destination).map_err(|e|e.to_string())?;
+        Ok(())
     })();
     if outcome.is_err(){let _=fs::remove_file(&partial);}
-    outcome?;Ok(destination.to_string_lossy().into_owned())
+    outcome?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+pub fn download(data_root:&Path,id:&str)->Result<String,String>{
+    if !clean_id(id){return Err("Identificador de proyecto inválido".into());}
+    let catalog=fetch(data_root)?;
+    let item=catalog.projects.iter().find(|p|p.id==id).ok_or("Proyecto no publicado")?;
+    if item.bundle_url.is_empty(){return Err("Este proyecto no tiene un paquete publicado".into());}
+    download_verified(data_root,id,&item.version,&item.bundle_url,&item.sha256,item.size_bytes)
+}
+/// Consulta las releases archivadas exclusivamente en el mismo Worker autorizado del catálogo.
+pub fn releases(data_root:&Path,id:&str)->Result<Vec<ProjectRelease>,String>{
+    if !clean_id(id){return Err("ID de proyecto inválido".into());}
+    let catalog=catalog_url(data_root).ok_or("Primero conectá un catálogo VIS Universe".to_owned())?;
+    let mut url=Url::parse(&catalog).map_err(|e|e.to_string())?;
+    if !url.host_str().is_some_and(|h|h.ends_with(".workers.dev")) ||
+        url.path()!="/catalog.json" {
+        return Err("El historial de releases requiere VIS Universe Worker".into());
+    }
+    url.set_path(&format!("/releases/{id}.json"));
+    let response=client()?.get(url.clone()).send().and_then(|r|r.error_for_status())
+        .map_err(|e|format!("Historial remoto: {e}"))?;
+    if response.content_length().is_some_and(|n|n>256*1024){
+        return Err("El historial de releases es demasiado grande".into());
+    }
+    let mut buf=Vec::new();response.take(256*1024+1).read_to_end(&mut buf).map_err(|e|e.to_string())?;
+    if buf.len()>256*1024{return Err("Historial de releases demasiado largo".into());}
+    let parsed:ReleaseIndex=serde_json::from_slice(&buf).map_err(|_|"Historial de releases inválido")?;
+    if parsed.project_id!=id||parsed.releases.len()>50{return Err("Historial fuera del proyecto".into());}
+    let mut seen=HashSet::new();
+    for release in &parsed.releases {
+        if !valid_release(&release.version) || !seen.insert(release.version.to_ascii_lowercase())
+          || release.sha256.len()!=64||!release.sha256.bytes().all(|b|b.is_ascii_hexdigit())
+          || release.size_bytes==0||release.size_bytes>32*1024*1024
+          ||!["java","horizon"].contains(&release.engine.as_str())
+          ||!["vanilla","fabric","horizon"].contains(&release.loader.as_str())
+          ||release.minecraft_version.len()>40||release.loader_version.len()>50
+          ||release.published_at.len()>50 {
+            return Err("Release antigua con metadatos inválidos".into());
+        }
+        let expected_path=format!("/packs/{id}/{}.zip",release.sha256.to_ascii_lowercase());
+        let checked=Url::parse(&release.bundle_url).map_err(|_|"Enlace de release inválido")?;
+        if checked.origin()!=url.origin() || checked.path()!=expected_path
+          ||checked.query().is_some()||checked.fragment().is_some(){
+            return Err("El archivo no pertenece al publicador de esta release".into());
+        }
+    }
+    Ok(parsed.releases)
+}
+pub fn download_release(data_root:&Path,id:&str,version:&str)->Result<String,String>{
+    if !valid_release(version){return Err("Versión seleccionada inválida".into());}
+    let items=releases(data_root,id)?;
+    let item=items.iter().find(|x|x.version==version)
+        .ok_or("La release no existe en el historial oficial")?;
+    let file_id=format!("release-{}-{}",item.version,&item.sha256[..12]);
+    download_verified(data_root,id,&file_id,&item.bundle_url,&item.sha256,item.size_bytes)
 }
 /// Upload only a locally generated, SHA-verified team ZIP to the configured
 /// R2-backed VIS Universe Worker. The publisher token stays in the Rust command,
@@ -192,6 +286,7 @@ pub fn upload_team_pack(
         .header("X-VIS-Minecraft-Version",project.mc_version.as_str())
         .header("X-VIS-Loader",project.loader.as_str())
         .header("X-VIS-Loader-Version",project.loader_version.as_str())
+        .header("X-VIS-Release-Version",project.protection.release_version.as_str())
         .header("Content-Type","application/zip")
         .header("Content-Length",pack.size_bytes)
         .body(reqwest::blocking::Body::sized(file,pack.size_bytes))
