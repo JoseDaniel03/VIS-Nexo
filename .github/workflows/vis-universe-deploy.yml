@@ -1,0 +1,63 @@
+name: VIS Universe - Deploy R2 Worker (manual)
+
+# Requiere aprobación explícita del propietario; ningún push despliega producción.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Autorizo desplegar el Worker VIS Universe a Cloudflare R2'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vis-universe-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == true }}
+    environment: vis-universe-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      VIS_UNIVERSE_BASE_URL: ${{ vars.VIS_UNIVERSE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validar Worker de R2 y releases inmutables
+        run: |
+          node --check services/universe/worker.mjs
+          node tools/test_universe_worker.mjs
+      - name: Comprobar credenciales Cloudflare sin imprimir secretos
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Falta CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Falta CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+          test -n "$VIS_UNIVERSE_BASE_URL" || { echo 'Falta var VIS_UNIVERSE_URL'; exit 1; }
+          node --input-type=module -e "const u=new URL(process.env.VIS_UNIVERSE_BASE_URL);if(u.protocol!=='https:'||!u.hostname.endsWith('.workers.dev')||u.pathname!=='/'||u.search||u.hash)process.exit(1)"
+      - name: Desplegar Worker con binding R2 existente (sin crear buckets)
+        working-directory: services/universe
+        run: npx --yes wrangler@4 deploy
+      - name: Comprobar endpoint de historial sin crear releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${VIS_UNIVERSE_BASE_URL%/}"
+          for n in $(seq 1 12); do
+            if curl --fail --silent --show-error "$base/releases/vis-ci-probe.json" > /tmp/vis-universe-release-health.json &&
+              node --input-type=module -e "import fs from 'node:fs';const x=JSON.parse(fs.readFileSync('/tmp/vis-universe-release-health.json','utf8'));if(x.project_id!=='vis-ci-probe'||!Array.isArray(x.releases))process.exit(1)"; then
+              echo 'VIS Universe: historial de releases listo'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'El endpoint de releases no responde con el contrato esperado'
+          exit 1
