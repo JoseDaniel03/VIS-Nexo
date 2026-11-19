@@ -87,7 +87,8 @@ fn source(instance:&Path,game_dir:&Path)->Result<Option<PathBuf>,String>{
     // Support copying just one .hnmod into the root of a portable instance.
     // The GitHub Actions outer ZIP is intentionally not accepted.
     for folder in [game_dir,instance] {
-        for rel in [NATIVE_FILE,"VSClient-MCRust-0.4.1.hnmod","vsclient.hnmod"] {
+        for rel in ["VSClient-MCRust-0.4.1.hnmod","vsclient.hnmod",
+                    "mods/VSClient-MCRust-0.4.1.hnmod","mods/vsclient.hnmod",NATIVE_FILE] {
             let path=folder.join(rel);
             if path.exists() {
                 regular_file(&path)?;
@@ -119,7 +120,11 @@ fn atomic_copy(source:&Path,target:&Path)->Result<(),String>{
 fn enable(game_dir:&Path)->Result<(),String>{
     let path=game_dir.join(MODS_LIST);
     if path.is_symlink(){return Err("VSClient: horizon-mods.txt es un enlace".into())}
-    let original=fs::read_to_string(&path).unwrap_or_default();
+    let original=match fs::read_to_string(&path) {
+        Ok(text)=>text,
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound=>String::new(),
+        Err(error)=>return Err(format!("No se pudo leer horizon-mods.txt: {error}")),
+    };
     let already=original.lines().any(|line|
         line.split_once(':').is_some_and(|(k,v)|k.trim()=="mod.vsclient"&&v.trim()=="true"));
     if already {return Ok(())}
