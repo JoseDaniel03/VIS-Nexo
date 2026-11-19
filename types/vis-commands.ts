@@ -35,6 +35,11 @@ export type DownloadJob = {
   status:'running'|'cancelling'|'completed'|'cancelled'|'failed';
   cancel_requested:boolean; started_at:number; finished_at:number|null;
 };
+export type ProjectRelease = {
+  version:string;sha256:string;size_bytes:number;bundle_url:string;
+  engine:InstanceEngine;minecraft_version:string;loader:InstanceLoader;
+  loader_version:string;published_at:string;
+};
 export type TeamOptions = {
   include_packs:boolean;include_custom_mods:boolean;include_servers:boolean;include_waypoints:boolean;
 };
@@ -93,6 +98,8 @@ export type NativeCommandMap = {
   install_app_update: {args: {confirmed: boolean}; result: void};
   fetch_cloud_catalog: {args: Record<string, never>; result: {source: string; projects: unknown[]}};
   download_cloud_bundle: {args: {projectId: string}; result: string};
+  list_project_releases: {args:{projectId:string};result:ProjectRelease[]};
+  download_project_release: {args:{projectId:string;version:string};result:string};
   preview_team_project: {
     args:{projectId:string;name:string;options:TeamOptions};result:TeamPreview
   };
