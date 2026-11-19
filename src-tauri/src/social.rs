@@ -194,6 +194,7 @@ fn activate_cloud_user(
     current.guest_name = None;
     current.active_user = Some(username.to_owned());
     current.cloud_account_login=true;
+    current.cloud_admin_username=if verified_admin{Some(username.to_owned())}else{None};
     current.cloud_admin_expires=if verified_admin{
         SystemTime::now().checked_add(Duration::from_secs(900))
     }else{None};
@@ -369,6 +370,7 @@ pub(crate) async fn social_request(
         if current.cloud_account_login && current.active_user.as_deref()==Some(username.as_str()){
             let permitted=result.get("role").and_then(Value::as_str)==Some("super_admin")
                 && result.get("username").and_then(Value::as_str)==Some(username.as_str());
+            current.cloud_admin_username=if permitted{Some(username.to_owned())}else{None};
             current.cloud_admin_expires=if permitted{
                 SystemTime::now().checked_add(Duration::from_secs(900))
             }else{None};
@@ -416,6 +418,7 @@ pub(crate) async fn social_disconnect(
 ) -> Result<(), String> {
     {
         let mut current=backend.lock().map_err(|_|"Estado local bloqueado")?;
+        current.cloud_admin_username=None;
         current.cloud_admin_expires=None;
     }
     let token = {
