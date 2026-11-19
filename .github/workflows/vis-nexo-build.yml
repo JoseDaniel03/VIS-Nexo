@@ -11,6 +11,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/vis-nexo-build.yml'
+      - 'src-tauri/examples/**'
+      - 'src-tauri/src/vsclient_native.rs'
+      - 'src-tauri/src/horizon.rs'
 jobs:
   build:
     strategy:
