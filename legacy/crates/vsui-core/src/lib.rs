@@ -207,6 +207,21 @@ pub struct ProjectEvent {
     pub description: String,
 }
 
+/// Reglas serializadas con el proyecto; el manifestado solo puede hacerlo Rust.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProjectProtection {
+    pub lock_mods: bool,
+    pub lock_resourcepacks: bool,
+    pub lock_shaderpacks: bool,
+    pub lock_datapacks: bool,
+    pub lock_config: bool,
+    pub lock_version: bool,
+    pub verify_on_launch: bool,
+    pub release_version: String,
+    pub sealed: bool,
+    pub file_hashes: BTreeMap<String, String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GameProject {
@@ -226,6 +241,7 @@ pub struct GameProject {
     /// Curated Modrinth project IDs; only Java + Fabric supports these mods.
     /// Serialized with the project so new installations and updates agree.
     #[serde(default)] pub modrinth_mods: Vec<String>,
+    #[serde(default)] pub protection: ProjectProtection,
     pub banner_path: String,
     pub logo_path: String,
     pub icon_path: String,
@@ -244,7 +260,7 @@ impl Default for GameProject {
     fn default() -> Self {
         Self { id: String::new(), title: String::new(), subtitle: String::new(),
             description: String::new(), versions: Vec::new(), page_scene_id: None,
-            mc_version: String::new(), engine: default_project_engine(), loader: default_project_loader(), loader_version: String::new(), modrinth_mods: Vec::new(), banner_path: String::new(), logo_path: String::new(),
+            mc_version: String::new(), engine: default_project_engine(), loader: default_project_loader(), loader_version: String::new(), modrinth_mods: Vec::new(), protection: ProjectProtection::default(), banner_path: String::new(), logo_path: String::new(),
             icon_path: String::new(), visible_sections: BTreeMap::new(), notes: String::new(), community_url: String::new(),
             installable: true, posts: Vec::new(), calendar: Vec::new() }
     }
