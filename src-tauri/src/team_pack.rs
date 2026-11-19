@@ -157,7 +157,11 @@ fn visit(game:&Path,root:&Path,options:TeamOptions,files:&mut Vec<PathBuf>,
         if metadata.file_type().is_symlink(){
             return Err(format!("No se permiten enlaces simbólicos dentro del paquete: {display}"));
         }
-        if name.starts_with('.')||(exclusions(&name)&&!approved_custom_jar(relative,options)){
+        // Nunca empaquetar archivos o subcarpetas arbitrarias de mods/.
+        let is_mod=matches!(relative.components().next(),
+            Some(std::path::Component::Normal(first)) if first=="mods");
+        if (is_mod&&!approved_custom_jar(relative,options))
+            || name.starts_with('.')||(exclusions(&name)&&!approved_custom_jar(relative,options)){
             if excluded.len()<80{excluded.push(display);}
             continue;
         }
@@ -377,6 +381,9 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
         let lower=file.path.to_ascii_lowercase();
         if !seen.insert(lower){return Err("Archivos repetidos en el ZIP".into());}
         let first=parts[0].as_os_str().to_str().ok_or("Carpeta inválida")?;
+        if first=="mods"&&!approved_custom_jar(path,TeamOptions{
+            include_custom_mods:manifest.include_custom_mods,..TeamOptions::default()
+        }){return Err("El paquete incluye un recurso de mods/ que no es un JAR aprobado".into());}
         if file.path=="servers.dat"{
             if !manifest.include_servers{return Err("Lista de servidores sin permiso en manifiesto".into());}
         }else if parts.len()<2||!allow_root(first,TeamOptions{include_packs:true,
