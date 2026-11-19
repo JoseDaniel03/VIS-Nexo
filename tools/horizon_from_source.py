@@ -72,6 +72,16 @@ def source_checkout(override: str | None, ref: str | None, update: bool) -> Path
     return path
 
 
+def has_embedded_vsclient(checkout: Path) -> bool:
+    """Detect opt-in game feature; Cargo feature values need not be empty."""
+    manifest = checkout / 'crates/horizon-official/Cargo.toml'
+    adapter = checkout / 'integrations/vsclient-horizon/api/src/lib.rs'
+    if not manifest.is_file() or not adapter.is_file():
+        return False
+    cargo = tomllib.loads(manifest.read_text(encoding='utf-8'))
+    return 'vis-vsclient' in cargo.get('features', {})
+
+
 def is_valid(output: Path, commit: str, vsclient_native: bool = False) -> bool:
     manifest = output / 'vis-horizon-source.json'
     try:
@@ -105,9 +115,7 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     # VIS releases use the full horizon-official game, not the low-level
     # horizon-client development binary. Keep support for old checkouts.
     official_manifest = checkout / 'crates/horizon-official/Cargo.toml'
-    official = tomllib.loads(official_manifest.read_text(encoding='utf-8')) if official_manifest.is_file() else {}
-    vsclient_native = ('vis-vsclient' in official.get('features', {})
-        and (checkout / 'integrations/vsclient-horizon/api/src/lib.rs').is_file())
+    vsclient_native = has_embedded_vsclient(checkout)
     game_binary = 'horizon-official' if official_manifest.is_file() else 'horizon-client'
     if not update and is_valid(output, sha, vsclient_native):
         print(f'[VIS Horizon Source] Build cacheado y verificado: {sha[:12]}')
