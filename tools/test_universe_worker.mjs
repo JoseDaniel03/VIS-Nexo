@@ -75,4 +75,52 @@ assert.equal(response.status,200);
 const afterChange=(await (await worker.fetch(new Request(base+'/catalog.json'),env)).json()).projects[0];
 assert.equal(afterChange.bundle_url,'','stale team package cannot cross versions/loaders');
 
+// Las versiones propias son inmutables y se descargan sin sobrescribir otras.
+const protectedProject={...project,protection:{
+  release_version:"1.0.0",lock_mods:true,verify_on_launch:true,sealed:true,
+  file_hashes:{"mods/example.jar":"a".repeat(64)}
+}};
+const unsealed={...protectedProject,protection:{...protectedProject.protection,sealed:false}};
+const secretHeader={Authorization:"Bearer "+env.VIS_PUBLISH_TOKEN};
+response=await worker.fetch(new Request(base+"/publish",{method:"POST",
+  body:JSON.stringify({format_version:1,projects:[unsealed]}),headers:secretHeader
+}),env);
+assert.equal(response.status,400,"a protected release must be sealed before publishing");
+response=await worker.fetch(new Request(packUrl,{method:"PUT",body:sample,headers:{
+ ...releaseHeaders,"X-VIS-Release-Version":"1.0.0"
+}}),env);
+assert.equal(response.status,200);
+response=await worker.fetch(new Request(base+"/publish",{method:"POST",
+  body:JSON.stringify({format_version:1,projects:[protectedProject]}),headers:secretHeader
+}),env);
+assert.equal(response.status,200,"published release with sealed manifest");
+response=await worker.fetch(new Request(base+"/releases/virgoland.json"),env);
+const history=(await response.json()).releases;
+assert.equal(history.length,1);
+assert.equal(history[0].version,"1.0.0");
+assert.equal(history[0].sha256,sha);
+assert.equal(history[0].bundle_url,packUrl);
+assert.equal(history[0].minecraft_version,"26.3");
+const secondVersion={...protectedProject,protection:{...protectedProject.protection,release_version:"2.0.0"}};
+response=await worker.fetch(new Request(base+"/publish",{method:"POST",
+ body:JSON.stringify({format_version:1,projects:[secondVersion]}),headers:secretHeader
+}),env);
+assert.equal(response.status,200);
+const newer=(await (await worker.fetch(new Request(base+"/catalog.json"),env)).json()).projects[0];
+assert.equal(newer.bundle_url,"","a package for release 1.0.0 cannot attach to release 2.0.0");
+const mutated=Uint8Array.from(sample);mutated[6]=3;
+const newSha=[...new Uint8Array(await crypto.subtle.digest("SHA-256",mutated))]
+ .map(x=>x.toString(16).padStart(2,"0")).join("");
+response=await worker.fetch(new Request(base+"/packs/virgoland/"+newSha+".zip",{
+ method:"PUT",body:mutated,headers:{...releaseHeaders,"X-VIS-Release-Version":"1.0.0"}
+}),env);
+assert.equal(response.status,200,"new content-addressed ZIP uploaded");
+response=await worker.fetch(new Request(base+"/publish",{method:"POST",
+ body:JSON.stringify({format_version:1,projects:[protectedProject]}),headers:secretHeader
+}),env);
+assert.equal(response.status,409,"existing release name cannot change its ZIP SHA-256");
+const finalHistory=(await (await worker.fetch(new Request(base+"/releases/virgoland.json"),env)).json()).releases;
+assert.equal(finalHistory.length,1);
+assert.equal(finalHistory[0].sha256,sha,"historic release hash never replaced");
+
 console.log("VIS Universe Worker tests passed");
