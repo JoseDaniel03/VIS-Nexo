@@ -10,7 +10,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path, sync::{Mutex,OnceLock}, time::Duration};
+use std::{fs, path::Path, sync::{Mutex,OnceLock}, time::{Duration,SystemTime}};
 use tauri::State;
 
 const DEFAULT_URL: &str = "https://vis-social.defreitascarranza-845.workers.dev";
@@ -179,7 +179,7 @@ fn cloud_registration_payload(username: &str,password: &str) -> Result<Value,Str
 }
 
 fn activate_cloud_user(
-    backend: &Mutex<Backend>, social: &Mutex<SocialSession>, authenticated: Value
+    backend: &Mutex<Backend>, social: &Mutex<SocialSession>, authenticated: Value, verified_admin: bool
 ) -> Result<crate::Snapshot,String> {
     let username = authenticated.get("username").and_then(Value::as_str)
         .ok_or("Respuesta de usuario de VIS Social inválida")?;
@@ -193,6 +193,10 @@ fn activate_cloud_user(
     current.storage.ensure_cloud_profile(username)?;
     current.guest_name = None;
     current.active_user = Some(username.to_owned());
+    current.cloud_account_login=true;
+    current.cloud_admin_expires=if verified_admin{
+        SystemTime::now().checked_add(Duration::from_secs(900))
+    }else{None};
     current.presence = "online".into();
     current.add_recent(username,"vis-social")?;
     let snapshot = current.snapshot();
@@ -224,7 +228,7 @@ pub(crate) async fn social_cloud_register(
         request(&client()?,&base_url()?,"/v1/accounts/register","POST",
             Some(&payload),None)
     }).await.map_err(|_| "Registro online interrumpido")??;
-    activate_cloud_user(&backend,&social,data)
+    activate_cloud_user(&backend,&social,data,false)
 }
 
 #[tauri::command]
@@ -262,11 +266,18 @@ pub(crate) async fn social_cloud_login(
         let signer=cloud_signing_key(&password,&salt_bytes)?;
         let proof=format!("VIS-CLOUD-AUTH-V2\n{username}\n{id}\n{nonce}");
         let signature=STANDARD.encode(signer.sign(proof.as_bytes()).to_bytes());
-        request(&http,&base,"/v1/accounts/login/verify","POST",
+        let data=request(&http,&base,"/v1/accounts/login/verify","POST",
             Some(&json!({"identifier":identifier,"challenge_id":id,
-                "signature":signature})),None)
+                "signature":signature})),None)?;
+        let token=data.get("token").and_then(Value::as_str)
+            .ok_or("VIS Ceibo no entregó bearer de sesión")?;
+        let state=request(&http,&base,"/v1/state","GET",None,Some(token))?;
+        // No confiar en un rol suministrado por el WebView ni por la cuenta local.
+        let verified=state.get("role").and_then(Value::as_str)==Some("super_admin")
+            && state.get("username").and_then(Value::as_str)==data.get("username").and_then(Value::as_str);
+        Ok::<(Value,bool),String>((data,verified))
     }).await.map_err(|_| "Inicio de sesión online interrumpido")??;
-    activate_cloud_user(&backend,&social,data)
+    activate_cloud_user(&backend,&social,data.0,data.1)
 }
 
 #[tauri::command]
@@ -348,10 +359,22 @@ pub(crate) async fn social_request(
         }
         active.bearer.clone().ok_or("Conectá VIS Social nuevamente")?
     };
-    tauri::async_runtime::spawn_blocking(move || {
+    let is_state=path=="/v1/state" && method=="GET";
+    let result=tauri::async_runtime::spawn_blocking(move || {
         let base = base_url()?;
         request(&client()?, &base, &path, &method, body.as_ref(), Some(&token))
-    }).await.map_err(|_| "Solicitud VIS Social interrumpida")?
+    }).await.map_err(|_| "Solicitud VIS Social interrumpida")??;
+    if is_state{
+        let mut current=backend.lock().map_err(|_|"Estado local bloqueado")?;
+        if current.cloud_account_login && current.active_user.as_deref()==Some(username.as_str()){
+            let permitted=result.get("role").and_then(Value::as_str)==Some("super_admin")
+                && result.get("username").and_then(Value::as_str)==Some(username.as_str());
+            current.cloud_admin_expires=if permitted{
+                SystemTime::now().checked_add(Duration::from_secs(900))
+            }else{None};
+        }
+    }
+    Ok(result)
 }
 
 // This is NOT a social bearer token. Only a 20-second, single-use,
@@ -389,8 +412,12 @@ pub(crate) async fn social_realtime_ticket(
 }
 #[tauri::command]
 pub(crate) async fn social_disconnect(
-    social: State<'_, Mutex<SocialSession>>
+    backend:State<'_,Mutex<Backend>>, social: State<'_, Mutex<SocialSession>>
 ) -> Result<(), String> {
+    {
+        let mut current=backend.lock().map_err(|_|"Estado local bloqueado")?;
+        current.cloud_admin_expires=None;
+    }
     let token = {
         let mut active = social.lock().map_err(|_| "Estado social bloqueado")?;
         active.username = None;
