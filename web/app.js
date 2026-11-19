@@ -23,7 +23,7 @@ function resetAccountView(){
  accountGeneration++;
  mcSelected=null;modResults=[];installedFiles=[];horizonChecks=[];
  bulkInstanceMode=false;bulkInstanceSelection.clear();
- cloudCatalog=null;premiumCosmetics=null;socialOverlay=null;downloadJobs=[];teamReview=null;
+ cloudCatalog=null;projectReleases={};premiumCosmetics=null;socialOverlay=null;downloadJobs=[];teamReview=null;
   premiumSkinSync=true;premiumSkinModel='classic';
  socialAvatars.clear();socialSkins.clear();skinLoads.clear();avatarLoads.clear();
  socialMediaQueue.length=0;publicSkinLookup=null;
@@ -134,6 +134,7 @@ function syncVersionSuggestions(){
 }
 let maintenanceReport = null, maintenanceLoading = false, legacyReport = null, legacyLoading = false;
 let updateInfo = null, updateBusy = false, cloudCatalog = null, cloudCatalogBusy = false;
+let projectReleases = {};
 let lastMinecraftExit = null;
 let horizonChecks = [];
 let horizonLibraryBuilds = [];
@@ -1180,7 +1181,13 @@ function cloudPage(){
  return `<div class="content-inner vis-cloud"><div class="page-heading"><div><span class="page-eyebrow">VIS UNIVERSE / PUBLICACIÓN</span><h1>Proyectos en la nube</h1><p>Catálogo compartido alojado por HTTPS. Los proyectos locales y mundos nunca se sobrescriben.</p></div><button class="outline-btn" data-action="refresh-cloud" ${cloudCatalogBusy?'disabled':''}>${I('cloud',18)} ${cloudCatalogBusy?'Conectando…':'Actualizar catálogo'}</button></div>
  <section class="surface-card cloud-guide"><div>${I('cloud',24)}<h3>Distribución sin alojar en tu PC</h3><p>Publicá el catálogo en GitHub Pages y los paquetes de proyecto en GitHub Releases o VIS Ombú (R2). Los clientes descargarán desde allí; no reciben cambios hasta que publicás una versión nueva.</p></div><span class="cloud-label">${cloudCatalog?.source?'Catálogo conectado':'Falta configurar URL'}</span></section>
  ${cloudCatalog?.source?`<p class="muted">Origen: ${esc(cloudCatalog.source)} · ${items.length} proyectos disponibles</p>`:`<p class="muted">La URL pública se configura al compilar desde <code>VIS_CATALOG_URL</code>, o por un administrador desde Configuración.</p>`}
- <div class="cloud-project-grid">${items.map(p=>`<article class="surface-card cloud-project"><div class="cloud-project-top">${I('layers',24)}<span>${esc(p.version||'Sin versión')}</span></div><h3>${esc(p.name)}</h3><p>${esc(p.description||'Proyecto de VIS Universe')}</p><div class="cloud-project-meta"><span>${I('game',14)} Minecraft ${esc(p.minecraft_version||'—')}</span><span>${esc(p.loader||'vanilla')}</span></div>${p.bundle_url?`
+ <div class="cloud-project-grid">${items.map(p=>`<article class="surface-card cloud-project"><div class="cloud-project-top">${I('layers',24)}<span>${esc(p.version||'Sin versión')}</span></div><h3>${esc(p.name)}</h3><p>${esc(p.description||'Proyecto de VIS Universe')}</p><div class="cloud-project-meta"><span>${I('game',14)} Minecraft ${esc(p.minecraft_version||'—')}</span><span>${esc(p.loader||'vanilla')}</span></div><div class="vis-release-list">
+ <button type="button" class="outline-btn" data-action="show-project-releases" data-id="${attr(p.id)}">${I('clock',15)} Consultar versiones anteriores</button>
+ ${Array.isArray(projectReleases[p.id])?
+  (projectReleases[p.id].length?
+   '<div class="vis-release-entries">'+projectReleases[p.id].slice(0,20).map(r=>'<div class="vis-release-entry"><span><strong>'+esc(r.version)+'</strong> <small>'+esc(r.minecraft_version)+' · '+esc(r.loader)+' · '+esc(fmtBytes(r.size_bytes))+'</small></span> <button type="button" class="outline-btn small" data-action="download-project-release" data-id="'+attr(p.id)+'" data-version="'+attr(r.version)+'">'+I('cloud',14)+' Descargar ZIP</button></div>').join('')+'</div>':
+   '<p class="muted">Todavía no hay releases archivadas.</p>') : ''}
+ </div>${p.bundle_url?`
   <button class="outline-btn" data-action="download-cloud-bundle" data-id="${attr(p.id)}">${I('cloud',16)} Descargar ZIP verificado</button>
   ${(() => {const own=db.instances.filter(i=>!i.source_owner&&i.project_id===p.id);
     return own.length?`<div class="team-install">
@@ -1207,7 +1214,7 @@ async function refreshCloudCatalog(silent=false){
   if(generation!==accountGeneration)return;
   const catalog=await command('fetch_cloud_catalog');
   if(generation!==accountGeneration)return;
-  db=next;cloudCatalog=catalog;
+  db=next;cloudCatalog=catalog;projectReleases={};
   await refreshAssets();
   if(generation===accountGeneration&&!silent)message(`Catálogo actualizado: ${catalog.projects?.length||0} proyectos`);
  }catch(e){if(generation===accountGeneration&&!silent)message(String(e),true);}
@@ -1967,6 +1974,27 @@ root.addEventListener('click',async event=>{
  else if(act==='go-cloud'){navigate('cloud');void refreshCloudCatalog(true);}
  else if(act==='refresh-cloud')await refreshCloudCatalog();
  else if(act==='download-cloud-bundle')await downloadCloudBundle(id);
+ else if(act==='show-project-releases'){
+   if(!native)return message('El historial de VIS Universe requiere la aplicación Tauri.',true);
+   const generation=accountGeneration;
+   await onceOperation('project-releases:'+id,async()=>{
+     try{
+       const releases=await command('list_project_releases',{projectId:id});
+       if(generation!==accountGeneration)return;
+       projectReleases[id]=releases;render();
+       message(releases.length+' releases archivadas en VIS Universe');
+     }catch(e){if(generation===accountGeneration)message(String(e),true);}
+   });
+ }
+ else if(act==='download-project-release'){
+   const version=button.dataset.version||'';
+   if(!/^[A-Za-z0-9._-]{1,40}$/.test(version))return;
+   if(!window.confirm('¿Descargar '+id+' versión '+version+'? El ZIP se conserva separado y no modifica tus mundos.'))return;
+   await onceOperation('download-project-release:'+id+':'+version,async()=>{
+     try{const path=await command('download_project_release',{projectId:id,version});message('Release '+version+' verificada y descargada: '+path);}
+     catch(e){message(String(e),true);}
+   });
+ }
  else if(act==='apply-team-project'){
    if(!native||!db.user)return;
    const card=button.closest('.cloud-project');
