@@ -103,6 +103,8 @@ struct Backend {
     data_root: PathBuf,
     active_user: Option<String>,
     guest_name: Option<String>,
+    cloud_account_login: bool,
+    cloud_admin_expires: Option<SystemTime>,
     recent_accounts: Vec<RecentIdentity>,
     recent_path: PathBuf,
     presence: String,
@@ -160,13 +162,13 @@ fn init_backend(app: &tauri::AppHandle) -> Result<Backend, String> {
     }else{Vec::new()};
     Ok(Backend { storage, catalog, catalog_path, branding, branding_path,
         project_execution, remote_projects, execution_path, data_root, active_user: None,
-        guest_name: None, recent_accounts: recent_accounts.accounts,
+        guest_name: None,cloud_account_login:false,cloud_admin_expires:None,
+        recent_accounts: recent_accounts.accounts,
         recent_path, presence: "online".into() })
 }
 impl Backend {
     fn project(&self,id:&str)->Option<&GameProject>{
-        let admin=self.active_user.as_deref()
-            .and_then(|u|self.storage.get(u)).is_some_and(|a|a.role==Role::Admin);
+        let admin=self.admin().is_ok();
         if admin { self.catalog.projects.iter().find(|p|p.id==id)
             .or_else(||self.remote_projects.iter().find(|p|p.id==id)) }
         else { self.remote_projects.iter().find(|p|p.id==id) }
@@ -217,10 +219,13 @@ impl Backend {
     fn username(&self) -> Result<&str, String> {
         self.active_user.as_deref().ok_or_else(|| "Iniciá sesión para continuar.".into())
     }
-    fn admin(&self) -> Result<&str, String> {
-        let username = self.username()?;
-        if self.storage.get(username).is_some_and(|a| a.role == Role::Admin) { Ok(username) }
-        else { Err("Solo un administrador puede gestionar proyectos y recursos públicos.".into()) }
+    fn admin(&self)->Result<&str,String>{
+        let username=self.username()?;
+        let local=self.storage.get(username).is_some_and(|a|a.role==Role::Admin);
+        let cloud=self.cloud_account_login &&
+            self.cloud_admin_expires.as_ref().is_some_and(|t|*t>SystemTime::now());
+        if local||cloud {Ok(username)}
+        else {Err("Necesitás administrador local o sesión VIS Cloud super_admin vigente".into())}
     }
     fn snapshot(&self) -> Snapshot {
         let username = self.active_user.as_deref();
@@ -232,7 +237,7 @@ impl Backend {
             })
         } else {
             username.and_then(|name| self.storage.get(name)).map(|a| SafeUser {
-                username: a.username.clone(), role: a.role, avatar: a.avatar.clone(),
+                username: a.username.clone(), role: if self.admin().is_ok(){Role::Admin}else{a.role}, avatar: a.avatar.clone(),
                 skin: a.skin.clone(), cape: a.cape.clone(), avatar_layer: a.avatar_layer.clone(),
                 profile_banner: a.profile_banner.clone(), presence: self.presence.clone(),
             })
@@ -357,6 +362,7 @@ fn register(state: State<'_, Mutex<Backend>>, username: String, password: String
     let name = s.storage.register(&username, &password, &confirm)?;
     s.guest_name = None;
     s.active_user = Some(name.clone());
+    s.cloud_account_login=false;s.cloud_admin_expires=None;
     s.presence = "online".into();
     s.add_recent(&name, "local")?;
     Ok(s.snapshot())
@@ -367,6 +373,7 @@ fn login(state: State<'_, Mutex<Backend>>, username: String, password: String) -
     let name = s.storage.login(&username, &password)?;
     s.guest_name = None;
     s.active_user = Some(name.clone());
+    s.cloud_account_login=false;s.cloud_admin_expires=None;
     s.presence = "online".into();
     s.add_recent(&name, "local")?;
     Ok(s.snapshot())
@@ -377,6 +384,7 @@ fn logout(state: State<'_, Mutex<Backend>>,ms:State<'_,Mutex<microsoft::Microsof
     let mut s = locked(&state)?;
     s.active_user = None;
     s.guest_name = None;
+    s.cloud_account_login=false;s.cloud_admin_expires=None;
     s.presence = "offline".into();
     Ok(s.snapshot())
 }
@@ -390,6 +398,7 @@ fn login_offline(state: State<'_, Mutex<Backend>>, nickname: String) -> Result<S
     let mut s = locked(&state)?;
     s.active_user = None;
     s.guest_name = Some(nick.to_owned());
+    s.cloud_account_login=false;s.cloud_admin_expires=None;
     s.presence = "offline".into();
     Ok(s.snapshot())
 }
@@ -609,7 +618,7 @@ fn save_instance(state: State<'_, Mutex<Backend>>, mut instance: Instance) -> Re
     if !(1024..=32768).contains(&instance.ram_mb) { return Err("La RAM debe estar entre 1024 y 32768 MB".into()); }
     if instance.project_id != PERSONAL_PROJECT_ID {
         let project=s.catalog.projects.iter().find(|p|p.id==instance.project_id).ok_or("Seleccioná un proyecto existente")?;
-        if s.storage.get(&username).is_some_and(|a|a.role!=Role::Admin) {
+        if s.admin().is_err() {
             // Ordinary players can only register a published project through
             // ensure_project_instance (folder+RAM). Never trust a crafted UI payload.
             return Err(format!("{}: usá Instalar y jugar; la configuración del juego la define VIS Studios",project.title));
@@ -1647,7 +1656,7 @@ async fn sync_project_mods(
            project.loader!=ins.loader || project.loader_version!=ins.loader_version {
             return Err("La versión/motor del proyecto cambió: prepará una instancia nueva sin borrar la anterior".into());
         }
-        if project.protection.lock_mods && s.storage.get(&username).is_none_or(|a|a.role!=Role::Admin){return Err("VIS Studios bloqueó la sincronización manual de mods".into());}
+        if project.protection.lock_mods && s.admin().is_err(){return Err("VIS Studios bloqueó la sincronización manual de mods".into());}
         (username,ins,s.data_root.clone(),project.modrinth_mods.clone())
     };
     tauri::async_runtime::spawn_blocking(move||
@@ -1779,13 +1788,13 @@ async fn search_modrinth(state:State<'_,Mutex<Backend>>,query:String,version:Str
 }
 #[tauri::command]
 async fn install_modrinth(state:State<'_,Mutex<Backend>>,project_id:String,name:String,mod_id:String,kind:String)->Result<Vec<String>,String>{
-    let (user,ins,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
+    let (user,ins,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.admin().is_err() {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::install_modrinth(&root,&user,&ins,&mod_id,&kind))
       .await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 async fn import_instance_file(state:State<'_,Mutex<Backend>>,project_id:String,name:String,path:String,kind:String)->Result<minecraft::InstalledFile,String>{
-    let (u,i,root)={let s=locked(&state)?;let (u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
+    let (u,i,root)={let s=locked(&state)?;let (u,i)=checked_instance(&s,&project_id,&name,false)?;if s.admin().is_err() {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::import_local(&root,&u,&i,Path::new(&path),&kind))
         .await.map_err(|e|e.to_string())?
 }
@@ -1797,13 +1806,13 @@ async fn list_instance_files(state:State<'_,Mutex<Backend>>,project_id:String,na
 }
 #[tauri::command]
 async fn toggle_instance_file(state:State<'_,Mutex<Backend>>,project_id:String,name:String,kind:String,file:String)->Result<String,String>{
-    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
+    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.admin().is_err() {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::toggle_local(&root,&u,&i,&kind,&file))
         .await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 async fn remove_instance_file(state:State<'_,Mutex<Backend>>,project_id:String,name:String,kind:String,file:String)->Result<(),String>{
-    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.storage.get(&u).is_none_or(|a|a.role!=Role::Admin) {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
+    let (u,i,root)={let s=locked(&state)?;let(u,i)=checked_instance(&s,&project_id,&name,false)?;if s.admin().is_err() {if let Some(p)=s.project(&project_id){if project_guard::locked(&p.protection,&kind){return Err("VIS Studios bloqueó esta categoría de contenido".into());}}}(u,i,s.data_root.clone())};
     tauri::async_runtime::spawn_blocking(move||minecraft::remove_local(&root,&u,&i,&kind,&file))
         .await.map_err(|e|e.to_string())?
 }
