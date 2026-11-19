@@ -1,0 +1,36 @@
+name: VSClient native auto-activation (Nexo)
+on:
+  push:
+    branches: [feat/vsclient-instance-autoload]
+    paths:
+      - 'src-tauri/src/vsclient_native.rs'
+      - 'src-tauri/src/horizon.rs'
+      - 'src-tauri/src/main.rs'
+      - 'tools/horizon_from_source.py'
+      - '.github/workflows/vis-vsclient-autoload.yml'
+  pull_request:
+    paths:
+      - 'src-tauri/src/vsclient_native.rs'
+      - 'src-tauri/src/horizon.rs'
+      - 'src-tauri/src/main.rs'
+      - 'tools/horizon_from_source.py'
+      - '.github/workflows/vis-vsclient-autoload.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux dependencies for Tauri 2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf libasound2-dev libudev-dev
+      - name: Check the launcher binary and auto-activation integration
+        run: cargo check -p vslauncher-tauri --bin vslauncher-tauri --locked
+      - name: Exercise real .hnmod registration with a temporary Horizon instance
+        run: cargo test -p vslauncher-tauri --bin vslauncher-tauri vsclient_native::tests --locked -- --nocapture
+      - name: Verify source builder is valid Python
+        run: python3 -m py_compile tools/horizon_from_source.py
