@@ -208,7 +208,7 @@ pub fn prepare(instance:&Path,game_dir:&Path,build:&Path)->Result<bool,String>{
         ));
     }
     let target=game_dir.join(NATIVE_FILE);
-    if file!=target {
+    if file!=target.as_path() {
         if target.exists() {
             regular_file(&target)?;
             // Don't replace an unrelated or user-managed native mod silently.
@@ -254,6 +254,21 @@ mod tests{
         assert!(prepare(&root,&game,&engine).unwrap());
         assert_eq!(fs::read_to_string(game.join(MODS_LIST)).unwrap()
             .lines().filter(|l|*l=="mod.vsclient:true").count(),1);
+        // Test an untouched GitHub Actions artifact: the user must be able
+        // to drop this outer ZIP into the instance and press Play.
+        let wrapped=root.join("VSClient-MCRust-0.4.1-HNMOD.zip");
+        let original=fs::read(&path).unwrap();
+        let mut outer=zip::ZipWriter::new(File::create(&wrapped).unwrap());
+        outer.start_file("VSClient-MCRust-0.4.1.hnmod",options).unwrap();
+        outer.write_all(&original).unwrap();
+        outer.finish().unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(game.join(NATIVE_FILE)).unwrap();
+        fs::remove_file(game.join(MODS_LIST)).unwrap();
+        assert!(prepare(&root,&game,&engine).unwrap());
+        assert!(game.join(NATIVE_FILE).is_file());
+        assert_eq!(sha(&wrapped).unwrap()!=sha(&game.join(NATIVE_FILE)).unwrap(),true);
+        assert!(fs::read_to_string(game.join(MODS_LIST)).unwrap().contains("mod.vsclient:true"));
         fs::write(engine.join("vis-horizon-source.json"),r#"{}"#).unwrap();
         assert!(prepare(&root,&game,&engine).is_err());
         let _=fs::remove_dir_all(root);
