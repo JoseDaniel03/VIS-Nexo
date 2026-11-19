@@ -36,7 +36,7 @@ export type DownloadJob = {
   cancel_requested:boolean; started_at:number; finished_at:number|null;
 };
 export type TeamOptions = {
-  include_packs:boolean;include_servers:boolean;include_waypoints:boolean;
+  include_packs:boolean;include_custom_mods:boolean;include_servers:boolean;include_waypoints:boolean;
 };
 export type TeamPreview = {
   project_id:string;files:string[];total_bytes:number;review_sha256:string;excluded:string[];warnings:string[];
@@ -81,6 +81,8 @@ export type NativeCommandMap = {
   configure_shared_ram: {args:{sourceOwner:string;projectId:string;name:string;ramMb:number};result:Snapshot};
   set_instance_auto_backup: {args:{projectId:string;name:string;enabled:boolean};result:Snapshot};
   install_minecraft: {args: {projectId: string;name: string}; result: Snapshot};
+  seal_project_instance: {args:{projectId:string;name:string};result:Snapshot};
+  verify_project_instance: {args:{projectId:string;name:string};result:number};
   social_realtime_ticket: {args:Record<string,never>;result:{ws_url:string;expires_in:number}};
   download_jobs: {args:Record<string,never>; result:DownloadJob[]};
   cancel_download: {args:{id:number}; result:DownloadJob};
