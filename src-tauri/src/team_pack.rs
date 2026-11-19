@@ -366,6 +366,21 @@ fn rollback_new_files(game:&Path,added:&[(String,String)])->Result<(),String>{
     }
     if errors.is_empty(){Ok(())}else{Err(errors.join("; "))}
 }
+/// Fail closed after a rollback that cannot safely delete a newly
+/// imported file. The existing backup guard blocks subsequent game launches
+/// until the user checks the files. Do not delete a potentially modified file.
+fn flag_incomplete_import(game:&Path)->Result<String,String>{
+    crate::instance_guard::private_paths(game,&[".vis/backups"])?;
+    let folder=game.join(".vis/backups");
+    fs::create_dir_all(&folder).map_err(|e|e.to_string())?;
+    let stage=folder.join(format!(".restore-team-{}-{}",std::process::id(),unique_stage()));
+    fs::create_dir(&stage).map_err(|e|e.to_string())?;
+    fs::write(stage.join("README.txt"),
+        "VIS Team: una importación falló y no pudo deshacer todos los archivos nuevos. \
+         Revisá las carpetas de la instancia antes de quitar este marcador de recuperación.")
+        .map_err(|e|e.to_string())?;
+    Ok(stage.to_string_lossy().into_owned())
+}
 // The first import is additive only. Existing user configs, options,
 // worlds, servers and modified mods are never replaced by team defaults.
 pub fn apply(game:&Path,archive:&Path,project:&GameProject,
@@ -507,9 +522,13 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
     let rollback=if outcome.is_err(){rollback_new_files(game,&added)}else{Ok(())};
     let _=fs::remove_dir_all(&stage);
     match (outcome,rollback){
-        (Err(cause),Err(recovery))=>Err(format!(
-            "Instalación interrumpida: {cause}. Recuperación incompleta: {recovery}. Revisá los archivos antes de ejecutar Minecraft."
-        )),
+        (Err(cause),Err(recovery))=>{
+            let marker=flag_incomplete_import(game)
+                .unwrap_or_else(|e|format!("No se pudo establecer bloqueo de recuperación: {e}"));
+            Err(format!(
+                "Instalación interrumpida: {cause}. Recuperación incompleta: {recovery}.                  Marcador de revisión: {marker}. Revisá la instancia antes de iniciar Minecraft."
+            ))
+        },
         (outcome,_)=>outcome,
     }
 }
@@ -572,6 +591,15 @@ mod tests{
         fs::write(dir.join("mods/added.jar"),b"edited outside VIS").unwrap();
         assert!(rollback_new_files(&dir,&[("mods/added.jar".into(),"a".repeat(64))]).is_err());
         assert_eq!(fs::read(dir.join("mods/added.jar")).unwrap(),b"edited outside VIS");
+        let _=fs::remove_dir_all(&dir);
+    }
+    #[test]fn incomplete_team_import_blocks_launch_until_manual_review(){
+        let dir=std::env::temp_dir().join(format!("vis-team-recovery-{}",std::process::id()));
+        let _=fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mark=flag_incomplete_import(&dir).unwrap();
+        assert!(Path::new(&mark).is_dir());
+        assert!(crate::instance_backup::require_clean_restore_state(&dir).is_err());
         let _=fs::remove_dir_all(&dir);
     }
     #[test]fn project_ids_and_secret_paths(){
