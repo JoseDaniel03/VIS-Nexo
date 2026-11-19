@@ -324,6 +324,14 @@ pub(crate) async fn social_connect(
             return Err("La cuenta cambió durante la conexión a VIS Social".into());
         }
     }
+    // Una conexión local por dispositivo no revalida el rol de cuenta cloud:
+    // nunca se transfieren privilegios de un bearer previo a otra sesión.
+    {
+        let mut current=backend.lock().map_err(|_|"Estado local bloqueado")?;
+        current.cloud_account_login=false;
+        current.cloud_admin_username=None;
+        current.cloud_admin_expires=None;
+    }
     let mut active = social.lock().map_err(|_| "Estado social bloqueado")?;
     active.username = Some(username);
     active.bearer = Some(token);
