@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="./vis-nexo-v2.9.css"/>
 <link rel="stylesheet" href="./vis-nexo-v2.10.css" />
   <link rel="stylesheet" href="./vis-nexo-v2.12.css" />
+  <script type="module" src="./splash.js"></script>
   <script type="module" src="./app.js"></script>
 <link rel="stylesheet" href="./vis-nexo-v2.13.css"/>
 <link rel="stylesheet" href="./vis-nexo-v2.14.css"/>
@@ -26,8 +27,26 @@
 <link rel="stylesheet" href="./vis-nexo-v2.17.css"/>
 <link rel="stylesheet" href="./vis-nexo-v2.20.css"/>
 <link rel="stylesheet" href="./vis-nexo-v2.21.css"/>
+<link rel="stylesheet" href="./splash.css" />
 </head>
 <body>
+  <div id="vis-startup" class="vis-startup" role="status" aria-live="polite">
+    <div class="vis-startup__shade" aria-hidden="true"></div>
+    <div class="vis-startup__identity">
+      <div class="vis-startup__mark"><img src="./assets/vis-nexo-mark.svg" alt="" /></div>
+      <h1>VSNEXO</h1>
+      <p class="vis-startup__tagline">MÁS QUE UN <strong>LAUNCHER</strong></p>
+    </div>
+    <div class="vis-startup__footer">
+      <div class="vis-startup__meta">
+        <span id="vis-startup-stage">Inicializando VIS Nexo</span><small>cargando</small>
+      </div>
+      <div class="vis-startup__track" role="progressbar" aria-label="Progreso de inicialización"><span class="vis-startup__bar"></span></div>
+      <div id="vis-startup-recovery" class="vis-startup__recovery" hidden>La aplicación todavía no respondió.
+        <button class="vis-startup__retry" type="button" data-vis-retry>Reintentar inicio</button>
+      </div>
+    </div>
+  </div>
   <div id="app"><div class="boot">VIS Nexo<span class="boot-dot"></span></div></div>
   <div id="toast-region" role="status" aria-live="polite"></div>
 </body>

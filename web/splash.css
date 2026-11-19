@@ -1,0 +1,65 @@
+/* VIS Nexo · pantalla de inicio. Sólo carga y acceso, sin alterar Home. */
+.vis-startup {
+  position: fixed; inset: 0; z-index: 1000; isolation: isolate;
+  min-height: 100dvh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; overflow: hidden;
+  padding: 34px 22px 46px; background: #08051b; color: #fff;
+  opacity: 1; transition: opacity 220ms ease;
+}
+.vis-startup::before, .vis-startup::after {
+  content: ''; position: absolute; inset: 0; z-index: -2;
+  background-position: center; background-size: cover; background-repeat: no-repeat;
+}
+.vis-startup::before { background-image: url('./assets/splash-atmosphere.webp'); }
+.vis-startup::after {
+  background-image: url('./assets/splash-forest.webp'); opacity: 0;
+  transition: opacity 370ms ease;
+}
+.vis-startup.is-session::after { opacity: 1; }
+.vis-startup__shade {
+  position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(180deg, rgba(6,4,17,.25) 0%, rgba(5,3,17,.5) 50%, rgba(4,2,14,.83) 100%);
+}
+.vis-startup__identity { display: flex; flex-direction: column; align-items: center; gap: 13px; text-align: center; transform: translateY(-8%); }
+.vis-startup__mark {
+  display: grid; place-items: center; width: clamp(73px, 10vw, 100px); aspect-ratio: 1;
+  border: 1px solid rgba(239,212,255,.25); border-radius: 25%;
+  background: linear-gradient(145deg, #8c16ff, #4900a7);
+  box-shadow: 0 16px 50px rgba(0,0,0,.45), inset 0 1px 1px rgba(255,255,255,.2);
+}
+.vis-startup__mark img { display: block; width: 92%; height: 92%; object-fit: contain; }
+.vis-startup__identity h1 { font-size: clamp(39px, 7.2vw, 74px); font-weight: 850; letter-spacing: -.065em; line-height: 1; margin: 5px 0 0; text-shadow: 0 3px 27px #050310bb; }
+.vis-startup__tagline { margin: 0; font-size: clamp(11px, 1.5vw, 15px); font-weight: 800; letter-spacing: .08em; }
+.vis-startup__tagline strong { color: #ff39b1; }
+.vis-startup.is-session .vis-startup__tagline strong { color: #30c7f9; }
+.vis-startup__footer {
+  position: absolute; left: 50%; bottom: clamp(29px, 10vh, 84px);
+  transform: translateX(-50%); width: min(320px, calc(100% - 56px));
+  display: grid; gap: 12px;
+}
+.vis-startup__meta { display: flex; justify-content: space-between; gap: 16px; color: #f5edff; font-size: 11px; font-weight: 700; text-shadow: 0 1px 9px #000; }
+.vis-startup__meta small { font-size: 11px; color: #d9ccf0; }
+.vis-startup__track { height: 3px; border-radius: 10px; overflow: hidden; background: #ffffff4a; }
+.vis-startup__bar { display: block; height: 100%; width: 34%; border-radius: inherit; background: #00edc4; animation: vis-startup-progress 1.7s ease-in-out infinite; }
+@keyframes vis-startup-progress { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+.vis-startup__recovery { margin-top: 18px; text-align: center; font-size: 12px; color: #fff; }
+.vis-startup__recovery[hidden] { display: none; }
+.vis-startup__retry { display: block; margin: 10px auto 0; border: 1px solid #c6ade9; background: #35254c; color: #fff; border-radius: 9px; padding: 9px 15px; cursor: pointer; }
+.vis-startup__retry:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.vis-startup.is-finished { opacity: 0; pointer-events: none; }
+/* Fondos sólo para ingreso/registro: la biblioteca y el resto del launcher no cambian. */
+.auth-screen {
+  background-color: #110921;
+  background-image: linear-gradient(110deg, rgba(6,3,18,.83), rgba(13,6,32,.67)), url('./assets/splash-atmosphere.webp');
+  background-position: center; background-repeat: no-repeat; background-size: cover;
+}
+.auth-glass { position: relative; z-index: 1; }
+@media (max-height: 620px) {
+  .vis-startup { justify-content: flex-start; padding-top: 7vh; }
+  .vis-startup__identity { transform: none; }
+  .vis-startup__footer { bottom: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vis-startup, .vis-startup::after { transition: none; }
+  .vis-startup__bar { animation: none; width: 100%; transform: none; }
+}

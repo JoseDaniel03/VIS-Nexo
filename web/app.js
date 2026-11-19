@@ -2612,9 +2612,11 @@ async function boot(){
     if(page==='minecraft'||page==='instances')render();
   }).catch(()=>{});
 }
+ document.dispatchEvent(new CustomEvent('vis:nexo:startup',{detail:{stage:'session'}}));
  try {db=await command('get_state');}
  catch(e){message(`No se pudo inicializar el cliente: ${String(e)}`,true);}
  render();
+ document.dispatchEvent(new CustomEvent('vis:nexo:startup',{detail:{stage:'ready'}}));
  if(db.user){
    void refreshAssets().catch(()=>{});
    void refreshDownloadJobs().then(()=>{if(page==='settings')scheduleSocialRender();}).catch(()=>{});
