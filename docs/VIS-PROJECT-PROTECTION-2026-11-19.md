@@ -31,6 +31,14 @@ VIS Team incluye carpetas compartibles de configuración y, con la casilla corre
 
 La etiqueta `release_version` se valida en el manifiesto `.bsconfig`, además de motor, Minecraft, loader y mods Modrinth. El sistema **no** sustituye todavía el historial de versiones con rollback ni admite varias releases instaladas simultáneamente bajo el mismo ID de proyecto: para eso se requiere un catálogo de releases independiente con hashes y migraciones.
 
+## Recuperación ante importaciones parciales (fase 3 inicial)
+
+Las importaciones **aditivas** de VIS Team se validan primero en una carpeta temporal: ZIP, rutas, tamaños y SHA-256. Durante la copia definitiva, cada archivo nuevo se vuelve a verificar por hash. Si falla la instalación después de incorporar algunos archivos, VIS intenta revertir **únicamente esos archivos nuevos**; nunca elimina archivos preexistentes del jugador.
+
+Si un archivo fue cambiado por un programa externo después de copiarlo o no se puede eliminar con seguridad, VIS **lo conserva** y genera un marcador de recuperación `.vis/backups/.restore-team-*`. El guardián de ejecución existente bloquea Java y Horizon mientras el marcador persiste, para permitir inspeccionar manualmente la instancia. El marcador no se borra automáticamente.
+
+Esta fase **no reemplaza ni migra archivos ya existentes** y no es todavía la actualización transaccional completa entre `1.0.0` y `1.1.0`. Para eso quedan pendientes recibos de autoría de cada archivo gestionado, copias de seguridad de originales, reversión de instalaciones que sustituyan contenido y una política de compatibilidad de versiones. Sin esos requisitos, los ZIPs históricos son descargables, pero no se aplican automáticamente encima de una instancia en uso.
+
 ## Historial de releases y descargas exactas
 
 **Fase 2, 19/11/2026:** cada paquete que se sube a VIS Universe informa `X-VIS-Release-Version` desde `protection.release_version`. El Worker solo adjunta el ZIP al catálogo si coinciden **release propia, Minecraft, motor y loader**. Si se cambia la release y todavía no se publicó su paquete, el catálogo no reutiliza la versión anterior.
