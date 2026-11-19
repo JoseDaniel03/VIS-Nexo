@@ -6,6 +6,8 @@ on:
       - '.github/workflows/vis-project-security-check.yml'
       - 'legacy/crates/vsui-core/**'
       - 'src-tauri/src/main.rs'
+      - 'src-tauri/src/social.rs'
+      - 'types/vis-commands.ts'
       - 'src-tauri/src/project_guard.rs'
       - 'src-tauri/src/team_pack.rs'
       - 'web/app.js'
