@@ -16,6 +16,7 @@ const MAX_ZIP:u64=32*1024*1024;
 #[serde(default)]
 pub struct TeamOptions {
     pub include_packs:bool,
+    pub include_custom_mods:bool,
     pub include_servers:bool,
     pub include_waypoints:bool,
 }
@@ -43,6 +44,8 @@ struct TeamManifest {
     format_version:u32,project_id:String,engine:String,
     minecraft_version:String,loader:String,loader_version:String,
     modrinth_project_ids:Vec<String>,files:Vec<FileEntry>,
+    #[serde(default)]include_custom_mods:bool,
+    #[serde(default)]release_version:String,
     #[serde(default)]include_servers:bool,
     #[serde(default)]include_waypoints:bool,
 }
@@ -113,6 +116,7 @@ fn inspect_config_secrets(path:&Path,filename:&str)->Result<(),String>{
 fn allow_root(name:&str,options:TeamOptions)->bool {
     matches!(name,"config"|"defaultconfigs"|"kubejs"|"scripts"|"patchouli_books")
     || options.include_packs&&matches!(name,"resourcepacks"|"shaderpacks"|"datapacks")
+    || options.include_custom_mods&&name=="mods"
     || options.include_waypoints&&matches!(name,"XaeroWaypoints"|"journeymap")
 }
 fn validate_game(game:&Path,project:&GameProject)->Result<(),String>{
@@ -123,6 +127,18 @@ fn validate_game(game:&Path,project:&GameProject)->Result<(),String>{
     }
     crate::instance_backup::require_clean_restore_state(game)?;
     Ok(())
+}
+/// Solo JARs planos en mods/ con nombres seguros, con inclusión explícita.
+fn approved_custom_jar(relative:&Path,options:TeamOptions)->bool{
+    if !options.include_custom_mods{return false;}
+    let mut parts=relative.components();
+    if !matches!(parts.next(),Some(std::path::Component::Normal(p)) if p=="mods"){return false;}
+    let Some(std::path::Component::Normal(name))=parts.next() else{return false;};
+    if parts.next().is_some(){return false;}
+    let Some(value)=name.to_str() else{return false;};
+    value.len()<=128 && value.ends_with(".jar") && value.len()>4 &&
+        value.bytes().all(|b|b.is_ascii_alphanumeric()||b"._-+".contains(&b)) &&
+        !["token","secret","private","password","session"].iter().any(|x|value.to_ascii_lowercase().contains(x))
 }
 fn visit(game:&Path,root:&Path,options:TeamOptions,files:&mut Vec<PathBuf>,
          excluded:&mut Vec<String>,bytes:&mut u64)->Result<(),String> {
@@ -141,7 +157,7 @@ fn visit(game:&Path,root:&Path,options:TeamOptions,files:&mut Vec<PathBuf>,
         if metadata.file_type().is_symlink(){
             return Err(format!("No se permiten enlaces simbólicos dentro del paquete: {display}"));
         }
-        if name.starts_with('.')||exclusions(&name){
+        if name.starts_with('.')||(exclusions(&name)&&!approved_custom_jar(relative,options)){
             if excluded.len()<80{excluded.push(display);}
             continue;
         }
@@ -165,8 +181,10 @@ fn gather(game:&Path,project:&GameProject,options:TeamOptions)
     ->Result<(Vec<PathBuf>,Vec<String>,u64),String>{
     validate_game(game,project)?;
     let mut files=Vec::new();let mut excluded=Vec::new();let mut bytes=0u64;
+    if options.include_custom_mods && (project.engine!="java"||project.loader!="fabric"){return Err("JARs propios solo para Java + Fabric".into());}
     let mut roots=vec!["config","defaultconfigs","kubejs","scripts","patchouli_books"];
     if options.include_packs {roots.extend(["resourcepacks","shaderpacks","datapacks"]);}
+    if options.include_custom_mods {roots.push("mods");}
     if options.include_waypoints {roots.extend(["XaeroWaypoints","journeymap"]);}
     for name in roots {
         if !allow_root(name,options){continue;}
@@ -207,7 +225,7 @@ fn file_entries(game:&Path,files:&[PathBuf])->Result<Vec<FileEntry>,String>{
 fn review_sha256(project:&GameProject,options:TeamOptions,entries:&[FileEntry])->Result<String,String>{
     let serialized=serde_json::to_vec(&(
         &project.id,&project.engine,&project.mc_version,&project.loader,
-        &project.loader_version,&project.modrinth_mods,options,entries
+        &project.loader_version,&project.modrinth_mods,&project.protection.release_version,options,entries
     )).map_err(|e|e.to_string())?;
     Ok(format!("{:x}",Sha256::digest(serialized)))
 }
@@ -251,6 +269,8 @@ pub fn build(game:&Path,output_root:&Path,project:&GameProject,options:TeamOptio
         "loader":&project.loader,
         "loader_version":&project.loader_version,
         "modrinth_project_ids":&project.modrinth_mods,
+        "release_version":&project.protection.release_version,
+        "include_custom_mods":options.include_custom_mods,
         "version_created_at":version_now(),
         "files":&entries,
         "contents":"team-defaults",
@@ -335,9 +355,11 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
         ||manifest.engine!=project.engine||manifest.loader!=project.loader
         ||manifest.loader_version!=project.loader_version
         ||manifest.minecraft_version!=project.mc_version
-        ||manifest.modrinth_project_ids!=project.modrinth_mods{
+        ||manifest.modrinth_project_ids!=project.modrinth_mods
+        ||manifest.release_version!=project.protection.release_version{
         return Err("Este paquete no corresponde a la versión/loader/mods del proyecto actual".into());
     }
+    if manifest.include_custom_mods&&(project.engine!="java"||project.loader!="fabric"){return Err("El proyecto no admite mods Java propios".into());}
     if manifest.files.len()+1!=zip.len()||manifest.files.len()>MAX_FILES{
         return Err("El manifiesto y el ZIP no coinciden".into());
     }
@@ -358,11 +380,13 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
         if file.path=="servers.dat"{
             if !manifest.include_servers{return Err("Lista de servidores sin permiso en manifiesto".into());}
         }else if parts.len()<2||!allow_root(first,TeamOptions{include_packs:true,
+            include_custom_mods:manifest.include_custom_mods,
             include_servers:manifest.include_servers,include_waypoints:manifest.include_waypoints}){
             return Err("El ZIP contiene una carpeta fuera del catálogo permitido".into());
         }
         if parts.iter().any(|p|match p{Component::Normal(n)=>
-            n.to_str().is_none_or(|name|name.starts_with('.')||exclusions(name)),
+            n.to_str().is_none_or(|name|name.starts_with('.')||(exclusions(name)
+                && !approved_custom_jar(path,TeamOptions{include_custom_mods:manifest.include_custom_mods,..TeamOptions::default()}))),
             _=>true}){
             return Err("El ZIP contiene datos privados o rutas de sistema".into());
         }
