@@ -40,5 +40,7 @@ jobs:
         run: cargo check -p vslauncher-tauri --bin vslauncher-tauri --locked
       - name: Exercise real .hnmod registration with a temporary Horizon instance
         run: cargo test -p vslauncher-tauri --bin vslauncher-tauri vsclient_native::tests --locked -- --nocapture
+      - name: Verify source builder compiles embedded VSClient (regression)
+        run: python3 -m unittest discover -s tools -p test_horizon_vsclient.py -v
       - name: Verify source builder is valid Python
         run: python3 -m py_compile tools/horizon_from_source.py
