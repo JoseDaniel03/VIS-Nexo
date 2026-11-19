@@ -140,7 +140,7 @@ fn enable(game_dir:&Path)->Result<(),String>{
         f.sync_all().map_err(|e|e.to_string())?;
         fs::rename(&tmp,&path).map_err(|e|e.to_string())
     })();
-    if result.is_err(){let _=fs::remove_file(&tmp)}
+    if result.is_err(){let _=fs::remove_file(&tmp);}
     result
 }
 
