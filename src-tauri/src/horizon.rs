@@ -556,10 +556,15 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     // Java and Horizon now share game data per instance by default.
     crate::minecraft::prepare_player_directory(game_dir)?;
     crate::instance_backup::require_clean_restore_state(game_dir)?;
+    // Drop the reviewed VSClient .hnmod in the instance and press Play.
+    // This only enables the native code PREBUILT in VIS McRust; it never
+    // compiles or executes the ZIP's source during a game launch.
+    let game_build=build_folder(ins)?;
+    let _vsclient_active=crate::vsclient_native::prepare(dir,game_dir,&game_build)?;
     let game_run=crate::minecraft::acquire_game_run(game_dir)?;
     if session_file.is_empty(){
         fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
-        let folder=build_folder(ins)?;
+        let folder=game_build.clone();
         let log_path=next_horizon_log(game_dir);
         let log=File::create(&log_path).map_err(|e|e.to_string())?;
         let mut cmd=Command::new(executable(&folder,"horizon-client"));
@@ -609,7 +614,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     // The user is responsible for supplying a temporary session for their own
     // licensed account. We do not delete the file if process creation fails.
     drop(session);
-    let folder=build_folder(ins)?;
+    let folder=game_build.clone();
     fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
     let log_path=next_horizon_log(game_dir);
     let log=File::create(&log_path).map_err(|e|e.to_string())?;
