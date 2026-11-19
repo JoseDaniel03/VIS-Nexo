@@ -7,6 +7,7 @@
 #[path = "../src/download_manager.rs"] mod download_manager;
 #[path = "../src/minecraft.rs"] mod minecraft;
 #[path = "../src/horizon.rs"] mod horizon;
+#[path = "../src/vsclient_native.rs"] mod vsclient_native;
 #[path = "../src/horizon_download.rs"] mod horizon_download;
 use tauri::{Listener, Manager};
 
