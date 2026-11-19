@@ -5,6 +5,7 @@ concurrency:
 # Builds are normally manual. Changes to this release workflow itself also
 # trigger a validation/packaging run; unrelated source commits do NOT.
 # This revision publishes the first VSClient 0.4.1-compatible launcher.
+# Solicitud de compilación PC — 2026-11-19 — interfaz con splash/animaciones (main 428d03ca).
 on:
   workflow_dispatch:
   push:
