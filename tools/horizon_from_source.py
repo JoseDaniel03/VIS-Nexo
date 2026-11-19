@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 REPOSITORY = 'https://github.com/JoseDaniel03/horizon-VISNEXO.git'
 ROOT = Path(__file__).resolve().parent.parent
@@ -75,7 +76,10 @@ def is_valid(output: Path, commit: str) -> bool:
     manifest = output / 'vis-horizon-source.json'
     try:
         record = json.loads(manifest.read_text(encoding='utf-8'))
-        return (record.get('source_commit') == commit
+        # Older cached game builds must be rebuilt after the VSClient feature
+        # appears in the fork. The source SHA also changes when this happens.
+        return (record.get('vsclient_embedded') in (None, '0.4.1')
+                and record.get('source_commit') == commit
                 and record.get('platform') == platform.system().lower()
                 and record.get('arch') == platform.machine().lower()
                 and all(digest(output / name) == expected
@@ -104,8 +108,17 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     target_dir.mkdir(parents=True, exist_ok=True)
     env['CARGO_TARGET_DIR'] = str(target_dir.resolve())
     env.setdefault('CARGO_BUILD_JOBS', '2')
-    command(['cargo', 'build', '--release', '-p', 'horizon-client', '--bin', 'horizon-client',
-             '-p', 'horizon-prepare', '--bin', 'horizon-prepare'], cwd=checkout, env=env)
+    # Build the trusted VIS port into the game binary once, rather than
+    # requiring Rust/Cargo on every player's computer. A dropped .hnmod only
+    # turns this prelinked VSClient on for the selected game instance.
+    cargo = tomllib.loads((checkout / 'crates/horizon-client/Cargo.toml').read_text(encoding='utf-8'))
+    vsclient_native = (cargo.get('features', {}).get('vis-vsclient') == []
+        and (checkout / 'integrations/vsclient-horizon/api/src/lib.rs').is_file())
+    args = ['cargo', 'build', '--release', '-p', 'horizon-client', '--bin', 'horizon-client']
+    if vsclient_native:
+        args.extend(['--features', 'vis-vsclient'])
+    args.extend(['-p', 'horizon-prepare', '--bin', 'horizon-prepare'])
+    command(args, cwd=checkout, env=env)
     source_root = target_dir / 'release'
     for bin_name in BINARIES:
         if not (source_root / binary_name(bin_name)).is_file():
@@ -128,6 +141,7 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
             'source_ref': ref or 'main', 'platform': platform.system().lower(),
             'arch': platform.machine().lower(), 'sha256': hashes,
             'minecraft_assets_included': False,
+            'vsclient_embedded': '0.4.1' if vsclient_native else None,
             'note': 'Compiled from public Horizon Rust source; Minecraft assets are NOT included.'
         }
         (stage / 'vis-horizon-source.json').write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
