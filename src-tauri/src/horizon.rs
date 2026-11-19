@@ -559,9 +559,12 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     // Drop the reviewed VSClient .hnmod in the instance and press Play.
     // This only enables the native code PREBUILT in VIS McRust; it never
     // compiles or executes the ZIP's source during a game launch.
+    // Take the instance's process lock before touching native mod settings:
+    // two overlapping Play clicks must never race to replace .hnmod or
+    // horizon-mods.txt while another Minecraft process is running.
+    let game_run=crate::minecraft::acquire_game_run(game_dir)?;
     let game_build=build_folder(ins)?;
     let _vsclient_active=crate::vsclient_native::prepare(dir,game_dir,&game_build)?;
-    let game_run=crate::minecraft::acquire_game_run(game_dir)?;
     if session_file.is_empty(){
         fs::create_dir_all(game_dir.join(".vis")).map_err(|e|e.to_string())?;
         let folder=game_build.clone();
