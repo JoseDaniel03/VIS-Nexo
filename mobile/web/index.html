@@ -7,9 +7,22 @@
 <meta name="color-scheme" content="dark"/>
 <title>VIS Nexo · Android Preview</title>
 <link rel="stylesheet" href="./style.css"/>
+<link rel="stylesheet" href="./splash.css"/>
 <script type="module" src="./app.js"></script>
 </head>
 <body>
+<div id="vis-mobile-startup" class="vis-mobile-startup" role="status" aria-live="polite">
+  <div class="vis-mobile-startup__shade" aria-hidden="true"></div>
+  <div class="vis-mobile-startup__brand">
+    <img src="./assets/vis-nexo-mark.svg" alt=""/>
+    <h1>VIS NEXO</h1>
+    <p>MÁS QUE UN <strong>LAUNCHER</strong></p>
+  </div>
+  <div class="vis-mobile-startup__progress">
+    <span>Inicializando VIS Ceibo</span>
+    <div class="vis-mobile-startup__track" role="progressbar" aria-label="Preparando VIS Nexo"><i></i></div>
+  </div>
+</div>
 <div class="ambient"></div>
 <div id="root" class="app-shell" aria-live="polite"></div>
 <div id="notifications" role="status" aria-live="polite"></div>

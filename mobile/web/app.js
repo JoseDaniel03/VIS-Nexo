@@ -26,7 +26,7 @@ async function command(name,args={}){
   return invoke(name,args);
 }
 function header(){
-  return '<header class="top"><div class="brand-mark">V<span>N</span></div>'+
+  return '<header class="top"><div class="brand-mark"><img src="./assets/vis-nexo-mark.svg" alt=""/></div>'+
     '<div class="brand-text"><strong>VIS NEXO</strong><small>ANDROID PREVIEW / CEIBO</small></div>'+
     '<div class="server-dot '+(state.network?.reachable?'online':'')+'" aria-label="Conexión"></div></header>';
 }
@@ -289,5 +289,11 @@ document.addEventListener('change',e=>{
 (async()=>{
   try{state.auth=await command('mobile_status');}
   catch(error){toast(error,true)}
-  screen();void refreshAll();
+  screen();
+  const splash=document.getElementById('vis-mobile-startup');
+  if(splash){
+    splash.classList.add('is-finished');
+    setTimeout(()=>splash.remove(),260);
+  }
+  void refreshAll();
 })();
