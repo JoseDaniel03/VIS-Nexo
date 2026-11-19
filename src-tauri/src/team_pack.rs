@@ -508,11 +508,16 @@ pub fn apply(game:&Path,archive:&Path,project:&GameProject,
                 let _=fs::remove_file(&destination);
                 return Err(format!("No se pudo instalar un archivo de equipo: {e}"));
             }
+            // Verify the installed bytes as well as the staged ZIP. A copy
+            // altered by another process must never be reported as successful.
+            let expected=by_name.get(&relative)
+                .ok_or("Archivo de equipo no declarado durante la instalación")?;
+            added.push((relative.clone(),expected.sha256.clone()));
+            let (actual,bytes)=fingerprint_file(&destination)?;
+            if actual!=expected.sha256 || bytes!=expected.size_bytes {
+                return Err("El archivo instalado no coincide con la huella SHA-256 oficial. Se requiere revisión".into());
+            }
             installed+=1;
-            // Keep a digest for safe rollback if a later file fails to copy.
-            let digest=by_name.get(&relative)
-                .ok_or("Archivo de equipo no declarado durante la instalación")?.sha256.clone();
-            added.push((relative,digest));
         }
         Ok(TeamApplyReport{project_id:project.id.clone(),installed,preserved,
             modrinth_mods:manifest.modrinth_project_ids.len()})
