@@ -1,0 +1,77 @@
+/* VIS Nexo Android — imagen oficial, responsividad y carga sin porcentajes ficticios. */
+.vis-mobile-startup{
+ position:fixed;inset:0;z-index:40;min-height:100dvh;isolation:isolate;overflow:hidden;
+ display:grid;grid-template-rows:minmax(0,1fr) auto;justify-items:center;
+ padding:calc(env(safe-area-inset-top) + 24px) 20px calc(env(safe-area-inset-bottom) + 35px);
+ color:#fff;background:#09051c;opacity:1;transition:opacity 240ms ease;
+}
+.vis-mobile-startup::before{
+ content:"";position:absolute;inset:0;z-index:-2;
+ background:url("./assets/splash-atmosphere.webp") center / cover no-repeat;
+}
+.vis-mobile-startup__shade{
+ position:absolute;inset:0;z-index:-1;
+ background:linear-gradient(180deg,rgba(9,4,21,.35),rgba(5,2,15,.85));
+}
+.vis-mobile-startup__brand{
+ align-self:center;display:flex;flex-direction:column;align-items:center;gap:13px;
+ text-align:center;animation:vis-mobile-enter 380ms cubic-bezier(.2,.75,.2,1) both;
+}
+.vis-mobile-startup__brand img{
+ width:clamp(90px,28vw,130px);height:clamp(90px,28vw,130px);object-fit:contain;
+ border-radius:24%;background:linear-gradient(140deg,#8b1af9,#420087);
+ box-shadow:0 14px 40px #0009;border:1px solid #ffffff3a;
+}
+.vis-mobile-startup__brand h1{
+ color:white;font-size:clamp(38px,10vw,62px);line-height:1.05;margin:8px 0 0;
+ font-weight:850;letter-spacing:-.06em;text-shadow:0 3px 22px #050315;
+}
+.vis-mobile-startup__brand p{
+ margin:0;font-size:11px;font-weight:800;letter-spacing:.12em;text-shadow:0 2px 12px #000;
+}
+.vis-mobile-startup__brand strong{color:#ff42b5}
+.vis-mobile-startup__progress{
+ align-self:end;display:grid;gap:12px;width:min(320px,100%);margin-bottom:12px;
+ font-size:11px;font-weight:700;color:#f4edff;
+}
+.vis-mobile-startup__track{
+ display:block;height:4px;border-radius:99px;overflow:hidden;background:#ffffff4a;
+}
+.vis-mobile-startup__track i{
+ display:block;width:30%;height:100%;border-radius:inherit;
+ background:linear-gradient(90deg,#00ffba,#48d4ff);
+ animation:vis-mobile-progress 1.6s ease-in-out infinite;
+}
+.vis-mobile-startup.is-finished{opacity:0;pointer-events:none}
+.brand-mark{width:40px;height:40px;flex:0 0 40px;display:grid;place-items:center;transform:none;letter-spacing:normal}
+.brand-mark img{width:100%;height:100%;object-fit:contain;border-radius:10px}
+/* Login y registro solamente: los demás sectores conservan su fondo original. */
+.auth-content{
+ background-image:linear-gradient(160deg,rgba(15,7,34,.76),rgba(18,8,39,.92)),
+ url("./assets/splash-forest.webp");
+ background-size:cover;background-position:center;
+ border-radius:0 0 22px 22px;min-width:0;
+}
+.auth-content .form-card{
+ background:rgba(30,17,55,.90);border-color:#be9afa55;
+ box-shadow:0 17px 38px #0008;
+}
+.auth-content input:focus{border-color:#00eabc;box-shadow:0 0 0 3px #00ffba22}
+.content,.auth-content{max-width:100%;overflow-wrap:anywhere}
+@keyframes vis-mobile-progress{
+ from{transform:translateX(-110%)}to{transform:translateX(350%)}
+}
+@keyframes vis-mobile-enter{
+ from{opacity:0;transform:translateY(12px) scale(.98)}
+ to{opacity:1;transform:translateY(0) scale(1)}
+}
+@media(max-height:570px){
+ .vis-mobile-startup__brand{gap:5px}
+ .vis-mobile-startup__brand img{width:65px;height:65px}
+ .vis-mobile-startup__progress{margin-bottom:0}
+}
+@media(prefers-reduced-motion:reduce){
+ .vis-mobile-startup{transition:none}
+ .vis-mobile-startup__brand,.vis-mobile-startup__track i{animation:none}
+ .vis-mobile-startup__track i{width:100%;transform:none}
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "VIS Nexo Android uses only its own explicitly registered native commands",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
