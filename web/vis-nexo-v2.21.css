@@ -256,3 +256,22 @@ html,body,#app{min-width:0;max-width:100%;min-height:0}
  .vis-download-head b{display:block;max-width:55vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .vis-download-history .detail-line{flex-wrap:wrap}
 }
+
+/* VIS Universe: historial de releases con hashes comprobados y diseño compacto. */
+.vis-release-list{display:grid;gap:10px;min-width:0;margin:14px 0}
+.vis-release-list>.outline-btn{justify-self:start;max-width:100%;white-space:normal;text-align:left}
+.vis-release-entries{display:grid;gap:6px;min-width:0;max-height:245px;overflow-y:auto}
+.vis-release-entry{
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  gap:9px;min-width:0;padding:9px 11px;border:1px solid rgba(191,166,236,.22);
+  border-radius:9px;background:rgba(31,19,57,.40)
+}
+.vis-release-entry>span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.vis-release-entry strong{font-size:12px;color:var(--text,#f5eeff);overflow-wrap:anywhere}
+.vis-release-entry small{font-size:11px;line-height:1.45;color:var(--muted,#bdb1d1);overflow-wrap:anywhere}
+.vis-release-entry button{flex:0 1 auto;min-width:0}
+@media(max-width:550px){
+ .vis-release-entry{align-items:stretch}
+ .vis-release-entry>span{flex:1 1 100%}
+ .vis-release-entry button{flex:1 1 auto}
+}
