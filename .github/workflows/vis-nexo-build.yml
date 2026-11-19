@@ -2,10 +2,15 @@ name: VIS Nexo Portable Build (Linux + Windows)
 concurrency:
   group: vis-nexo-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-# This workflow creates distributable Linux/Windows binaries.
-# During VIS Nexo development it must run only when explicitly requested.
+# Builds are normally manual. Changes to this release workflow itself also
+# trigger a validation/packaging run; unrelated source commits do NOT.
+# This revision publishes the first VSClient 0.4.1-compatible launcher.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vis-nexo-build.yml'
 jobs:
   build:
     strategy:
