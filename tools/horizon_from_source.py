@@ -102,9 +102,13 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     output = project_root / 'src-tauri' / 'resources' / 'horizon'
     # Check the feature BEFORE deciding whether an older source build can be
     # reused: the same Horizon commit may have been packaged without VSClient.
-    cargo = tomllib.loads((checkout / 'crates/horizon-client/Cargo.toml').read_text(encoding='utf-8'))
-    vsclient_native = (cargo.get('features', {}).get('vis-vsclient') == []
+    # VIS releases use the full horizon-official game, not the low-level
+    # horizon-client development binary. Keep support for old checkouts.
+    official_manifest = checkout / 'crates/horizon-official/Cargo.toml'
+    official = tomllib.loads(official_manifest.read_text(encoding='utf-8')) if official_manifest.is_file() else {}
+    vsclient_native = (official.get('features', {}).get('vis-vsclient') == []
         and (checkout / 'integrations/vsclient-horizon/api/src/lib.rs').is_file())
+    game_binary = 'horizon-official' if official_manifest.is_file() else 'horizon-client'
     if not update and is_valid(output, sha, vsclient_native):
         print(f'[VIS Horizon Source] Build cacheado y verificado: {sha[:12]}')
         return
@@ -116,13 +120,13 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     # Build the trusted VIS port into the game binary once, rather than
     # requiring Rust/Cargo on every player's computer. A dropped .hnmod only
     # turns this prelinked VSClient on for the selected game instance.
-    args = ['cargo', 'build', '--release', '-p', 'horizon-client', '--bin', 'horizon-client']
+    args = ['cargo', 'build', '--release', '-p', game_binary, '--bin', game_binary]
     if vsclient_native:
-        args.extend(['--features', 'horizon-client/vis-vsclient'])
+        args.extend(['--features', 'horizon-official/vis-vsclient'])
     args.extend(['-p', 'horizon-prepare', '--bin', 'horizon-prepare'])
     command(args, cwd=checkout, env=env)
     source_root = target_dir / 'release'
-    for bin_name in BINARIES:
+    for bin_name in (game_binary, 'horizon-prepare'):
         if not (source_root / binary_name(bin_name)).is_file():
             raise RuntimeError(f'Cargo no generó {binary_name(bin_name)}')
     if not (checkout / 'research-lock.json').is_file():
@@ -130,8 +134,8 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.horizon-stage-', dir=output.parent) as temp:
         stage = Path(temp)
-        for name in BINARIES:
-            shutil.copy2(source_root / binary_name(name), stage / binary_name(name))
+        shutil.copy2(source_root / binary_name(game_binary), stage / binary_name('horizon-client'))
+        shutil.copy2(source_root / binary_name('horizon-prepare'), stage / binary_name('horizon-prepare'))
         for name in ('research-lock.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md'):
             src = checkout / name
             if src.is_file():
@@ -140,7 +144,8 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
         hashes = {path.relative_to(stage).as_posix(): digest(path) for path in stage.rglob('*') if path.is_file()}
         metadata = {
             'format': 1, 'source_repo': REPOSITORY, 'source_commit': sha,
-            'source_ref': ref or 'main', 'platform': platform.system().lower(),
+            'source_ref': ref or 'main', 'game_binary': game_binary,
+            'platform': platform.system().lower(),
             'arch': platform.machine().lower(), 'sha256': hashes,
             'minecraft_assets_included': False,
             'vsclient_embedded': '0.4.1' if vsclient_native else None,
