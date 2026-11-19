@@ -43,6 +43,17 @@ En **VIS Universe → Proyectos en la nube → Consultar versiones anteriores**,
 
 Las etiquetas se consideran inmutables a nivel de API; queda pendiente controlar publicaciones simultáneas con una coordinación más fuerte y asociar firmas criptográficas del editor a los manifiestos públicos.
 
+## Publicación del Worker (manual, no ejecutada)
+
+La integración del historial está en el repositorio pero el nuevo endpoint no existe en producción hasta desplegar el Worker. El workflow [VIS Universe - Deploy R2 Worker (manual)](../.github/workflows/vis-universe-deploy.yml) fue preparado **sin despliegue automático**. Para usarlo, el propietario debe:
+
+1. Configurar el entorno GitHub `vis-universe-production`, idealmente con aprobación obligatoria, y los secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` (este último también puede ser variable).
+2. Definir la variable `VIS_UNIVERSE_URL` con el origen HTTPS del Worker VIS Universe terminado en `.workers.dev`, **sin ruta ni barra adicional**.
+3. Comprobar que el bucket R2 `vis-universe` existe y que el secreto `VIS_PUBLISH_TOKEN` ya está configurado en el Worker. Este valor nunca se almacena en el launcher ni en GitHub.
+4. Ejecutar manualmente Actions → **VIS Universe - Deploy R2 Worker (manual)** desde `main`, marcando `confirm`. El flujo comprueba las pruebas del Worker, despliega y valida un GET público de releases sin crear archivos de prueba en R2.
+
+El deploy no altera D1 de Ceibo ni publica binarios de Windows/Android. Si el pipeline falla, revisar antes de distribuir una versión del launcher que intente consultar las releases.
+
 ## VIS Ceibo y permisos
 
 Una cuenta VIS Cloud solo obtiene permisos locales de administración cuando la sesión Rust ha confirmado contra VIS Ceibo la identidad y el rol `super_admin` mediante bearer autenticado. La concesión dura como máximo 15 minutos desde la última comprobación correcta de `/v1/state`, se asocia al nombre autenticado y nunca queda registrada como rol de administrador local. Se limpia al cerrar sesión. El backend cloud verifica la autorización para las acciones remotas por separado. Si la conexión falla o el permiso expira, volver a conectar/iniciar sesión para renovar.
