@@ -16,6 +16,7 @@ mod updates;
 mod ombu;
 mod horizon;
 mod horizon_download;
+mod vsclient_native;
 mod download_manager;
 mod social;
 
