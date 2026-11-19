@@ -25,7 +25,8 @@ pub fn has_locked_files(p:&ProjectProtection)->bool{
 }
 pub fn validate(p:&ProjectProtection)->Result<(),String>{
     if !p.release_version.is_empty() &&
-       (p.release_version.len()>40 || !p.release_version.bytes().all(|b|
+       (p.release_version=="." || p.release_version==".." ||
+         p.release_version.len()>40 || !p.release_version.bytes().all(|b|
            b.is_ascii_alphanumeric()||b"._-".contains(&b))){
         return Err("Versión del proyecto inválida (máximo 40 caracteres, letras, números, . _ -)".into());
     }
@@ -33,7 +34,8 @@ pub fn validate(p:&ProjectProtection)->Result<(),String>{
     for (path,digest) in &p.file_hashes{
         let parts=path.split('/').collect::<Vec<_>>();
         if parts.len()<2 || parts.iter().any(|x|x.is_empty()||*x=="."||*x==".."||x.len()>255)
-           ||path.contains('\\')||path.len()>1024
+           ||path.contains('\\')||path.len()>1024 ||
+           path.chars().any(|ch|ch.is_control()||ch==':')
            ||!ROOTS.contains(&parts[0])||!root_locked(p,parts[0])
            ||digest.len()!=64||!digest.bytes().all(|b|b.is_ascii_hexdigit()){
             return Err("Huella SHA-256 o ruta de proyecto inválida".into());
@@ -105,6 +107,9 @@ pub fn verify(dir:&Path,project:&GameProject,engine:&str,version:&str,
    let mut p=ProjectProtection::default();p.lock_mods=true;
    p.file_hashes.insert("mods/../saves/a".into(),"a".repeat(64));
    assert!(validate(&p).is_err());
+   p.file_hashes.clear();
+   p.release_version="..".into();
+   assert!(validate(&p).is_err(),"No se permite una release llamada ..");
  }
  #[test]fn detects_tampering(){
    let dir=std::env::temp_dir().join(format!("vis-policy-test-{}",std::process::id()));

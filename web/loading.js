@@ -14,7 +14,9 @@ const operations=Object.freeze({
   export_worlds_instance:['Exportando VIS Worlds','Creando paquete portátil','forest'],
   apply_team_project:['Actualizando proyecto','Aplicando recursos compartidos','forest'],
   publish_team_project:['Publicando VIS Team','Preparando recursos del proyecto','forest'],
-  publish_universe:['Publicando VIS Universe','Sincronizando proyectos','atmosphere']
+  publish_universe:['Publicando VIS Universe','Sincronizando proyectos','atmosphere'],
+  list_project_releases:['Consultando versiones','Leyendo el historial oficial de VIS Universe','atmosphere'],
+  download_project_release:['Descargando release','Verificando el archivo histórico por SHA-256','forest']
 });
 const tasks=[];
 let view=null,showTimer=null,hideTimer=null,focusBefore=null;

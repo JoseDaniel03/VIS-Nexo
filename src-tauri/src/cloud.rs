@@ -241,6 +241,11 @@ pub fn upload_team_pack(
     if token.len()<32 || token.len()>256 || token.contains('\n') || token.contains('\r'){
         return Err("Credencial de publicación inválida".into());
     }
+    if crate::project_guard::validate(&project.protection).is_err()
+        || (project.protection.verify_on_launch && crate::project_guard::has_locked_files(&project.protection)
+            && !project.protection.sealed){
+        return Err("Antes de distribuir, el proyecto protegido necesita un sello oficial válido".into());
+    }
     if project.id!=pack.project_id || project.mc_version.len()>40
         ||project.loader.len()>32||project.loader_version.len()>50
         || !["java","horizon"].contains(&project.engine.as_str()){
@@ -330,6 +335,11 @@ pub fn publish(root:&Path, projects:&[GameProject], secret:&str)->Result<(),Stri
     let mut prepared=projects.to_vec();
     if prepared.len()>100{return Err("Demasiados proyectos para publicar".into())}
     for item in &mut prepared {
+        crate::project_guard::validate(&item.protection)?;
+        if item.protection.verify_on_launch && crate::project_guard::has_locked_files(&item.protection)
+            && !item.protection.sealed {
+            return Err("Sellá el proyecto protegido antes de publicarlo".into());
+        }
         if item.id.is_empty() || item.title.is_empty(){return Err("El proyecto necesita identificador y título".into())}
         encode_artwork(root,&mut item.banner_path)?;
         encode_artwork(root,&mut item.logo_path)?;
