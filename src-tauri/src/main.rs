@@ -1946,6 +1946,20 @@ async fn download_cloud_bundle(state:State<'_,Mutex<Backend>>,project_id:String)
     tauri::async_runtime::spawn_blocking(move||cloud::download(&root,&project_id)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
+async fn list_project_releases(state:State<'_,Mutex<Backend>>,project_id:String)
+    ->Result<Vec<cloud::ProjectRelease>,String>{
+    let root={let s=locked(&state)?;s.username()?;s.data_root.clone()};
+    tauri::async_runtime::spawn_blocking(move||cloud::releases(&root,&project_id))
+        .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn download_project_release(state:State<'_,Mutex<Backend>>,
+    project_id:String,version:String)->Result<String,String>{
+    let root={let s=locked(&state)?;s.username()?;s.data_root.clone()};
+    tauri::async_runtime::spawn_blocking(move||cloud::download_release(&root,&project_id,&version))
+        .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
 fn configure_cloud_catalog(state:State<'_,Mutex<Backend>>,url:String)->Result<(),String>{
     let s=locked(&state)?;s.admin()?;cloud::save_catalog_url(&s.data_root,&url)
 }
@@ -1986,7 +2000,7 @@ fn main() {
             set_project_execution, minecraft_versions, fabric_loaders, horizon_probe, horizon_diagnostics, horizon_source_build, horizon_local_builds, horizon_installed_builds, launch_horizon, install_minecraft, download_jobs, cancel_download,
             export_worlds_instance, import_worlds_instance, launch_minecraft, search_modrinth, install_modrinth, import_instance_file,
             list_instance_files, toggle_instance_file, remove_instance_file, maintenance_preview, maintenance_clean, check_app_update, install_app_update,
-            fetch_cloud_catalog, download_cloud_bundle, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project
+            fetch_cloud_catalog, download_cloud_bundle, list_project_releases, download_project_release, configure_cloud_catalog, sync_universe, publish_universe, preview_team_project, publish_team_project, apply_team_project
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo abrir VIS Nexo");
