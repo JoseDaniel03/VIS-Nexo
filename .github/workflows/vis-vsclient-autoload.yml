@@ -17,6 +17,9 @@ on:
       - '.github/workflows/vis-vsclient-autoload.yml'
 permissions:
   contents: read
+concurrency:
+  group: vis-vsclient-autoload-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-24.04
