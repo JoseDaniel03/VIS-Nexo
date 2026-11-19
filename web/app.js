@@ -1,5 +1,6 @@
 import { animateEntrance, animateAuthSwap, animateModal, animateModalStep, animateSocial, animateSocialTab, animateChat, animateFeed, animateAvatar, animateControl, animateProjectMotion, beginSectionChange, beginSurfaceDismiss, animateSetting, cancelPendingSectionChange, enableButtonFeedback } from './effects.js';
 import { createSocialRemote } from './social-remote.js';
+import { withOperationLoading, reportMinecraftProgress } from './loading.js';
 /* VIS Nexo 2.16 — Horizon library, integrity selection and version pinning.
    VIS Nexo 2.14 — Horizon diagnostics and local build discovery.
    VIS Nexo 2.17 — Universe / Worlds / Horizon Rust Edition + compartir instancias offline.
@@ -207,7 +208,7 @@ const iconPaths = {
   circle:'<circle cx="12" cy="12" r="9"/>',
 };
 function I(name,size=19){return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name]||iconPaths.grid}</svg>`}
-const logo = (big=false) => `<span class="vs-mark${big?' large':''}" aria-hidden="true">${db.branding?.launcher_logo&&preview(db.branding.launcher_logo)?`<img src="${preview(db.branding.launcher_logo)}" alt=""/>`:'<span>V</span>'}</span>`;
+const logo = (big=false) => `<span class="vs-mark${big?' large':''}" aria-hidden="true">${db.branding?.launcher_logo&&preview(db.branding.launcher_logo)?`<img src="${preview(db.branding.launcher_logo)}" alt=""/>`:'<img src="./assets/vis-nexo-mark.svg" alt=""/>'}</span>`;
 const msMark=()=>'<span class="ms-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
 function message(text,bad=false){ while(toastRegion.querySelectorAll('.toast').length>=3)toastRegion.querySelector('.toast')?.remove(); const d=document.createElement('div');d.className=`toast ${bad?'bad':''}`;d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(text)}</span>`;toastRegion.append(d);setTimeout(()=>d.remove(),4400);}
 function closeDialog(){
@@ -224,8 +225,7 @@ function projectHeroPhoto(path){return preview(path)?`style="background-image:ur
 function projectIcon(p,more=''){return preview(p?.icon_path)?`<img src="${preview(p.icon_path)}" alt="" ${more}/>`:`${I('game',22)}`;}
 
 async function command(name,args={}) {
-  if(native) return await T.core.invoke(name,args);
-  return mockCommand(name,args);
+  return withOperationLoading(name, () => native ? T.core.invoke(name,args) : mockCommand(name,args));
 }
 function mockCommand(name,args){
   const u=db.user;
@@ -2597,7 +2597,7 @@ async function removeMcFile(kind,file){
 }
 async function boot(){
  if(native&&T?.event?.listen){
-  T.event.listen('minecraft-progress',e=>{installProgress=e.payload;const el=document.querySelector('#minecraft-progress');if(el)el.textContent=`${e.payload.stage}: ${e.payload.completed}/${e.payload.total} · ${e.payload.detail}`;updateDownloadDock();}).catch(()=>{});
+  T.event.listen('minecraft-progress',e=>{installProgress=e.payload;reportMinecraftProgress(e.payload);const el=document.querySelector('#minecraft-progress');if(el)el.textContent=`${e.payload.stage}: ${e.payload.completed}/${e.payload.total} · ${e.payload.detail}`;updateDownloadDock();}).catch(()=>{});
   T.event.listen('vis-download-state',e=>{
      const job=e.payload;
      if(!job||!db.user||job.owner!==db.user.username)return;

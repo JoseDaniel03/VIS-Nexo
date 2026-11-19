@@ -41,6 +41,17 @@ export function animateEntrance(root,{reducedMotion=false,kind='home'}={}) {
   const content = root.querySelector('.main-scroll > .content-inner') || root.querySelector('.auth-glass');
   tween(content,[{opacity:.2,transform:'translate3d(0,12px,0)'},{opacity:1,transform:'translate3d(0,0,0)'}],
     {duration:kind==='auth'?330:305,easing:ease},reducedMotion);
+  // Entrada escalonada para autenticación y título al navegar.
+  if(kind==='auth'){
+    const parts=root.querySelectorAll('.auth-brand,.auth-intro,.auth-switch,.auth-form');
+    parts.forEach((node,index)=>tween(node,
+      [{opacity:0,transform:'translate3d(0,9px,0)'},{opacity:1,transform:'translate3d(0,0,0)'}],
+      {duration:255,delay:Math.min(index*55,180),easing:ease},reducedMotion));
+  }else{
+    tween(root.querySelector('.app-topbar .breadcrumb,.app-topbar .crumb-current'),
+      [{opacity:.35,transform:'translate3d(0,4px,0)'},{opacity:1,transform:'translate3d(0,0,0)'}],
+      {duration:225,easing:ease},reducedMotion);
+  }
   const hero = root.querySelector('.portal-feature,.portal-project-hero,.profile-banner');
   tween(hero,[{opacity:.65,transform:'translate3d(0,9px,0) scale(.995)'},{opacity:1,transform:'translate3d(0,0,0) scale(1)'}],
     {duration:360,delay:40,easing:ease},reducedMotion);
