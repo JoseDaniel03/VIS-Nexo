@@ -104,6 +104,7 @@ struct Backend {
     active_user: Option<String>,
     guest_name: Option<String>,
     cloud_account_login: bool,
+    cloud_admin_username: Option<String>,
     cloud_admin_expires: Option<SystemTime>,
     recent_accounts: Vec<RecentIdentity>,
     recent_path: PathBuf,
@@ -162,7 +163,7 @@ fn init_backend(app: &tauri::AppHandle) -> Result<Backend, String> {
     }else{Vec::new()};
     Ok(Backend { storage, catalog, catalog_path, branding, branding_path,
         project_execution, remote_projects, execution_path, data_root, active_user: None,
-        guest_name: None,cloud_account_login:false,cloud_admin_expires:None,
+        guest_name: None,cloud_account_login:false,cloud_admin_username:None,cloud_admin_expires:None,
         recent_accounts: recent_accounts.accounts,
         recent_path, presence: "online".into() })
 }
@@ -222,7 +223,7 @@ impl Backend {
     fn admin(&self)->Result<&str,String>{
         let username=self.username()?;
         let local=self.storage.get(username).is_some_and(|a|a.role==Role::Admin);
-        let cloud=self.cloud_account_login &&
+        let cloud=self.cloud_account_login && self.cloud_admin_username.as_deref()==Some(username) &&
             self.cloud_admin_expires.as_ref().is_some_and(|t|*t>SystemTime::now());
         if local||cloud {Ok(username)}
         else {Err("Necesitás administrador local o sesión VIS Cloud super_admin vigente".into())}
@@ -362,7 +363,7 @@ fn register(state: State<'_, Mutex<Backend>>, username: String, password: String
     let name = s.storage.register(&username, &password, &confirm)?;
     s.guest_name = None;
     s.active_user = Some(name.clone());
-    s.cloud_account_login=false;s.cloud_admin_expires=None;
+    s.cloud_account_login=false;s.cloud_admin_username=None;s.cloud_admin_expires=None;
     s.presence = "online".into();
     s.add_recent(&name, "local")?;
     Ok(s.snapshot())
@@ -373,7 +374,7 @@ fn login(state: State<'_, Mutex<Backend>>, username: String, password: String) -
     let name = s.storage.login(&username, &password)?;
     s.guest_name = None;
     s.active_user = Some(name.clone());
-    s.cloud_account_login=false;s.cloud_admin_expires=None;
+    s.cloud_account_login=false;s.cloud_admin_username=None;s.cloud_admin_expires=None;
     s.presence = "online".into();
     s.add_recent(&name, "local")?;
     Ok(s.snapshot())
@@ -384,7 +385,7 @@ fn logout(state: State<'_, Mutex<Backend>>,ms:State<'_,Mutex<microsoft::Microsof
     let mut s = locked(&state)?;
     s.active_user = None;
     s.guest_name = None;
-    s.cloud_account_login=false;s.cloud_admin_expires=None;
+    s.cloud_account_login=false;s.cloud_admin_username=None;s.cloud_admin_expires=None;
     s.presence = "offline".into();
     Ok(s.snapshot())
 }
@@ -398,7 +399,7 @@ fn login_offline(state: State<'_, Mutex<Backend>>, nickname: String) -> Result<S
     let mut s = locked(&state)?;
     s.active_user = None;
     s.guest_name = Some(nick.to_owned());
-    s.cloud_account_login=false;s.cloud_admin_expires=None;
+    s.cloud_account_login=false;s.cloud_admin_username=None;s.cloud_admin_expires=None;
     s.presence = "offline".into();
     Ok(s.snapshot())
 }
