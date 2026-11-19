@@ -72,13 +72,13 @@ def source_checkout(override: str | None, ref: str | None, update: bool) -> Path
     return path
 
 
-def is_valid(output: Path, commit: str) -> bool:
+def is_valid(output: Path, commit: str, vsclient_native: bool = False) -> bool:
     manifest = output / 'vis-horizon-source.json'
     try:
         record = json.loads(manifest.read_text(encoding='utf-8'))
         # Older cached game builds must be rebuilt after the VSClient feature
         # appears in the fork. The source SHA also changes when this happens.
-        return (record.get('vsclient_embedded') in (None, '0.4.1')
+        return (record.get('vsclient_embedded') == ('0.4.1' if vsclient_native else None)
                 and record.get('source_commit') == commit
                 and record.get('platform') == platform.system().lower()
                 and record.get('arch') == platform.machine().lower()
@@ -100,7 +100,12 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     if len(sha) != 40 or any(c not in '0123456789abcdef' for c in sha):
         raise RuntimeError(f'Commit de Horizon inválido: {sha}')
     output = project_root / 'src-tauri' / 'resources' / 'horizon'
-    if not update and is_valid(output, sha):
+    # Check the feature BEFORE deciding whether an older source build can be
+    # reused: the same Horizon commit may have been packaged without VSClient.
+    cargo = tomllib.loads((checkout / 'crates/horizon-client/Cargo.toml').read_text(encoding='utf-8'))
+    vsclient_native = (cargo.get('features', {}).get('vis-vsclient') == []
+        and (checkout / 'integrations/vsclient-horizon/api/src/lib.rs').is_file())
+    if not update and is_valid(output, sha, vsclient_native):
         print(f'[VIS Horizon Source] Build cacheado y verificado: {sha[:12]}')
         return
     env = dict(os.environ)
@@ -111,12 +116,9 @@ def build(override: str | None, ref: str | None, update: bool, *, project_root: 
     # Build the trusted VIS port into the game binary once, rather than
     # requiring Rust/Cargo on every player's computer. A dropped .hnmod only
     # turns this prelinked VSClient on for the selected game instance.
-    cargo = tomllib.loads((checkout / 'crates/horizon-client/Cargo.toml').read_text(encoding='utf-8'))
-    vsclient_native = (cargo.get('features', {}).get('vis-vsclient') == []
-        and (checkout / 'integrations/vsclient-horizon/api/src/lib.rs').is_file())
     args = ['cargo', 'build', '--release', '-p', 'horizon-client', '--bin', 'horizon-client']
     if vsclient_native:
-        args.extend(['--features', 'vis-vsclient'])
+        args.extend(['--features', 'horizon-client/vis-vsclient'])
     args.extend(['-p', 'horizon-prepare', '--bin', 'horizon-prepare'])
     command(args, cwd=checkout, env=env)
     source_root = target_dir / 'release'
