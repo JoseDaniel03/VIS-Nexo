@@ -11,6 +11,9 @@ on:
       - 'src-tauri/src/project_guard.rs'
       - 'src-tauri/src/team_pack.rs'
       - 'web/app.js'
+      - 'src-tauri/src/cloud.rs'
+      - 'services/universe/worker.mjs'
+      - 'tools/test_universe_worker.mjs'
   workflow_dispatch:
 permissions:
   contents: read
