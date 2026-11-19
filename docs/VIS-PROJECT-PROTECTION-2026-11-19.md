@@ -31,6 +31,18 @@ VIS Team incluye carpetas compartibles de configuración y, con la casilla corre
 
 La etiqueta `release_version` se valida en el manifiesto `.bsconfig`, además de motor, Minecraft, loader y mods Modrinth. El sistema **no** sustituye todavía el historial de versiones con rollback ni admite varias releases instaladas simultáneamente bajo el mismo ID de proyecto: para eso se requiere un catálogo de releases independiente con hashes y migraciones.
 
+## Historial de releases y descargas exactas
+
+**Fase 2, 19/11/2026:** cada paquete que se sube a VIS Universe informa `X-VIS-Release-Version` desde `protection.release_version`. El Worker solo adjunta el ZIP al catálogo si coinciden **release propia, Minecraft, motor y loader**. Si se cambia la release y todavía no se publicó su paquete, el catálogo no reutiliza la versión anterior.
+
+Si la release tiene una etiqueta válida y un ZIP verificado, el Worker crea una referencia histórica en `GET /releases/{project_id}.json`, con etiqueta, SHA-256, tamaño, versión del juego y origen inmutable `/packs/<proyecto>/<sha256>.zip`. No se permiten dos ZIP con hashes diferentes para una misma etiqueta de release; una segunda publicación de ese tipo responde HTTP 409 y exige cambiar la etiqueta. Los objetos ZIP siguen siendo archivos por hash.
+
+En **VIS Universe → Proyectos en la nube → Consultar versiones anteriores**, los usuarios ven las releases registradas y pueden **descargar una versión exacta**. Rust obtiene el índice del Worker del catálogo configurado, comprueba formato, proyecto, origen de descarga y SHA-256/tamaño reales antes de aceptar el archivo. Se almacena con un nombre que contiene la release y un prefijo del hash para evitar sobrescribir ZIPs anteriores.
+
+**No se instalan versiones históricas encima de una instancia existente.** La descarga es independiente de los mundos, opciones y servidores. Una migración o rollback requiere un sistema transaccional de backups y autoría de archivos; sigue pendiente. Hasta entonces, instalar una versión anterior implica crear una instancia aislada mediante el flujo normal.
+
+Las etiquetas se consideran inmutables a nivel de API; queda pendiente controlar publicaciones simultáneas con una coordinación más fuerte y asociar firmas criptográficas del editor a los manifiestos públicos.
+
 ## VIS Ceibo y permisos
 
 Una cuenta VIS Cloud solo obtiene permisos locales de administración cuando la sesión Rust ha confirmado contra VIS Ceibo la identidad y el rol `super_admin` mediante bearer autenticado. La concesión dura como máximo 15 minutos desde la última comprobación correcta de `/v1/state`, se asocia al nombre autenticado y nunca queda registrada como rol de administrador local. Se limpia al cerrar sesión. El backend cloud verifica la autorización para las acciones remotas por separado. Si la conexión falla o el permiso expira, volver a conectar/iniciar sesión para renovar.
