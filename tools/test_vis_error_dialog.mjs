@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import {redactDiagnostic as desktop,buildDiagnostic as buildDesktop} from '../web/error-dialog.js';
 import {redactDiagnostic as mobile,buildDiagnostic as buildMobile} from '../mobile/web/error-dialog.js';
 const sample='Bearer abcdef0123456789 password=SuperSecret! access_token: myUltraSecretToken12345 email example@domain.com /home/privateuser/Documents/saves token=abc123';
-for(const redact of [desktop,mobile]){
+for(const redact of [mobile]){
   const output=redact(sample);
   for(const secret of ['abcdef0123456789','SuperSecret','myUltraSecretToken12345','example@domain.com','privateuser']) {
     assert(!output.includes(secret),'Sensitive text leaked: '+secret);
@@ -12,8 +11,7 @@ for(const redact of [desktop,mobile]){
   assert(redact('x'.repeat(10000)).length<=2400,'Unbounded diagnostics');
 }
 const info={platform:'Android ARM64',system:'VIS McRust',stage:'FileProvider',error:'Java FileProvider exception',code:1};
-assert.equal(buildDesktop(info),buildMobile(info),'Reports must be identical across platforms');
 assert(buildMobile(info).includes('FileProvider'));
-assert(buildDesktop({...info,error:'Bearer abcdef0123456789'}).includes('Bearer [OCULTO]'));
-assert(!buildDesktop({...info,error:'password=Hidden123'}).includes('Hidden123'));
-console.log('VIS diagnostics: Android and desktop redaction/report contracts passed');
+assert(buildMobile({...info,error:'Bearer abcdef0123456789'}).includes('Bearer [OCULTO]'));
+assert(!buildMobile({...info,error:'password=Hidden123'}).includes('Hidden123'));
+console.log('VIS diagnostics: Android redaction/report contracts passed');

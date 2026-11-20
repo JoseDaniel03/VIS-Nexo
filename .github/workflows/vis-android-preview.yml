@@ -8,6 +8,7 @@ on:
       - "mobile/**"
       - "services/social/**"
       - "tools/test_vis_android_features.mjs"
+      - "tools/test_vis_error_dialog.mjs"
 
       - ".github/workflows/vis-android-preview.yml"
   workflow_dispatch:
