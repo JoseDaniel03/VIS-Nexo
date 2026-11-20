@@ -141,3 +141,4 @@ jobs:
             target/release/SHA256SUMS-Windows.txt
           if-no-files-found: error
           retention-days: 30
+# Package current main for the Android and desktop test round.
