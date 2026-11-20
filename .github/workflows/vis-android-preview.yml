@@ -9,6 +9,10 @@ on:
       - "services/social/**"
       - "tools/test_vis_android_features.mjs"
       - "tools/test_vis_error_dialog.mjs"
+      - "tools/test_mobile_refresh.mjs"
+      - "tools/test_mobile_device.mjs"
+      - "tools/test_social_worker.mjs"
+      - "tools/configure_android_installer.py"
 
       - ".github/workflows/vis-android-preview.yml"
   workflow_dispatch:
