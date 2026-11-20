@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {devicePanel} from '../mobile/web/device.js';
+const first=devicePanel({prepared:false,installer_allowed:false});
+assert(first.includes('device-installer'));
+assert(first.includes('device-onboarding'));
+assert(first.includes('requiere tu autorización'));
+assert(first.includes('device-updates'));
+const ready=devicePanel({prepared:true,installer_allowed:true});
+assert(!ready.includes('device-onboarding'));
+assert(ready.includes('autorizado'));
+assert(!ready.includes('requiere tu autorización'));
+console.log('Android preparation: first launch, optional permissions, return access and update action passed');

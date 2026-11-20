@@ -346,3 +346,9 @@ h1,h2,h3,p{margin-top:0}
 @media(max-height:700px){.auth-screen{align-items:flex-start;overflow-y:auto}.auth-glass{margin:auto}.auth-intro{margin-top:22px}.auth-switch{margin:20px 0}.auth-submit{margin-top:20px}.auth-footer{margin-top:16px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;scroll-behavior:auto!important;transition-duration:.001ms!important}}
 .reduce-motion *, .reduce-motion *::before,.reduce-motion *::after{animation:none!important;transition-duration:.001ms!important}
+
+/* Rotate the official mint accent while preserving neutral parts of the SVG. */
+.section-mark:is([data-section="projects"],[data-section="project"],[data-section="cloud"]){filter:hue-rotate(98deg)}
+.section-mark:is([data-section="instances"],[data-section="minecraft"]){filter:hue-rotate(43deg)}
+.section-mark:is([data-section="friends"],[data-section="social"]){filter:hue-rotate(155deg)}
+.section-mark:is([data-section="profile"],[data-section="account"]){filter:hue-rotate(265deg)}

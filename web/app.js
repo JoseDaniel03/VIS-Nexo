@@ -209,7 +209,10 @@ const iconPaths = {
   circle:'<circle cx="12" cy="12" r="9"/>',
 };
 function I(name,size=19){return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name]||iconPaths.grid}</svg>`}
-const logo = (big=false) => `<span class="vs-mark${big?' large':''}" aria-hidden="true">${db.branding?.launcher_logo&&preview(db.branding.launcher_logo)?`<img src="${preview(db.branding.launcher_logo)}" alt=""/>`:'<img src="./assets/vis-nexo-mark.svg" alt=""/>'}</span>`;
+function BrandImage(section){
+  return `<img class="section-mark" data-section="${esc(section)}" src="./assets/vis-nexo-mark.svg" alt=""/>`;
+}
+const logo = (big=false) => `<span class="vs-mark${big?' large':''}" aria-hidden="true">${db.branding?.launcher_logo&&preview(db.branding.launcher_logo)?`<img src="${preview(db.branding.launcher_logo)}" alt=""/>`:BrandImage(page)}</span>`;
 const msMark=()=>'<span class="ms-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
 function message(text,bad=false){ while(toastRegion.querySelectorAll('.toast').length>=3)toastRegion.querySelector('.toast')?.remove(); const d=document.createElement('div');d.className=`toast ${bad?'bad':''}`;d.innerHTML=`${I(bad?'info':'check',17)}<span>${esc(text)}</span>`;toastRegion.append(d);setTimeout(()=>d.remove(),4400);}
 function closeDialog(){
