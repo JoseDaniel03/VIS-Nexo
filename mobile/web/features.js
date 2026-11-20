@@ -130,7 +130,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         :microsoft.user_code
         ?'<p class="muted">Ingresá este código en el sitio oficial de Microsoft:</p>'+
           '<div class="session-list"><strong>'+E(microsoft.user_code)+'</strong></div>'+
-          button('ms-browser','Abrir Microsoft en el navegador')+
+          button('ms-browser','Abrir microsoft.com/link en el navegador')+
           '<div class="small-row">'+button('ms-poll','Comprobar autorización')+
             button('ms-disconnect','Cancelar')+'</div>'
         :button('ms-begin','Conectar con Microsoft'))+
