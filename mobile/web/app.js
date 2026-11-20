@@ -40,6 +40,12 @@ function reportError(error,context={}){
   const text=String(error||'Error desconocido');
   toast(text,true,{...context,automatic:true});
 }
+window.addEventListener('error',event=>{
+  if(event.message)reportError(event.message,{stage:'Interfaz de VIS Nexo'});
+});
+window.addEventListener('unhandledrejection',event=>{
+  reportError(event.reason?.message??event.reason,{stage:'Operación sin completar en VIS Nexo'});
+});
 async function command(name,args={}){
   if(!invoke)throw Error('Puente nativo Tauri no disponible. Instalá la APK, no abras este HTML en Chrome.');
   return invoke(name,args);
@@ -320,41 +326,64 @@ document.addEventListener('change',e=>{
 })();
 
 
+const launchKey='vis.mcrust.launchTime';
+const returnedKey='vis.mcrust.backgroundLaunch';
 let checkingExit=false;
-async function checkGameExit(){
-  const key='vis.mcrust.launchTime';
-  const started=Number(localStorage.getItem(key));
+let exitRetry;
+async function checkGameExit(finalAttempt=false){
+  const started=Number(localStorage.getItem(launchKey));
   if(document.hidden||checkingExit||!started)return;
   checkingExit=true;
+  let report='';
   try{
-    const {report}=await command('mobile_device',{operation:'diagnostics'});
-    // The published engine already includes this line on Android 11+.
-    const exit=/Android exit reason: (\d+); status: -?\d+; time: (\d+)/.exec(report);
-    const failure=/^Startup failure: (\d+)$/m.exec(report);
-    const startupFailed=Boolean(failure && Number(failure[1])>=started);
-    if(document.hidden || Number(localStorage.getItem(key))!==started)return;
-    if(!startupFailed && (!exit || Number(exit[2])<started))return;
-    localStorage.removeItem(key);
-    if(startupFailed || [2,3,4,5,6,7,9].includes(Number(exit[1]))){
-      diagnostics.open({platform:'Android ARM64',system:'VIS McRust',stage:'Cierre del juego',error:report});
-    }
-  }catch{/* Keep the launch timestamp for retry and manual diagnostics. */}
-  finally{checkingExit=false;}
+    const result=await command('mobile_device',{operation:'diagnostics'});
+    report=String(result?.report??'');
+  }catch(error){
+    report='No se pudo consultar el diagnóstico de McRust: '+redactDiagnostic(error);
+  }finally{
+    checkingExit=false;
+  }
+  if(document.hidden||Number(localStorage.getItem(launchKey))!==started)return;
+  const exit=/^Android exit reason: (\d+); status: (-?\d+); time: (\d+)/m.exec(report);
+  const failure=/^Startup failure: (\d+)$/m.exec(report);
+  const startupFailed=Number(failure?.[1])>=started;
+  const recentExit=Number(exit?.[3])>=started;
+  const reason=Number(exit?.[1]);
+  const status=Number(exit?.[2]);
+  const confirmed=startupFailed || (recentExit && (
+    [2,3,4,5,6,7,9,12,15].includes(reason) || (reason===1 && status!==0)
+  ));
+  if(confirmed){
+    reportError(report,{system:'VIS McRust',stage:startupFailed?'Arranque del juego':'Cierre del juego'});
+  }else if(!recentExit && finalAttempt && Number(localStorage.getItem(returnedKey))===started){
+    reportError('Nexo volvió al primer plano y Android todavía no informó cómo terminó McRust. El juego puede seguir abierto en segundo plano. Volvé a consultar el diagnóstico si se cerró.\n'+report,
+      {system:'VIS McRust',stage:'Resultado del intento sin confirmar'});
+    // Preserve the attempt so a later foreground event can still show a confirmed crash.
+    localStorage.removeItem(returnedKey);
+    return;
+  }else if(!recentExit){
+    return;
+  }
+  localStorage.removeItem(launchKey);
+  localStorage.removeItem(returnedKey);
 }
-let exitRetry;
 function scheduleExitCheck(){
   clearTimeout(exitRetry);
-  if(document.hidden || !localStorage.getItem('vis.mcrust.launchTime'))return;
+  if(document.hidden||!localStorage.getItem(launchKey))return;
   void checkGameExit();
-  exitRetry=setTimeout(checkGameExit,1800);
+  exitRetry=setTimeout(()=>void checkGameExit(true),6500);
 }
 window.addEventListener('vis-game-started',scheduleExitCheck);
 window.addEventListener('focus',scheduleExitCheck);
 scheduleExitCheck();
 
 document.addEventListener('visibilitychange',()=>{
-  if(!document.hidden)scheduleExitCheck();
-  if(document.hidden)return;
+  if(document.hidden){
+    const pending=localStorage.getItem(launchKey);
+    if(pending)localStorage.setItem(returnedKey,pending);
+    return;
+  }
+  scheduleExitCheck();
   void command('mobile_device',{operation:'status'}).then(device=>{
     const changed=device.prepared!==state.device?.prepared||device.installer_allowed!==state.device?.installer_allowed;
     state.device=device;
