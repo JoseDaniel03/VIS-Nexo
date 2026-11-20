@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/vis-nexo-build.yml'
+      - 'tools/check_vis213.py'
       - 'tools/check_vis218.py'
       - 'src-tauri/examples/**'
       - 'src-tauri/src/vsclient_native.rs'
