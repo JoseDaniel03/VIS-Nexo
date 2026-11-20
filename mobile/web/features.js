@@ -130,7 +130,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         :microsoft.user_code
         ?'<p class="muted">Ingresá este código en el sitio oficial de Microsoft:</p>'+
           '<div class="session-list"><strong>'+E(microsoft.user_code)+'</strong></div>'+
-          '<a href="https://www.microsoft.com/link" target="_blank" rel="noopener noreferrer">Abrir microsoft.com/link</a>'+
+          button('ms-browser','Abrir Microsoft en el navegador')+
           '<div class="small-row">'+button('ms-poll','Comprobar autorización')+
             button('ms-disconnect','Cancelar')+'</div>'
         :button('ms-begin','Conectar con Microsoft'))+
@@ -431,7 +431,7 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
     const supported=new Set([
       'friend-accept','friend-alias','project-sub','request-review','setup-mfa','rotate-codes',
       'load-sessions','revoke-session','revoke-all','remove-skin','view-cosmetics','remove-instance','play-mcrust',
-      'ms-begin','ms-poll','ms-disconnect'
+      'ms-begin','ms-browser','ms-poll','ms-disconnect'
     ]);
     if(!supported.has(act))return false;
     if(uiBusy)return true;
@@ -442,6 +442,8 @@ export function createMobileFeatures({state,command,escape,toast,screen,refreshA
         const result=await command('mobile_ms_begin');
         microsoft={...result,status:'pending',name:'',uuid:''};
         screen();toast('Código Microsoft generado. Abrí microsoft.com/link y autorizá el dispositivo.');
+      }else if(act==='ms-browser'){
+        await command('mobile_device',{operation:'microsoft-link'});
       }else if(act==='ms-poll'){
         const result=await command('mobile_ms_poll');
         microsoft={...microsoft,...result};

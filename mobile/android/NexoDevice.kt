@@ -58,6 +58,7 @@ object NexoDevice {
             "onboarding" -> { check(prefs.edit().putBoolean("prepared", true).commit()); return "{}" }
             "installer" -> activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + activity.packageName)))
             "settings" -> activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + activity.packageName)))
+            "microsoft-link" -> activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.microsoft.com/link")))
             "updates" -> activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/JoseDaniel03/VIS-Nexo/releases")))
             "game-prepare", "game-delete" -> {
                 val request = JSONObject(payload)
