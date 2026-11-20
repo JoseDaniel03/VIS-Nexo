@@ -1509,6 +1509,18 @@ async fn launch_horizon(
                 active,is_ms_profile,None)
         }
     };
+    let skin = if guest.is_none() {
+        let s = locked(&state)?;
+        s.storage.get(&active).and_then(|account| {
+            let directory = asset_dir(&s).canonicalize().ok()?;
+            let path = PathBuf::from(&account.skin).canonicalize().ok()?;
+            let metadata = path.metadata().ok()?;
+            (path.starts_with(directory) && metadata.is_file() && metadata.len() <= 1024 * 1024)
+                .then_some(path)
+        })
+    } else {
+        None
+    };
     let protected_project={let s=locked(&state)?;s.project(&project_id).cloned()};
     if instance.engine!="horizon"{return Err("No es una instancia Horizon".into());}
     let credential=if guest.is_some() {
@@ -1547,8 +1559,8 @@ async fn launch_horizon(
             .unwrap_or(session_file);
         let outcome=if let Some(player)=visitor {
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
-            horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir)
-        }else{horizon::launch(&app,&dir,&instance,&effective)};
+            horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir,skin.as_deref())
+        }else{horizon::launch_with_skin(&app,&dir,&instance,&effective,skin.as_deref())};
         if let Some(path)=session_path{let _=fs::remove_file(path);}
         outcome
     }).await.map_err(|e|e.to_string())?

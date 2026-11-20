@@ -543,14 +543,17 @@ fn next_horizon_log(game_dir:&Path)->PathBuf{
     game_dir.join(".vis").join(format!("horizon-launch-{epoch}-{}.log",std::process::id()))
 }
 pub fn launch(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str)->Result<LaunchResult,String>{
-    launch_in_directory(app,dir,ins,session_file,dir)
+    launch_with_skin(app,dir,ins,session_file,None)
+}
+pub fn launch_with_skin(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,skin:Option<&Path>)->Result<LaunchResult,String>{
+    launch_in_directory(app,dir,ins,session_file,dir,skin)
 }
 /// Reuse Horizon build/resources and (by default) the same instance data,
 /// while keeping Microsoft authentication tied to the active account.
-pub fn launch_shared(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,visitor_dir:&Path)->Result<LaunchResult,String>{
-    launch_in_directory(app,dir,ins,session_file,visitor_dir)
+pub fn launch_shared(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,visitor_dir:&Path,skin:Option<&Path>)->Result<LaunchResult,String>{
+    launch_in_directory(app,dir,ins,session_file,visitor_dir,skin)
 }
-fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,game_dir:&Path)->Result<LaunchResult,String>{
+fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,game_dir:&Path,skin:Option<&Path>)->Result<LaunchResult,String>{
     let probe=inspect(dir,ins)?;
     if !probe.resources_ready{return Err("Prepará y verificá los recursos de Horizon antes de jugar".into())}
     // Java and Horizon now share game data per instance by default.
@@ -572,6 +575,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
         let log=File::create(&log_path).map_err(|e|e.to_string())?;
         let mut cmd=Command::new(executable(&folder,"horizon-client"));
         crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
+        if let Some(path)=skin { cmd.env("HORIZON_OFFLINE_SKIN",path); }
         cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
             .arg("--game-dir").arg(game_dir).arg("--home").arg(game_dir);
         if !ins.player_name.is_empty(){cmd.arg("--name").arg(&ins.player_name);}
@@ -623,6 +627,7 @@ fn launch_in_directory(app:&AppHandle,dir:&Path,ins:&Instance,session_file:&str,
     let log=File::create(&log_path).map_err(|e|e.to_string())?;
     let mut cmd=Command::new(executable(&folder,"horizon-client"));
     crate::minecraft::configure_instance_environment(&mut cmd,game_dir)?;
+    if let Some(path)=skin { cmd.env("HORIZON_OFFLINE_SKIN",path); }
     // Keep any relative game writes in this player's folder. The engine
     // executable and --resources remain absolute paths in the owner install.
     cmd.current_dir(game_dir).arg("--resources").arg(resources(dir))
