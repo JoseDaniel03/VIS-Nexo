@@ -328,17 +328,23 @@ async function checkGameExit(){
     const {report}=await command('mobile_device',{operation:'diagnostics'});
     // The published engine already includes this line on Android 11+.
     const exit=/Android exit reason: (\d+); status: -?\d+; time: (\d+)/.exec(report);
-    if(!exit||Number(exit[2])<started||Number(localStorage.getItem(key))!==started)return;
+    const failure=/^Startup failure: (\d+)$/m.exec(report);
+    const startupFailed=Boolean(failure && Number(failure[1])>=started);
+    if(document.hidden || Number(localStorage.getItem(key))!==started)return;
+    if(!startupFailed && (!exit || Number(exit[2])<started))return;
     localStorage.removeItem(key);
-    if([2,3,4,5,6,7,9].includes(Number(exit[1]))){
+    if(startupFailed || [2,3,4,5,6,7,9].includes(Number(exit[1]))){
       diagnostics.open({platform:'Android ARM64',system:'VIS McRust',stage:'Cierre del juego',error:report});
     }
   }catch{/* Keep the launch timestamp for retry and manual diagnostics. */}
   finally{checkingExit=false;}
 }
+let exitRetry;
 function scheduleExitCheck(){
+  clearTimeout(exitRetry);
+  if(document.hidden || !localStorage.getItem('vis.mcrust.launchTime'))return;
   void checkGameExit();
-  setTimeout(checkGameExit,1800);
+  exitRetry=setTimeout(checkGameExit,1800);
 }
 window.addEventListener('vis-game-started',scheduleExitCheck);
 window.addEventListener('focus',scheduleExitCheck);
