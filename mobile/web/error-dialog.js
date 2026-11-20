@@ -27,7 +27,7 @@ export function buildDiagnostic({platform='VIS Nexo',system='Launcher',stage='op
   return lines.join('\n');
 }
 export function createDiagnosticDialog(doc=document){
-  let dialog=null,report='';
+  let dialog=null,report='',dispose=()=>{};
   const el=(tag,cls,text)=>{
     const node=doc.createElement(tag);
     if(cls)node.className=cls;
@@ -40,9 +40,11 @@ export function createDiagnosticDialog(doc=document){
     dialog=null;report='';
     try{if(typeof active.close==='function'&&active.open)active.close();}catch{}
     active.remove();
+    dispose();
   }
   function open(details){
     close();
+    const trigger=doc.activeElement;
     report=buildDiagnostic(details||{});
     const root=el('dialog','vis-error-dialog');
     root.setAttribute('aria-label','Diagnóstico VIS Nexo');
@@ -71,14 +73,23 @@ export function createDiagnosticDialog(doc=document){
         copy.textContent='Seleccioná el texto y copialo';
       }
     });
+    const download=el('a','vis-error-download','Guardar informe');
+    const reportUrl=URL.createObjectURL(new Blob([report],{type:'text/plain;charset=utf-8'}));
+    download.href=reportUrl;
+    download.download='vis-nexo-diagnostico.txt';
     const dismiss=el('button','vis-error-close','Cerrar');
     dismiss.type='button';
     dismiss.addEventListener('click',close);
-    actions.append(copy,dismiss);
+    actions.append(copy,download,dismiss);
     root.append(actions);
-    root.addEventListener('close',close,{once:true});
+    root.addEventListener('close',()=>{
+      if(dialog && dialog!==root)return;
+      if(dialog===root)close();
+      trigger?.focus?.();
+    },{once:true});
     doc.body.append(root);
     dialog=root;
+    dispose=()=>URL.revokeObjectURL(reportUrl);
     if(typeof root.showModal==='function')root.showModal();
     else root.setAttribute('open','');
     return report;

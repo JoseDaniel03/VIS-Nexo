@@ -108,7 +108,7 @@ function authPanel(){
     '<div class="hero-label">IDENTIDAD / VIS CEIBO</div>'+
     '<h1>'+title+'</h1><p class="hint">'+sub+'</p>'+
     '<div class="form-card"><form id="auth-form" data-step="'+step+'">'+body+'</form></div>'+
-    '<button type="button" data-action="device-settings">Permisos de Android</button><button type="button" data-action="device-updates">Buscar actualizaciones</button>'+
+    '<button type="button" data-action="device-settings">Permisos de Android</button><button type="button" data-action="device-updates">Ver versiones de Nexo</button>'+
     '<div class="security-note">◈ Identidad y tokens protegidos por Rust · HTTPS hacia Cloudflare</div>'+
     '<div class="preview-note">Minecraft Rust VIS Nexo 26.3 es el único motor Android. Nexo verifica y solicita la instalación de McRust al jugar.</div>'+
   '</section>';
@@ -276,10 +276,12 @@ document.addEventListener('click',async e=>{
     screen();return;
   }
   if(act==='device-diagnostics'){
+    button.disabled=true;
     try{
       const result=await command('mobile_device',{operation:'diagnostics'});
       diagnostics.open({platform:'Android ARM64',system:'VIS Nexo Rust',stage:'Último cierre del juego',error:result.report});
     }catch(error){toast(error,true)}
+    finally{button.disabled=false;}
     return;
   }
   if(act?.startsWith('device-')){
