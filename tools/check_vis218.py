@@ -34,9 +34,13 @@ checks = {
         'https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/releases' in download,
     "No arbitrary game-binary download URLs":
         'https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}' in download,
-    "GitHub SHA-256 digest is mandatory":
+    "Fork archive requires SHA-256 from the release API or its pinned checksum file":
         'strip_prefix("sha256:")' in download
-        and 'download_stream(app,response,&archive_path,&sha,asset.size)' in download,
+        and 'fork_digest(asset)?' in download
+        and '/releases/download/{tag}/SHA256SUMS' in download
+        and 'checksum_of(&bytes,archive)?' in download
+        and 'download_stream(app,response,&archive_path,&sha,size)?' in download
+        and 'format!("{:x}",hasher.finalize())!=expected' in download,
     "No duplicate game engine inside instance":
         "if source.starts_with(&local_root)" in horizon,
     "Source manifest bound to the fork and exact release tag":
