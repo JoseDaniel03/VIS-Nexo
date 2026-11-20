@@ -1251,6 +1251,21 @@ fn asset_data_url(path: &Path) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{}", STANDARD.encode(&bytes)))
 }
 fn asset_dir(s: &Backend) -> PathBuf { s.data_root.join("assets") }
+fn game_skin_reference(s: &Backend, username: &str) -> Result<PathBuf, String> {
+    let root = asset_dir(s);
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let png = s.storage.get(username)
+        .and_then(|account| PathBuf::from(&account.skin).canonicalize().ok())
+        .filter(|path| path.parent() == Some(root.as_path()))
+        .filter(|path| path.metadata().is_ok_and(|m| m.is_file() && m.len() <= 1024 * 1024))
+        .and_then(|path| path.file_name()?.to_str().map(str::to_owned));
+    let account_key: String = username.bytes().map(|byte| format!("{byte:02x}")).collect();
+    let reference = root.join(format!("vis-live-skin-{account_key}.json"));
+    atomic_json(&reference, &png)?;
+    Ok(reference)
+}
+
 #[tauri::command]
 fn import_asset(state: State<'_, Mutex<Backend>>, path: String, kind: String, project_id: Option<String>, stage_only: Option<bool>) -> Result<AssetReply, String> {
     let mut s = locked(&state)?;
@@ -1293,6 +1308,7 @@ fn import_asset(state: State<'_, Mutex<Backend>>, path: String, kind: String, pr
         "skin" => {
             if let Some(user) = s.storage.get_mut(&username) {user.skin = target_str.clone();}
             s.storage.save()?;
+            game_skin_reference(&s, &username)?;
         }
         "cape" => {
             if let Some(user) = s.storage.get_mut(&username) {user.cape = target_str.clone();}
@@ -1363,6 +1379,9 @@ fn clear_asset(state: State<'_, Mutex<Backend>>, kind: String) -> Result<Snapsho
                 "avatar_layer"=>user.avatar_layer.clear(), "profile_banner"=>user.profile_banner.clear(), _=>{}
             }
             s.storage.save()?;
+            if kind == "skin" {
+                game_skin_reference(&s, &username)?;
+            }
         }
         "launcher_logo" | "home" => {
             s.admin()?;
@@ -1509,6 +1528,12 @@ async fn launch_horizon(
                 active,is_ms_profile,None)
         }
     };
+    let live_skin = if guest.is_none() {
+        let s = locked(&state)?;
+        Some(game_skin_reference(&s, &active)?)
+    } else {
+        None
+    };
     let skin = if guest.is_none() {
         let s = locked(&state)?;
         s.storage.get(&active).and_then(|account| {
@@ -1559,8 +1584,8 @@ async fn launch_horizon(
             .unwrap_or(session_file);
         let outcome=if let Some(player)=visitor {
             let game_dir=minecraft::shared_game_directory(&root,&owner,&instance,&player)?;
-            horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir,skin.as_deref())
-        }else{horizon::launch_with_skin(&app,&dir,&instance,&effective,skin.as_deref())};
+            horizon::launch_shared(&app,&dir,&instance,&effective,&game_dir,skin.as_deref(),live_skin.as_deref())
+        }else{horizon::launch_with_skin(&app,&dir,&instance,&effective,skin.as_deref(),live_skin.as_deref())};
         if let Some(path)=session_path{let _=fs::remove_file(path);}
         outcome
     }).await.map_err(|e|e.to_string())?
