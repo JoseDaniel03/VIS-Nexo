@@ -15,7 +15,7 @@ pub struct Target {pub asset:String,pub sha256:String,pub size:u64,#[serde(defau
 #[derive(Clone,Deserialize,Serialize)]
 pub struct Contract {pub schema:u32,pub source_repo:String,pub engine_commit:String,pub minecraft:String,pub protocol:i32,pub data_version:i32,pub resource_pack:[i32;2],pub data_pack:[i32;2],pub targets:BTreeMap<String,Target>}
 #[derive(Deserialize)]
-struct Release {tag_name:String,draft:bool,#[serde(default)]prerelease:bool,assets:Vec<Asset>}
+struct Release {tag_name:String,#[serde(default)]published_at:Option<String>,draft:bool,#[serde(default)]prerelease:bool,assets:Vec<Asset>}
 #[derive(Deserialize)]
 struct Asset{name:String,size:u64,digest:Option<String>,browser_download_url:String}
 fn hash_ok(s:&str,n:usize)->bool{s.len()==n&&s.bytes().all(|b|b.is_ascii_hexdigit())}
@@ -52,9 +52,11 @@ pub fn obtain(cache:&Path)->Result<(Contract,PathBuf),String>{
  let response=http.get(format!("https://api.github.com/repos/{REPO}/releases?per_page=15")).send().and_then(|r|r.error_for_status()).map_err(|_|"No se pudo consultar la versión de McRust".to_string())?;
  let mut bytes=Vec::new();response.take(2*1024*1024+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
  if bytes.len()>2*1024*1024{return Err("Catálogo demasiado grande".into());}
- let releases:Vec<Release>=serde_json::from_slice(&bytes).map_err(|_|"Catálogo del motor inválido")?;
+ let mut releases:Vec<Release>=serde_json::from_slice(&bytes).map_err(|_|"Catálogo del motor inválido")?;
+ // GitHub's release list can place older publications before newer ones.
+ releases.sort_by(|a,b|b.published_at.cmp(&a.published_at));
  for release in releases {
-  if !accepts_release(release.draft,release.prerelease)||!release.tag_name.starts_with("visgame-"){continue;}
+  if release.published_at.is_none()||!accepts_release(release.draft,release.prerelease)||!release.tag_name.starts_with("visgame-"){continue;}
   let Some(manifest)=release.assets.iter().find(|a|a.name=="vis-mcrust-release.json")else{continue};
   let raw=verified_bytes(&http,manifest,&release.tag_name,"vis-mcrust-release.json",128*1024)?;
   let contract:Contract=serde_json::from_slice(&raw).map_err(|_|"Manifiesto compartido inválido")?;
