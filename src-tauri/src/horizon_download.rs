@@ -123,7 +123,7 @@ fn checksum_of(sums:&[u8],archive:&str)->Result<String,String>{
     let manifest=std::str::from_utf8(sums).map_err(|_|"SHA256SUMS no es UTF-8")?;
     let mut matches=manifest.lines().filter_map(|line|{
         if line.len()<67{return None}
-        let hex=&line[..64];
+        let hex=line.get(..64)?;
         if !hex.bytes().all(|c|c.is_ascii_hexdigit()) {return None}
         let name=line[64..].trim().trim_start_matches('*');
         (name==archive).then(||hex.to_ascii_lowercase())
@@ -510,19 +510,34 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     crate::instance_guard::private_paths(dir,&[".vis",".vis/horizon-engine"])?;
     let archive=fork_asset_name()?;
     let http=client()?;
-    let releases:Vec<ForkRelease>=http.get(VIS_FORK_API).send()
-        .and_then(|r|r.error_for_status()).map_err(|e|format!("No se pudo consultar el fork: {e}"))?
-        .json().map_err(|_|"El fork devolvió releases inválidos")?;
-    let release=fork_release(&releases,archive)?;
-    let tag=release.tag_name.clone();
-    let asset=fork_asset(release,archive)?;
-    let sha=fork_digest(asset)?;
-    let expected_url=format!(
-        "https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}"
-    );
-    if asset.browser_download_url!=expected_url || asset.size==0 || asset.size>MAX_ARCHIVE {
-        return Err("Metadatos Horizon inesperados".into());
-    }
+    let response=http.get(VIS_FORK_API).send()
+        .map_err(|e|format!("No se pudo consultar el fork: {e}"))?;
+    let (tag,sha,expected_size)=if matches!(response.status().as_u16(),403|429) {
+        // Resolve the public latest page once, then pin both downloads to its tag.
+        let latest=http.get(format!("https://github.com/{VIS_FORK}/releases/latest"))
+            .send().and_then(|r|r.error_for_status())
+            .map_err(|e|format!("GitHub limitó el catálogo y no se pudo abrir el release: {e}"))?;
+        let prefix=format!("/{VIS_FORK}/releases/tag/");
+        let tag=latest.url().path().strip_prefix(&prefix)
+            .filter(|tag|fork_tag_valid(tag))
+            .filter(|_|latest.url().scheme()=="https" && latest.url().host_str()==Some("github.com"))
+            .ok_or("GitHub no devolvió una versión estable de McRust")?.to_owned();
+        let sums=http.get(format!("https://github.com/{VIS_FORK}/releases/download/{tag}/SHA256SUMS"))
+            .send().and_then(|r|r.error_for_status())
+            .map_err(|e|format!("No se pudo descargar la suma de McRust: {e}"))?;
+        let mut bytes=Vec::new();
+        sums.take(65537).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
+        if bytes.len()>65536{return Err("SHA256SUMS de McRust supera el límite".into())}
+        (tag,checksum_of(&bytes,archive)?,None)
+    }else{
+        let releases:Vec<ForkRelease>=response.error_for_status()
+            .map_err(|e|format!("No se pudo consultar el fork: {e}"))?
+            .json().map_err(|_|"El fork devolvió releases inválidos")?;
+        let release=fork_release(&releases,archive)?;
+        let asset=fork_asset(release,archive)?;
+        (release.tag_name.clone(),fork_digest(asset)?,Some(asset.size))
+    };
+    let expected_url=format!("https://github.com/{VIS_FORK}/releases/download/{tag}/{archive}");
     let root=dir.join(".vis/horizon-engine");
     fs::create_dir_all(&root).map_err(|e|e.to_string())?;
     let final_dir=root.join(&tag);
@@ -550,9 +565,12 @@ pub fn install_fork(app:&AppHandle,dir:&Path,minecraft_version:&str)->Result<Ins
     emit(app,"Motor Rust",0,"Descargando Horizon desde el fork VIS (no incluye Minecraft ni su launcher)");
     let response=http.get(&expected_url).send().and_then(|r|r.error_for_status())
         .map_err(|e|format!("No se pudo descargar Horizon portable: {e}"))?;
-    download_stream(app,response,&archive_path,&sha,asset.size)?;
+    let size=expected_size.or_else(||response.content_length())
+        .filter(|size|*size>0 && *size<=MAX_ARCHIVE)
+        .ok_or("Tamaño de descarga de McRust inválido o desconocido")?;
+    download_stream(app,response,&archive_path,&sha,size)?;
     crate::download_manager::checkpoint()?;
-    if fs::metadata(&archive_path).map_err(|e|e.to_string())?.len()!=asset.size {
+    if fs::metadata(&archive_path).map_err(|e|e.to_string())?.len()!=size {
         return Err("La descarga del motor Rust tiene tamaño incorrecto".into());
     }
     let unpacked=scratch.join("unpacked");

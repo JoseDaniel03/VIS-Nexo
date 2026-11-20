@@ -15,6 +15,7 @@ on:
       - 'src-tauri/examples/**'
       - 'src-tauri/src/vsclient_native.rs'
       - 'src-tauri/src/horizon.rs'
+      - 'src-tauri/src/horizon_download.rs'
 jobs:
   build:
     strategy:
