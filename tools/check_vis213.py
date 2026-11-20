@@ -24,6 +24,9 @@ checks={
  'UI shared instance labels': 'Instalada por' in ui,
  'Horizon installer routed to adapter': 'horizon::prepare(&cloned_app' in main,
  'Horizon launch routed to adapter': 'horizon::launch_with_skin(&app' in main,
+ 'Existing VIS skin can equip on Java Premium':
+    'data-action="premium-publish-vis-skin"' in ui
+    and "changePremiumCosmetic('microsoft_upload_skin',{path,variant:" in ui,
 }
 for k,v in checks.items():print(('OK' if v else 'FAIL'),k)
 if not all(checks.values()):raise SystemExit(1)

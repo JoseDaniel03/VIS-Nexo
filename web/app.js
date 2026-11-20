@@ -934,6 +934,7 @@ function profilePage(){
       '<button class="outline-btn" data-action="import-skin">'+I('upload',15)+' Importar PNG</button>'+
       '<button class="primary-btn" data-action="publish-vis-skin" '+(!skinPath||!connected||skinSharingBusy?'disabled':'')+'>'+
         I('cloud',15)+' '+(skinSharingBusy?'Publicando…':'Compartir skin VIS')+'</button>'+
+      (microsoftGamertag?'<button class="outline-btn" data-action="premium-publish-vis-skin" '+(!skinPath||premiumCosmeticsBusy?'disabled':'')+'>Usar en Minecraft Java</button>':'')+
       (publicSkin?.skin?'<button class="subtle-btn" data-action="remove-vis-skin">'+I('trash',15)+' Dejar de compartir</button>':'')+
     '</div>'+
    '</section>'+
@@ -2191,6 +2192,10 @@ root.addEventListener('click',async event=>{
  else if(act==='save-crop'){await saveCrop();}
  else if(act==='edit-profile'){dialog={type:'edit-profile'};render();}
  else if(act==='publish-vis-skin'){void publishLocalSkin();}
+ else if(act==='premium-publish-vis-skin'){
+   const path=db.user?.skin;
+   if(path)void changePremiumCosmetic('microsoft_upload_skin',{path,variant:premiumSkinModel==='slim'?'slim':'classic'});
+ }
  else if(act==='remove-vis-skin'){void removePublicSkin();}
  else if(act==='skin-lookup'){
    const username=window.prompt('Usuario VIS cuya skin querés ver (no gamertag):','');
